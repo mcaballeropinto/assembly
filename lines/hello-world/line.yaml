@@ -1,0 +1,20 @@
+name: hello-world
+description: >
+  Minimal two-station line. A useful first read for understanding the
+  workpiece → station → envelope contract without the noise of fanout,
+  evals, or external tools.
+
+  Stage 1 (greet) writes a short greeting based on the task description.
+  Stage 2 (record) appends it to a markdown log.
+
+concurrency: 1
+timeout: 60
+
+sequence:
+  - greet
+  - record
+
+defaults:
+  provider: claude-code-cached
+  model: haiku
+  max_tokens: 4096

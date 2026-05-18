@@ -1,0 +1,40 @@
+# Build output
+dist/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+bun.lock
+
+# Runtime state (per-line queues, memory, envelopes, per-line outputs)
+lines/*/queues/
+lines/*/stations/*/queue/
+lines/*/stations/*/memory/
+lines/*/stations/*/.envelope-state/
+lines/*/digests/
+lines/hello-world/greetings.md
+
+# Agent scratch + station leakage
+FANOUT-*
+*-RESULT.json
+*-SUMMARY.md
+*-SCORE.json
+*-COMPLETE.md
+
+# Logs and screenshots
+*.log
+*.png
+*.jpg
+*.jpeg
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+.secrets.env
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

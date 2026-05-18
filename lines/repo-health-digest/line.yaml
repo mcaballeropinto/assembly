@@ -1,0 +1,30 @@
+name: repo-health-digest
+description: >
+  Five-station line that audits a list of GitHub repositories and emits a
+  markdown digest grading each one.
+
+  Stations:
+    1. discover  (script) — resolve the input topic/org to a repo list
+    2. fetch     (script) — pull metadata, recent commits, open issues
+    3. analyze   (LLM)    — compute health signals from the raw data
+    4. score     (LLM)    — combine signals into a letter grade, gated by EVAL
+    5. report    (script) — write the final markdown digest
+
+  This is the recommended second example to read after `hello-world`: it
+  shows how deterministic (script) and creative (LLM) stations cooperate,
+  and how an EVAL gate keeps an LLM station honest.
+
+concurrency: 1
+timeout: 600
+
+sequence:
+  - discover
+  - fetch
+  - analyze
+  - score
+  - report
+
+defaults:
+  provider: claude-code-cached
+  model: sonnet
+  max_tokens: 16384

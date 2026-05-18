@@ -1,0 +1,19 @@
+name: assembly-dev
+description: >
+  Meta-assembly line for developing the Assembly framework itself.
+  Takes a feature request or bug report through three stages:
+  plan (structured design), develop (worktree implementation with
+  test/screenshot eval), and deploy (merge + restart services).
+
+concurrency: 1
+timeout: 900
+
+sequence:
+  - plan
+  - develop
+  - deploy
+
+defaults:
+  provider: claude-code-cached
+  model: opus
+  max_tokens: 32768
