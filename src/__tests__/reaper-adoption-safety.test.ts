@@ -11,22 +11,30 @@ import { scanAndReap } from "../reaper";
  * workers or their LLM children. These tests exercise scanAndReap directly.
  */
 describe("reaper safety against adopted workers", () => {
-  test("protectedPids exempts a pid from reaping even if it matches everything else", () => {
-    // We can't easily fabricate a PPID=1 process matching the allowlist in
-    // a test, so use our own pid as a sentinel: we explicitly add it to
-    // protectedPids and verify it's NEVER touched even if we add it to the
-    // allowlist. (Otherwise, scanAndReap on our own pid would happily try
-    // to kill ourselves.)
+  test("protectedPids is honored and scanAndReap accepts the option", () => {
+    // scanAndReap is the production reaper — it actually SIGKILLs every
+    // PPID=1 process on the host whose comm matches the allowlist and which
+    // isn't in protectedPids. So this test MUST use a sentinel allowlist
+    // that can't match any real process; using `^bun$` (or anything that
+    // could match a live daemon, e.g. the assembly.service main process
+    // which systemd reparents to PID=1) destroys arbitrary daemons on the
+    // host. The protectedPids assertion below is therefore a contract
+    // smoke-test: scanAndReap accepts the option and doesn't reap our pid.
+    // For end-to-end exercise of the protection semantics, see the orphan
+    // tests in process-group.test.ts which use `exec -a <sentinel>` to
+    // spawn a controllable PPID=1 process with a unique comm.
     if (!existsSync("/proc/uptime")) {
       // Non-Linux — scanAndReap returns [] regardless. Skip.
       return;
     }
     const reaped = scanAndReap({
-      binaryAllowlist: new RegExp(`^bun$`),
+      binaryAllowlist: new RegExp(`^reaper-adoption-safety-sentinel$`),
       olderThanMs: 0,
       protectedPids: new Set([process.pid, process.ppid]),
     });
-    // Our own pid must not appear in the reaped list.
+    // Sentinel doesn't match anything, so nothing should be reaped — and
+    // our own pid certainly shouldn't be.
+    expect(reaped).toEqual([]);
     const selfReaped = reaped.find((r) => r.pid === process.pid);
     expect(selfReaped).toBeUndefined();
   });
