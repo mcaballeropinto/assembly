@@ -373,7 +373,9 @@
 
     // Header
     html += '<h1>' + esc(state.line) + '</h1>';
-    html += '<div class="subtitle" style="margin-bottom:24px">' + esc(selectedLine) + '</div>';
+    if (state.description) {
+      html += '<div class="subtitle" style="margin-bottom:24px">' + esc(state.description) + '</div>';
+    }
 
     // Kanban board mount — populated asynchronously by loadKanban()
     html += '<div class="kanban-board" id="kanban-board" data-preserve="true"></div>';

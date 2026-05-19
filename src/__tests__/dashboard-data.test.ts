@@ -44,7 +44,7 @@ beforeAll(() => {
   // Write line.yaml
   writeFileSync(
     resolve(LINE_DIR, "line.yaml"),
-    `name: test-line\nsequence:\n  - station-a\n  - station-b\n`
+    `name: test-line\ndescription: Test line for dashboard data tests\nsequence:\n  - station-a\n  - station-b\n`
   );
 
   // Create station directories with queues and AGENT.md
@@ -122,6 +122,7 @@ describe("getFullState", () => {
 
     // Check top-level fields
     expect(state).toHaveProperty("line", "test-line");
+    expect(state).toHaveProperty("description", "Test line for dashboard data tests");
     expect(state).toHaveProperty("sequence");
     expect(state).toHaveProperty("lineQueue");
     expect(state).toHaveProperty("sections");
@@ -1314,7 +1315,7 @@ describe("getHistory", () => {
   test("getFullState shape unchanged — no new 'history' field added", async () => {
     const state = await getFullState(LINE_DIR) as any;
     const expectedKeys = [
-      "line", "sequence", "lineQueue", "sections", "activity", "completed",
+      "line", "description", "sequence", "lineQueue", "sections", "activity", "completed",
       "errors", "errorsDismissed", "reviews", "triggers", "stationTimings",
       "pipelineTotalMs", "health", "sessionTotals", "throughput", "timestamp",
     ];
