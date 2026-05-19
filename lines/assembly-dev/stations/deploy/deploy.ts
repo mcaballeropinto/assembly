@@ -140,6 +140,126 @@ if (spawnSync("git", ["-C", REPO, "merge-base", "--is-ancestor", commitSha, bran
   fatal(`commit ${commitSha} is not on branch ${branch}`);
 }
 
+// ─── 2b. Safety re-check on the branch (defense in depth) ─────────────
+//
+// develop ran the gates before commit, but we re-check at the deploy
+// boundary so a develop bypass / future-disabled gate / direct deploy
+// invocation still can't push violations to origin/main.
+//
+// We scan the COMMIT RANGE main..<branch> (just the new work) rather than
+// the entire branch, so noise from older history isn't flagged.
+
+log("safety re-check on branch commits");
+
+// Files changed by the branch (relative to main).
+const branchFilesR = spawnSync(
+  "git",
+  ["-C", REPO, "diff", "--name-only", `main..${branch}`],
+  { encoding: "utf-8" }
+);
+const branchFiles = ((branchFilesR.stdout ?? "").trim().split("\n")).filter((s) => s.length > 0);
+
+// Full diff content for regex scanning.
+const branchDiffR = spawnSync(
+  "git",
+  ["-C", REPO, "diff", "--no-color", `main..${branch}`],
+  { encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 }
+);
+const branchDiff = branchDiffR.stdout ?? "";
+
+// Path blocklist (same patterns as develop.ts).
+const BLOCKED_PATH_PATTERNS: Array<{ re: RegExp; reason: string }> = [
+  { re: /(^|\/)\.env(\.|$)/, reason: ".env files (secrets)" },
+  { re: /(^|\/)\.secrets(\.|$)/, reason: ".secrets files" },
+  { re: /\.(pem|key|p12|pfx|crt|cer|jks)$/i, reason: "key/cert files" },
+  { re: /(^|\/)id_(rsa|ed25519|ecdsa|dsa)(\.|$)/, reason: "SSH private keys" },
+  { re: /(^|\/)\.ssh(\/|$)/, reason: ".ssh directory" },
+  { re: /(^|\/)\.aws(\/|$)/, reason: ".aws directory (credentials)" },
+  { re: /(^|\/)\.gnupg(\/|$)/, reason: ".gnupg directory" },
+  { re: /(^|\/)\.assembly(\/|$)/, reason: "~/.assembly runtime state" },
+  { re: /(^|\/)\.claude(\/|$)/, reason: "~/.claude config" },
+  { re: /^lines\/[^/]+\/queues(\/|$)/, reason: "line queue runtime state" },
+  { re: /(^|\/)\.git(\/|$)/, reason: ".git internals" },
+  { re: /(^|\/)node_modules(\/|$)/, reason: "node_modules" },
+  { re: /(^|\/)\.DS_Store$/, reason: "macOS metadata" },
+];
+const blockedHits: Array<{ file: string; reason: string }> = [];
+for (const f of branchFiles) {
+  for (const { re, reason } of BLOCKED_PATH_PATTERNS) {
+    if (re.test(f)) {
+      blockedHits.push({ file: f, reason });
+      break;
+    }
+  }
+}
+if (blockedHits.length > 0) {
+  const lines = blockedHits.map((h) => `  ${h.file}  (${h.reason})`).join("\n");
+  fatal(
+    "blocked path on branch — deploy halted before merge",
+    `Branch ${branch} touches paths on the safety-gate blocklist:\n${lines}`
+  );
+}
+
+// Regex secret scan (same patterns as develop.ts).
+const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
+  { name: "Anthropic API key", re: /\bsk-ant-api03-[A-Za-z0-9_\-]{50,}/ },
+  { name: "OpenAI/sk-style key", re: /\bsk-[A-Za-z0-9]{32,}\b/ },
+  { name: "AWS access key id", re: /\bAKIA[0-9A-Z]{16}\b/ },
+  { name: "AWS secret access key (likely)", re: /aws_secret_access_key\s*[:=]\s*['"]?[A-Za-z0-9/+=]{40}['"]?/i },
+  { name: "Google API key", re: /\bAIza[A-Za-z0-9_\-]{35}\b/ },
+  { name: "GitHub token", re: /\bgh[pousr]_[A-Za-z0-9]{30,}\b/ },
+  { name: "Slack token", re: /\bxox[abpsr]-[A-Za-z0-9\-]{10,}\b/ },
+  { name: "Stripe live secret", re: /\bsk_live_[A-Za-z0-9]{20,}\b/ },
+  { name: "PEM private key block", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+];
+const addedLines: string[] = [];
+for (const line of branchDiff.split("\n")) {
+  if (line.startsWith("+") && !line.startsWith("+++")) {
+    addedLines.push(line);
+  }
+}
+const addedText = addedLines.join("\n");
+const secretHits: Array<{ kind: string; sample: string }> = [];
+for (const { name, re } of SECRET_PATTERNS) {
+  const m = addedText.match(re);
+  if (m) {
+    const sample = m[0].slice(0, 8) + "…[redacted]";
+    secretHits.push({ kind: name, sample });
+  }
+}
+if (secretHits.length > 0) {
+  const lines = secretHits.map((h) => `  ${h.kind}: ${h.sample}`).join("\n");
+  fatal(
+    "potential secret on branch — deploy halted before merge",
+    `Branch ${branch} contains strings matching secret patterns:\n${lines}`
+  );
+}
+
+// gitleaks on the commit range — broader ruleset.
+const gitleaksProbe = spawnSync("gitleaks", ["version"], { encoding: "utf-8" });
+if (gitleaksProbe.status !== 0) {
+  fatal(
+    "gitleaks not installed on deploy host",
+    `gitleaks binary not found on PATH. Install it (apt-get install -y gitleaks) ` +
+      `so the deploy safety re-check can run.`
+  );
+}
+log(`gitleaks detect --log-opts main..${branch}`);
+const glR = spawnSync(
+  "gitleaks",
+  ["detect", "--no-banner", "--redact", "--exit-code", "1", "--log-opts", `main..${branch}`],
+  { cwd: REPO, encoding: "utf-8" }
+);
+if (glR.status !== 0) {
+  const reason = glR.status === 1 ? "secrets detected in branch commits" : `gitleaks crashed (exit ${glR.status})`;
+  fatal(
+    `gitleaks (deploy): ${reason}`,
+    ((glR.stdout ?? "") + "\n" + (glR.stderr ?? "")).slice(-3000)
+  );
+}
+
+log("safety re-check passed");
+
 // ─── 3. Merge to main ─────────────────────────────────────────────────
 
 log("checkout main");

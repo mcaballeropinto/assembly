@@ -453,6 +453,34 @@ if (secretHits.length > 0) {
   );
 }
 
+// ── Gate 2b: gitleaks on the staged diff ─────────────────────────────
+// gitleaks has a broader, well-maintained ruleset than our regex sweep
+// (AWS, GitHub, Slack, GCP service-account JSON, …). The Anthropic key
+// rule is missing in older gitleaks versions, which is why we keep the
+// regex sweep above.
+const gitleaksProbe = spawnSync("gitleaks", ["version"], { encoding: "utf-8" });
+if (gitleaksProbe.status !== 0) {
+  hardFail(
+    "gitleaks not installed",
+    `gitleaks binary not found on PATH. Install it (apt-get install -y gitleaks) ` +
+      `or remove this gate from develop.ts if you accept the regex-only coverage.`
+  );
+}
+log(`gitleaks protect --staged`);
+const glR = spawnSync(
+  "gitleaks",
+  ["protect", "--staged", "--no-banner", "--redact", "--exit-code", "1"],
+  { cwd: wt, encoding: "utf-8" }
+);
+if (glR.status !== 0) {
+  // exit 1 = leaks found; anything else = gitleaks crashed.
+  const reason = glR.status === 1 ? "secrets detected in staged diff" : `gitleaks crashed (exit ${glR.status})`;
+  hardFail(
+    `gitleaks: ${reason}`,
+    ((glR.stdout ?? "") + "\n" + (glR.stderr ?? "")).slice(-3000)
+  );
+}
+
 // ── Gate 3: Plan/diff alignment ──────────────────────────────────────
 // `plan.files_to_change` and `plan.files_to_create` are the agent's contract.
 // Files the agent touches must be within the allowed set, with a small
