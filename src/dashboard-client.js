@@ -377,6 +377,12 @@
       html += '<div class="subtitle" style="margin-bottom:24px">' + esc(state.description) + '</div>';
     }
 
+    // Flow metrics row — injected between header and kanban
+    var metricsData = ctx.flowMetrics !== undefined ? ctx.flowMetrics : null;
+    html += '<div class="flow-metrics-row" id="flow-metrics-row" data-preserve="true">';
+    html += buildMetricsRow(metricsData);
+    html += '</div>';
+
     // Kanban board mount — populated asynchronously by loadKanban()
     html += '<div class="kanban-board" id="kanban-board" data-preserve="true"></div>';
 
@@ -728,5 +734,81 @@
     }, 1000);
   }
 
-  return { buildOverviewDom: buildOverviewDom, buildDetailDom: buildDetailDom, renderHistoryInner: renderHistoryInner, applyMorph: applyMorph, MORPH_OPTIONS: MORPH_OPTIONS, renderStationRounds: renderStationRounds, startBackoffTickers: startBackoffTickers, __resetHashes: __resetHashes };
+  // --- Flow Metrics Row (Tier 4 #29) ---
+
+  function sparklineSvg(points) {
+    if (!points || points.length === 0) return '';
+    var max = Math.max.apply(null, points);
+    if (max === 0) max = 1; // avoid division by zero
+    var width = 60;
+    var height = 20;
+    var pathPoints = [];
+    for (var i = 0; i < points.length; i++) {
+      var x = i * (width / (points.length - 1));
+      var y = height - (points[i] / max * 18) - 1;
+      pathPoints.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+    return '<svg class="metric-sparkline" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '">' +
+      '<polyline points="' + pathPoints.join(' ') + '" stroke="var(--color-info)" stroke-width="1.5" fill="none" />' +
+      '</svg>';
+  }
+
+  function buildMetricsRow(metrics) {
+    if (!metrics || metrics === null) {
+      // Skeleton loading state
+      var html = '<div class="flow-metrics-skeleton">';
+      for (var i = 0; i < 5; i++) {
+        html += '<div class="flow-metric-tile">';
+        html += '<div class="skeleton-line" style="width: 60%; margin-bottom: 6px;"></div>';
+        html += '<div class="skeleton-line large" style="margin-bottom: 8px;"></div>';
+        html += '<div class="skeleton-line small"></div>';
+        html += '</div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    if (!metrics.tiles || metrics.tiles.length === 0) {
+      return '<div class="flow-metrics-empty">No data yet — metrics appear after the first workpiece completes.</div>';
+    }
+
+    var html = '';
+    for (var i = 0; i < metrics.tiles.length; i++) {
+      var tile = metrics.tiles[i];
+      html += '<div class="flow-metric-tile" title="' + escapeHtml(tile.explanation) + '">';
+      html += '<div class="metric-label">' + escapeHtml(tile.label) + '</div>';
+      html += '<div class="metric-value">' + escapeHtml(tile.value) + '</div>';
+      html += '<div class="metric-context">';
+
+      // Sparkline for throughput
+      if (tile.sparkline && tile.sparkline.length > 0) {
+        html += sparklineSvg(tile.sparkline);
+      }
+      // Delta for other tiles
+      else if (tile.delta !== null && tile.delta !== undefined) {
+        var arrow = tile.delta > 0 ? '↑' : '↓';
+        var deltaVal = Math.abs(tile.delta).toFixed(0);
+        // For cycle time and wait time, negative delta (faster) is good
+        // For throughput and success rate, positive delta is good
+        var isGood = false;
+        if (tile.label.indexOf('Cycle') >= 0 || tile.label.indexOf('Wait') >= 0) {
+          isGood = tile.delta < 0;
+        } else {
+          isGood = tile.delta > 0;
+        }
+        var deltaClass = isGood ? 'metric-delta positive' : 'metric-delta negative';
+        html += '<span class="' + deltaClass + '">' + arrow + deltaVal + '% vs prior 7d</span>';
+      }
+      // Live for in-flight
+      else {
+        html += '<span class="metric-context-live">live</span>';
+      }
+
+      html += '</div>';
+      html += '</div>';
+    }
+    return html;
+  }
+
+  return { buildOverviewDom: buildOverviewDom, buildDetailDom: buildDetailDom, renderHistoryInner: renderHistoryInner, applyMorph: applyMorph, MORPH_OPTIONS: MORPH_OPTIONS, renderStationRounds: renderStationRounds, startBackoffTickers: startBackoffTickers, buildMetricsRow: buildMetricsRow, __resetHashes: __resetHashes };
 });

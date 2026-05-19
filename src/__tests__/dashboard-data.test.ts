@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import { resolve } from "path";
 import { mkdirSync, rmSync, writeFileSync, existsSync, utimesSync, readFileSync, renameSync } from "fs";
-import { getFullState, findWorkpiece, getWorkpieceActivity, computeHealth, computeErrorSeverity, BANNER_ERROR_MAX_AGE_MS, computeThroughput, connectionHealth, CONNECTION_LIVE_THRESHOLD_MS, CONNECTION_STALE_THRESHOLD_MS, getHistory, HISTORY_DEFAULT_LIMIT, HISTORY_MAX_LIMIT, getKanbanState, type KanbanState } from "../dashboard-data";
+import { getFullState, findWorkpiece, getWorkpieceActivity, computeHealth, computeErrorSeverity, BANNER_ERROR_MAX_AGE_MS, computeThroughput, connectionHealth, CONNECTION_LIVE_THRESHOLD_MS, CONNECTION_STALE_THRESHOLD_MS, getHistory, HISTORY_DEFAULT_LIMIT, HISTORY_MAX_LIMIT, getKanbanState, type KanbanState, computeFlowMetrics } from "../dashboard-data";
 import { initSectionQueue, initLineQueue } from "../queue";
 import { dismissFilenames, undismissFilenames } from "../error-dismiss";
 import {
@@ -1683,5 +1683,320 @@ describe("getKanbanState", () => {
       .find((c) => c.key === "station-a:output")!
       .cards.find((x) => x.id === "wp-move")!;
     expect(card.state).toBe("routed");
+  });
+});
+
+describe("computeFlowMetrics", () => {
+  test("empty line returns tiles with zero/no-data values", () => {
+    const emptyDir = resolve(TEMP_DIR, "empty-line");
+    mkdirSync(emptyDir, { recursive: true });
+    writeFileSync(resolve(emptyDir, "line.yaml"), "name: empty-line\nsequence:\n  - station-a\n");
+    initLineQueue(emptyDir);
+    const stationDir = resolve(emptyDir, "stations", "station-a");
+    mkdirSync(stationDir, { recursive: true });
+    writeFileSync(resolve(stationDir, "AGENT.md"), "---\n---\nTest");
+    initSectionQueue(stationDir);
+
+    const metrics = computeFlowMetrics(emptyDir, ["station-a"]);
+
+    expect(metrics.tiles.length).toBe(5);
+    expect(metrics.tiles[0].label).toBe("Items in Flight");
+    expect(metrics.tiles[0].rawValue).toBe(0);
+    expect(metrics.tiles[1].label).toBe("Throughput 7d");
+    expect(metrics.tiles[1].rawValue).toBe(0);
+    expect(metrics.tiles[2].label).toBe("Avg Cycle Time");
+    expect(metrics.tiles[2].rawValue).toBe(0);
+    expect(metrics.tiles[3].label).toBe("Avg Wait Time");
+    expect(metrics.tiles[3].rawValue).toBe(0);
+    expect(metrics.tiles[4].label).toBe("Success Rate 7d");
+    expect(metrics.tiles[4].rawValue).toBe(0);
+  });
+
+  test("items in flight counts processing + inbox correctly", () => {
+    const dir = resolve(TEMP_DIR, "in-flight-test");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(resolve(dir, "line.yaml"), "name: in-flight-test\nsequence:\n  - station-a\n  - station-b\n");
+    initLineQueue(dir);
+
+    const stationA = resolve(dir, "stations", "station-a");
+    const stationB = resolve(dir, "stations", "station-b");
+    mkdirSync(stationA, { recursive: true });
+    mkdirSync(stationB, { recursive: true });
+    writeFileSync(resolve(stationA, "AGENT.md"), "---\n---\nTest");
+    writeFileSync(resolve(stationB, "AGENT.md"), "---\n---\nTest");
+    initSectionQueue(stationA);
+    initSectionQueue(stationB);
+
+    // Add 2 to station-a processing, 1 to station-b inbox, 1 to line inbox
+    writeFileSync(resolve(stationA, "queue", "processing", "wp1.json"), makeWorkpiece("wp1"));
+    writeFileSync(resolve(stationA, "queue", "processing", "wp2.json"), makeWorkpiece("wp2"));
+    writeFileSync(resolve(stationB, "queue", "inbox", "wp3.json"), makeWorkpiece("wp3"));
+    writeFileSync(resolve(dir, "queues", "inbox", "wp4.json"), makeWorkpiece("wp4"));
+
+    const metrics = computeFlowMetrics(dir, ["station-a", "station-b"]);
+    const inFlightTile = metrics.tiles.find(t => t.label === "Items in Flight")!;
+    expect(inFlightTile.rawValue).toBe(4);
+  });
+
+  test("throughput sparkline has 7 points", () => {
+    const dir = resolve(TEMP_DIR, "throughput-test");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(resolve(dir, "line.yaml"), "name: throughput-test\nsequence:\n  - station-a\n");
+    initLineQueue(dir);
+
+    const now = Date.now();
+    const oneDayMs = 24 * 60 * 60 * 1000;
+
+    // Write done files with mtimes spread across 7 days
+    for (let i = 0; i < 7; i++) {
+      const path = resolve(dir, "queues", "done", `wp-day${i}.json`);
+      writeFileSync(path, makeWorkpiece(`wp-day${i}`));
+      const targetTime = now - i * oneDayMs;
+      utimesSync(path, new Date(targetTime), new Date(targetTime));
+    }
+
+    const metrics = computeFlowMetrics(dir, ["station-a"]);
+    const throughputTile = metrics.tiles.find(t => t.label === "Throughput 7d")!;
+    expect(throughputTile.sparkline).toBeDefined();
+    expect(throughputTile.sparkline!.length).toBe(7);
+  });
+
+  test("cycle time computed from station timestamps", () => {
+    const dir = resolve(TEMP_DIR, "cycle-time-test");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(resolve(dir, "line.yaml"), "name: cycle-time-test\nsequence:\n  - station-a\n  - station-b\n");
+    initLineQueue(dir);
+
+    const now = new Date();
+    const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000);
+
+    // Workpiece with known cycle time: started 5 min ago, finished now
+    const wp = {
+      id: "wp-cycle",
+      line: "cycle-time-test",
+      task: "test",
+      input: {},
+      stations: {
+        "station-a": {
+          summary: "done",
+          status: "done",
+          started_at: fiveMinAgo.toISOString(),
+          finished_at: fiveMinAgo.toISOString(),
+          model: "test",
+        },
+        "station-b": {
+          summary: "done",
+          status: "done",
+          started_at: fiveMinAgo.toISOString(),
+          finished_at: now.toISOString(),
+          model: "test",
+        },
+      },
+    };
+
+    const path = resolve(dir, "queues", "done", "wp-cycle.json");
+    writeFileSync(path, JSON.stringify(wp));
+    const mtime = Date.now() - 1000; // recent
+    utimesSync(path, new Date(mtime), new Date(mtime));
+
+    const metrics = computeFlowMetrics(dir, ["station-a", "station-b"]);
+    const cycleTimeTile = metrics.tiles.find(t => t.label === "Avg Cycle Time")!;
+    // Expected: 5 minutes = 300000ms
+    expect(cycleTimeTile.rawValue).toBeGreaterThan(290000);
+    expect(cycleTimeTile.rawValue).toBeLessThan(310000);
+  });
+
+  test("wait time = cycle - sum(station durations)", () => {
+    const dir = resolve(TEMP_DIR, "wait-time-test");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(resolve(dir, "line.yaml"), "name: wait-time-test\nsequence:\n  - station-a\n  - station-b\n");
+    initLineQueue(dir);
+
+    const now = new Date();
+    const twoMinAgo = new Date(now.getTime() - 2 * 60 * 1000);
+    const oneMinAgo = new Date(now.getTime() - 1 * 60 * 1000);
+
+    // Total cycle: 2 min. Station-a: 30s, Station-b: 60s. Wait: 30s.
+    const wp = {
+      id: "wp-wait",
+      line: "wait-time-test",
+      task: "test",
+      input: {},
+      stations: {
+        "station-a": {
+          summary: "done",
+          status: "done",
+          started_at: twoMinAgo.toISOString(),
+          finished_at: new Date(twoMinAgo.getTime() + 30000).toISOString(),
+          model: "test",
+        },
+        "station-b": {
+          summary: "done",
+          status: "done",
+          started_at: oneMinAgo.toISOString(),
+          finished_at: now.toISOString(),
+          model: "test",
+        },
+      },
+    };
+
+    const path = resolve(dir, "queues", "done", "wp-wait.json");
+    writeFileSync(path, JSON.stringify(wp));
+    const mtime = Date.now() - 1000;
+    utimesSync(path, new Date(mtime), new Date(mtime));
+
+    const metrics = computeFlowMetrics(dir, ["station-a", "station-b"]);
+    const waitTimeTile = metrics.tiles.find(t => t.label === "Avg Wait Time")!;
+    // Expected: 30000ms (30 seconds wait between stations)
+    expect(waitTimeTile.rawValue).toBeGreaterThan(25000);
+    expect(waitTimeTile.rawValue).toBeLessThan(35000);
+  });
+
+  test("success rate computed correctly", () => {
+    const dir = resolve(TEMP_DIR, "success-rate-test");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(resolve(dir, "line.yaml"), "name: success-rate-test\nsequence:\n  - station-a\n");
+    initLineQueue(dir);
+
+    const now = Date.now();
+    const mtime = now - 1000;
+
+    // 3 done, 1 error = 75%
+    for (let i = 0; i < 3; i++) {
+      const path = resolve(dir, "queues", "done", `wp-done-${i}.json`);
+      writeFileSync(path, makeWorkpiece(`wp-done-${i}`));
+      utimesSync(path, new Date(mtime), new Date(mtime));
+    }
+
+    const errorPath = resolve(dir, "queues", "error", "wp-error.json");
+    writeFileSync(errorPath, JSON.stringify({
+      id: "wp-error",
+      line: "success-rate-test",
+      task: "failed",
+      input: {},
+      stations: {
+        "station-a": {
+          summary: "failed",
+          status: "failed",
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+          model: "test",
+        },
+      },
+    }));
+    utimesSync(errorPath, new Date(mtime), new Date(mtime));
+
+    const metrics = computeFlowMetrics(dir, ["station-a"]);
+    const successRateTile = metrics.tiles.find(t => t.label === "Success Rate 7d")!;
+    expect(successRateTile.rawValue).toBe(75);
+  });
+
+  test("delta vs prior period", () => {
+    const dir = resolve(TEMP_DIR, "delta-test");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(resolve(dir, "line.yaml"), "name: delta-test\nsequence:\n  - station-a\n");
+    initLineQueue(dir);
+
+    const now = Date.now();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const currentStart = now - sevenDaysMs;
+    const priorStart = now - 2 * sevenDaysMs;
+
+    const currentTime = new Date(currentStart + 1000);
+    const priorTime = new Date(priorStart + 1000);
+
+    // Current period: 1 workpiece with 1 min cycle time
+    const wpCurrent = {
+      id: "wp-current",
+      line: "delta-test",
+      task: "test",
+      input: {},
+      stations: {
+        "station-a": {
+          summary: "done",
+          status: "done",
+          started_at: new Date(currentTime.getTime()).toISOString(),
+          finished_at: new Date(currentTime.getTime() + 60000).toISOString(),
+          model: "test",
+        },
+      },
+    };
+
+    // Prior period: 1 workpiece with 2 min cycle time
+    const wpPrior = {
+      id: "wp-prior",
+      line: "delta-test",
+      task: "test",
+      input: {},
+      stations: {
+        "station-a": {
+          summary: "done",
+          status: "done",
+          started_at: new Date(priorTime.getTime()).toISOString(),
+          finished_at: new Date(priorTime.getTime() + 120000).toISOString(),
+          model: "test",
+        },
+      },
+    };
+
+    const currentPath = resolve(dir, "queues", "done", "wp-current.json");
+    const priorPath = resolve(dir, "queues", "done", "wp-prior.json");
+    writeFileSync(currentPath, JSON.stringify(wpCurrent));
+    writeFileSync(priorPath, JSON.stringify(wpPrior));
+
+    utimesSync(currentPath, currentTime, currentTime);
+    utimesSync(priorPath, priorTime, priorTime);
+
+    const metrics = computeFlowMetrics(dir, ["station-a"]);
+    const cycleTimeTile = metrics.tiles.find(t => t.label === "Avg Cycle Time")!;
+    expect(cycleTimeTile.delta).not.toBeNull();
+    // Current 60s vs prior 120s = -50%
+    expect(cycleTimeTile.delta).toBeLessThan(-40);
+    expect(cycleTimeTile.delta).toBeGreaterThan(-60);
+  });
+
+  test("missing timestamps don't crash", () => {
+    const dir = resolve(TEMP_DIR, "missing-ts-test");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(resolve(dir, "line.yaml"), "name: missing-ts-test\nsequence:\n  - station-a\n");
+    initLineQueue(dir);
+
+    const wp = {
+      id: "wp-missing",
+      line: "missing-ts-test",
+      task: "test",
+      input: {},
+      stations: {
+        "station-a": {
+          summary: "done",
+          status: "done",
+          started_at: null,
+          finished_at: null,
+          model: "test",
+        },
+      },
+    };
+
+    const path = resolve(dir, "queues", "done", "wp-missing.json");
+    writeFileSync(path, JSON.stringify(wp));
+    const mtime = Date.now() - 1000;
+    utimesSync(path, new Date(mtime), new Date(mtime));
+
+    expect(() => computeFlowMetrics(dir, ["station-a"])).not.toThrow();
+    const metrics = computeFlowMetrics(dir, ["station-a"]);
+    expect(metrics.tiles.length).toBe(5);
+  });
+
+  test("getFullState shape unchanged (backward compat)", async () => {
+    const state = await getFullState(LINE_DIR);
+    expect(state).toHaveProperty("line");
+    expect(state).toHaveProperty("sequence");
+    expect(state).toHaveProperty("sections");
+    expect(state).toHaveProperty("completed");
+    expect(state).toHaveProperty("errors");
+    expect(state).toHaveProperty("throughput");
+    expect(state).toHaveProperty("timestamp");
+    // Should NOT have a flowMetrics key
+    expect(state).not.toHaveProperty("flowMetrics");
   });
 });
