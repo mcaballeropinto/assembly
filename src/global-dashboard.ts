@@ -999,8 +999,13 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       padding: var(--space-sm);
       min-height: 32px;
       border-bottom: 1px solid var(--lane-divider);
+      min-width: 0;
     }
     .kanban-lane:last-child { border-bottom: none; }
+    .kanban-col-body {
+      min-width: 0;
+      overflow: hidden;
+    }
     .kanban-lane-label {
       font-size: 10px;
       text-transform: uppercase;
@@ -1026,6 +1031,8 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       display: flex;
       flex-direction: column;
       gap: 2px;
+      min-width: 0;
+      overflow: hidden;
       transition: transform 300ms ease-out, opacity 300ms ease-out, border-color 150ms ease;
     }
     .kanban-card:hover { border-color: var(--color-info); }
