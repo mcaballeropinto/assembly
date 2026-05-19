@@ -1614,16 +1614,16 @@ describe("getKanbanState", () => {
     expect(heldCol!.title).toBe("Held");
   });
 
-  test("held column is positioned after inbox and before first station", async () => {
+  test("held column is positioned before inbox and before first station", async () => {
     const dir = setupKanbanLine("kanban-held-order");
     const out = (await getKanbanState(dir)) as KanbanState;
     const keys = out.columns.map((c) => c.key);
     const inboxIdx = keys.indexOf("inbox");
     const heldIdx = keys.indexOf("held");
     const firstStationIdx = keys.findIndex((k) => k.includes(":"));
-    expect(inboxIdx).toBeGreaterThanOrEqual(0);
-    expect(heldIdx).toBe(inboxIdx + 1);
-    expect(firstStationIdx).toBe(heldIdx + 1);
+    expect(heldIdx).toBeGreaterThanOrEqual(0);
+    expect(inboxIdx).toBe(heldIdx + 1);
+    expect(firstStationIdx).toBe(inboxIdx + 1);
   });
 
   test("dismissed errors are excluded from error column; active errors appear", async () => {
