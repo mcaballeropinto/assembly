@@ -425,6 +425,7 @@ export async function getFullState(linePath: string) {
 
   return {
     line: config.name,
+    description: config.description,
     sequence,
     lineQueue: lineState,
     held,
