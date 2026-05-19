@@ -1,6 +1,6 @@
 import { test, expect, describe, afterEach, beforeEach } from "bun:test";
 import { resolve, join } from "path";
-import { mkdirSync, rmSync, existsSync, writeFileSync, readdirSync, readFileSync } from "fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { startOrchestrator } from "../orchestrator";
 import { createWorkpiece, failStation } from "../workpiece";

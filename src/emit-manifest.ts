@@ -21,7 +21,7 @@
  */
 
 import { existsSync, mkdirSync, appendFileSync, readFileSync, renameSync } from "fs";
-import { resolve, dirname, basename } from "path";
+import { resolve, basename } from "path";
 
 export type EmitSource =
   | "fanout"            // cross-line fanout from on_complete

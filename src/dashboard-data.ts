@@ -2,7 +2,6 @@ import { resolve, basename } from "path";
 import { readdirSync, existsSync, readFileSync } from "fs";
 import { loadLine } from "./line";
 import {
-  countQueue,
   listQueue,
   getLineQueueState,
   getSectionQueueState,
@@ -285,7 +284,7 @@ export async function getFullState(linePath: string) {
   // Recent completed workpieces (last 10 from done/)
   const doneDir = resolve(linePath, "queues", "done");
   const throughput = computeThroughput(doneDir);
-  let completed: unknown[] = [];
+  const completed: unknown[] = [];
   if (existsSync(doneDir)) {
     const files = listQueue(doneDir).slice(-10).reverse();
     for (const f of files) {
@@ -317,8 +316,8 @@ export async function getFullState(linePath: string) {
 
   // Recent errors (last 10) — split into active vs. dismissed
   const errorDir = resolve(linePath, "queues", "error");
-  let activeErrors: unknown[] = [];
-  let dismissedErrors: unknown[] = [];
+  const activeErrors: unknown[] = [];
+  const dismissedErrors: unknown[] = [];
   if (existsSync(errorDir)) {
     const dismissedMap = readDismissed(linePath);
     const files = listQueue(errorDir).slice(-20).reverse(); // load extra to have enough after splitting
@@ -374,7 +373,7 @@ export async function getFullState(linePath: string) {
 
   // Recent review items (last 10)
   const reviewDir = resolve(linePath, "queues", "review");
-  let reviews: unknown[] = [];
+  const reviews: unknown[] = [];
   if (existsSync(reviewDir)) {
     const files = listQueue(reviewDir).slice(-10).reverse();
     for (const f of files) {

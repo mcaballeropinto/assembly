@@ -8,13 +8,12 @@
  */
 
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
-import { resolve, basename } from "path";
+import { resolve } from "path";
 import {
   mkdirSync,
   rmSync,
   existsSync,
   writeFileSync,
-  readFileSync,
 } from "fs";
 import { readTaskEvents, listTaskEventStations } from "../task-events";
 import { startHeartbeat } from "../section-worker";

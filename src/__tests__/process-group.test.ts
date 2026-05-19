@@ -1,5 +1,5 @@
 import { test, expect, describe, afterEach } from "bun:test";
-import { existsSync, readFileSync } from "fs";
+import { readFileSync } from "fs";
 import { killProcessGroup, getProcessGroupSize } from "../orchestrator";
 import { scanAndReap } from "../reaper";
 

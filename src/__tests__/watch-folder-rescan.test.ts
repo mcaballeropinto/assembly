@@ -5,7 +5,6 @@ import {
   rmSync,
   writeFileSync,
   unlinkSync,
-  readdirSync,
   existsSync,
 } from "fs";
 import { homedir } from "os";

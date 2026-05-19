@@ -6,22 +6,18 @@ import {
   readdirSync,
 } from "fs";
 import { resolve, basename } from "path";
-import YAML from "yaml";
 import {
-  GLOBAL_LINES_DIR,
-  GLOBAL_CONFIG,
   ORCHESTRATOR_PID_FILE,
   lineSearchDirs,
 } from "./paths";
-import { startOrchestrator, type OrchestratorHandle } from "./orchestrator";
+import { startOrchestrator } from "./orchestrator";
 import { getFullState } from "./dashboard-data";
-import { startOrphanReaper, type ReaperHandle } from "./reaper";
+import { startOrphanReaper } from "./reaper";
 import type { LineConfig } from "./types";
 import {
   findLatestHandoff,
   writeHandoffState,
   consumeHandoffState,
-  handoffPathForPid,
   HANDOFF_VERSION,
   type HandoffState,
   type HandoffWorker,

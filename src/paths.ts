@@ -1,4 +1,4 @@
-import { resolve, join } from "path";
+import { resolve } from "path";
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import YAML from "yaml";

@@ -18,26 +18,6 @@ function makeWorkpiece(id: string, task: string = "test task") {
   });
 }
 
-function makeWorkpieceWithStation(id: string, station: string, status: string) {
-  return JSON.stringify({
-    id,
-    line: "test-line",
-    task: "test task",
-    input: {},
-    stations: {
-      [station]: {
-        summary: status === "done" ? "ok" : "failed",
-        status,
-        started_at: new Date().toISOString(),
-        finished_at: new Date().toISOString(),
-        model: "test",
-        tokens: { in: 100, out: 50 },
-        cost_usd: 0.01,
-      },
-    },
-  });
-}
-
 function findColumn(state: KanbanState, key: string): KanbanColumn | undefined {
   return state.columns.find((c) => c.key === key);
 }

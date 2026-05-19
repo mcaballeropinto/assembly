@@ -5,7 +5,6 @@ import {
   rmSync,
   existsSync,
   writeFileSync,
-  readFileSync,
 } from "fs";
 import {
   findWorkerForWorkpiece,

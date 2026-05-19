@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { unlinkSync, writeFileSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join as joinPath } from "path";
-import type { LLMMessage, LLMResponse, LLMResult, Provider, ProgressCallback, OnEventCallback } from "./types";
+import type { LLMMessage, LLMResult, Provider, ProgressCallback, OnEventCallback } from "./types";
 import { openSessionLog, appendSessionLogRaw, closeSessionLog } from "./session-log";
 
 export const DEFAULT_REPAIR_MODEL = "claude-haiku-4-5-20251001";
@@ -1072,35 +1072,3 @@ export async function callAnthropicRepair(
   };
 }
 
-// ─── CLI Runner Utility ──────────────────────────────────────────────
-
-async function runCLI(
-  command: string,
-  args: string[]
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  // Strip Anthropic API keys when calling claude CLI so it uses the
-  // Claude Code subscription instead of direct API (which may have no credits).
-  const env = { ...process.env };
-  if (command === "claude") {
-    delete env.ANTHROPIC_API_KEY;
-    delete env.ASSEMBLY_ANTHROPIC_API_KEY;
-  }
-
-  const proc = Bun.spawn([command, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-    env,
-  });
-
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0 && !stdout.trim()) {
-    throw new Error(
-      `${command} exited with code ${exitCode}: ${stderr.substring(0, 300)}`
-    );
-  }
-
-  return { stdout, stderr, exitCode };
-}

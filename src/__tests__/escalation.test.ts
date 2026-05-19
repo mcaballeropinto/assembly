@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
 import { parseEvalResponse } from "../envelope";
 import { escalateStation, createWorkpiece, writeStation } from "../workpiece";
 import { initLineQueue, getLineQueueState } from "../queue";
-import type { StationResult, Workpiece } from "../types";
+import type { StationResult } from "../types";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-escalation-${Date.now()}`);
 

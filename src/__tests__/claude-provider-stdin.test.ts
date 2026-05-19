@@ -3,7 +3,7 @@
  * and that the prompt-size warning telemetry fires correctly.
  */
 
-import { describe, it, expect, afterEach, mock, spyOn, beforeEach } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import { CLAUDE_PROMPT_WARN_DEFAULT, getPromptWarnThreshold } from "../llm";
 
 // Save and restore environment vars

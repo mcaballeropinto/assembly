@@ -13,7 +13,6 @@ import {
   type OrchestratorHandle,
 } from "../orchestrator";
 import { createWorkpiece } from "../workpiece";
-import { recordEmit } from "../emit-manifest";
 import {
   HANDOFF_VERSION,
   type HandoffState,

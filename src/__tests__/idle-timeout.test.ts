@@ -6,7 +6,6 @@ import {
   existsSync,
   writeFileSync,
   readFileSync,
-  statSync,
   renameSync,
 } from "fs";
 import { loadLine, validateLine } from "../line";
@@ -187,11 +186,10 @@ describe("idle watchdog behavior", () => {
 
     // Read stdout chunks to update liveness
     const reader = proc.stdout.getReader();
-    const decoder = new TextDecoder();
     (async () => {
       try {
         while (true) {
-          const { done, value } = await reader.read();
+          const { done } = await reader.read();
           if (done) break;
           lastActivityMs = Date.now();
         }
@@ -221,7 +219,7 @@ describe("idle watchdog behavior", () => {
       stderr: "pipe",
     });
 
-    let lastActivityMs = Date.now();
+    const lastActivityMs = Date.now();
     let timedOut = false;
     const idleThresholdMs = 2_000;
 
@@ -256,7 +254,7 @@ describe("idle watchdog behavior", () => {
     (async () => {
       try {
         while (true) {
-          const { done, value } = await reader.read();
+          const { done } = await reader.read();
           if (done) break;
           lastActivityMs = Date.now();
         }

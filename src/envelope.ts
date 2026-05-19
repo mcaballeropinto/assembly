@@ -4,7 +4,7 @@ import type { StationEnvelope, StationConfig, EvalResult } from "./types";
  * Parse and validate a station's raw LLM response into a StationEnvelope.
  */
 export function parseEnvelope(raw: string): StationEnvelope {
-  let cleaned = raw.trim();
+  const cleaned = raw.trim();
 
   // Strategy 1: Try parsing as-is (already clean JSON)
   let parsed: unknown;
@@ -377,7 +377,7 @@ export function buildGuardrailRepairPrompt(
  * Reuses the same JSON extraction strategies as parseEnvelope.
  */
 export function parseEvalResponse(raw: string): EvalResult {
-  let cleaned = raw.trim();
+  const cleaned = raw.trim();
 
   let parsed: unknown;
   try {

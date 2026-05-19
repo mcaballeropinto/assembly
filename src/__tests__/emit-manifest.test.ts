@@ -15,7 +15,6 @@ import { tmpdir } from "os";
 import {
   recordEmit,
   isEmitted,
-  loadManifest,
   quarantineUnverified,
   bootstrapManifest,
   isManifestSidecar,

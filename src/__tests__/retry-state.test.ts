@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import { resolve } from "path";
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
 import {
   writeRetryState,
   readRetryState,

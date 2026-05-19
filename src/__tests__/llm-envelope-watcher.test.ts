@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, writeFileSync, chmodSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { callLLM, resolveAllowedTools, DEFAULT_ALLOWED_TOOLS } from "../llm";
+import { callLLM, resolveAllowedTools } from "../llm";
 import { parseEnvelope } from "../envelope";
 import type { LLMMessage } from "../types";
 

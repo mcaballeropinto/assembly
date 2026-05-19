@@ -10,7 +10,10 @@
   "scripts": {
     "dev": "bun run src/cli.ts",
     "build": "bun build src/cli.ts --outdir dist --target node",
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -19,8 +22,13 @@
     "morphdom": "^2.7.4"
   },
   "devDependencies": {
-    "@types/bun": "latest",
     "@happy-dom/global-registrator": "^14.12.0",
-    "happy-dom": "^14.12.0"
+    "@types/bun": "latest",
+    "eslint": "^10.4.0",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "globals": "^17.6.0",
+    "happy-dom": "^14.12.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.4"
   }
 }

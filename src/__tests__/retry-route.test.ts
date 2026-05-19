@@ -6,7 +6,6 @@ import {
   writeFileSync,
   existsSync,
   readFileSync,
-  readdirSync,
 } from "fs";
 import { initLineQueue, initSectionQueue } from "../queue";
 import { readDismissed } from "../error-dismiss";

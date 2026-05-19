@@ -1,13 +1,8 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { resolve } from "path";
-import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
 import {
   HANDOFF_VERSION,
-  handoffPathForPid,
-  writeHandoffState,
-  findLatestHandoff,
-  consumeHandoffState,
-  isPidAlive,
   type HandoffState,
 } from "../handoff";
 

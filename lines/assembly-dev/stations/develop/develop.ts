@@ -346,6 +346,213 @@ if (!porcelain && !aheadOfMain) {
   );
 }
 
+// ─── Safety gates ─────────────────────────────────────────────────────
+//
+// Run BEFORE tests/commit. Each gate hardFails on violation so the agent's
+// changes never reach `main`. Cheap gates run first.
+//
+// 1. Path blocklist  — diff must not touch secrets/SSH/runtime state
+// 2. Secret scan     — diff content must not contain credential-shaped strings
+// 3. Plan alignment  — changed files must be ⊆ plan.files_to_change ∪ files_to_create
+//                      (with a small allowance for test files paired with planned src files)
+// 4. Typecheck       — `tsc --noEmit` must be clean
+// 5. Lint            — `eslint .` must be clean
+// (6. Tests           — existing `bun test` further down)
+
+// Stage everything so we can scan it as a single diff. The worktree is
+// transient; if any gate fails we hardFail and the orchestrator tears it down.
+spawnSync("git", ["-C", wtRoot, "add", "-A"], { stdio: "inherit" });
+
+const changedR = spawnSync(
+  "git",
+  ["-C", wtRoot, "diff", "--cached", "--name-only", "HEAD"],
+  { encoding: "utf-8" }
+);
+const changedFiles = ((changedR.stdout ?? "").trim().split("\n")).filter((s) => s.length > 0);
+
+const diffR = spawnSync(
+  "git",
+  ["-C", wtRoot, "diff", "--cached", "--no-color", "HEAD"],
+  { encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 }
+);
+const diffText = diffR.stdout ?? "";
+
+log(`safety gates: ${changedFiles.length} changed files, ${diffText.length} bytes of diff`);
+
+// ── Gate 1: Path blocklist ───────────────────────────────────────────
+const BLOCKED_PATH_PATTERNS: Array<{ re: RegExp; reason: string }> = [
+  { re: /(^|\/)\.env(\.|$)/, reason: ".env files (secrets)" },
+  { re: /(^|\/)\.secrets(\.|$)/, reason: ".secrets files" },
+  { re: /\.(pem|key|p12|pfx|crt|cer|jks)$/i, reason: "key/cert files" },
+  { re: /(^|\/)id_(rsa|ed25519|ecdsa|dsa)(\.|$)/, reason: "SSH private keys" },
+  { re: /(^|\/)\.ssh(\/|$)/, reason: ".ssh directory" },
+  { re: /(^|\/)\.aws(\/|$)/, reason: ".aws directory (credentials)" },
+  { re: /(^|\/)\.gnupg(\/|$)/, reason: ".gnupg directory" },
+  { re: /(^|\/)\.assembly(\/|$)/, reason: "~/.assembly runtime state" },
+  { re: /(^|\/)\.claude(\/|$)/, reason: "~/.claude config" },
+  { re: /^lines\/[^/]+\/queues(\/|$)/, reason: "line queue runtime state" },
+  { re: /(^|\/)\.git(\/|$)/, reason: ".git internals" },
+  { re: /(^|\/)node_modules(\/|$)/, reason: "node_modules" },
+  { re: /(^|\/)\.DS_Store$/, reason: "macOS metadata" },
+];
+const blockedHits: Array<{ file: string; reason: string }> = [];
+for (const f of changedFiles) {
+  for (const { re, reason } of BLOCKED_PATH_PATTERNS) {
+    if (re.test(f)) {
+      blockedHits.push({ file: f, reason });
+      break;
+    }
+  }
+}
+if (blockedHits.length > 0) {
+  const lines = blockedHits.map((h) => `  ${h.file}  (${h.reason})`).join("\n");
+  hardFail(
+    "blocked path in diff",
+    `Files in diff match the safety-gate path blocklist:\n${lines}\n` +
+      `These paths must never be committed. The agent must not edit them.`
+  );
+}
+
+// ── Gate 2: Secret scan ──────────────────────────────────────────────
+// High-confidence patterns only — false positives here halt the pipeline.
+const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
+  { name: "Anthropic API key", re: /\bsk-ant-api03-[A-Za-z0-9_\-]{50,}/ },
+  { name: "OpenAI/sk-style key", re: /\bsk-[A-Za-z0-9]{32,}\b/ },
+  { name: "AWS access key id", re: /\bAKIA[0-9A-Z]{16}\b/ },
+  { name: "AWS secret access key (likely)", re: /aws_secret_access_key\s*[:=]\s*['"]?[A-Za-z0-9/+=]{40}['"]?/i },
+  { name: "Google API key", re: /\bAIza[A-Za-z0-9_\-]{35}\b/ },
+  { name: "GitHub token", re: /\bgh[pousr]_[A-Za-z0-9]{30,}\b/ },
+  { name: "Slack token", re: /\bxox[abpsr]-[A-Za-z0-9\-]{10,}\b/ },
+  { name: "Stripe live secret", re: /\bsk_live_[A-Za-z0-9]{20,}\b/ },
+  { name: "PEM private key block", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+];
+// Scan only ADDED lines (lines beginning with "+" in the unified diff, excluding "+++" file headers).
+const addedLines: string[] = [];
+for (const line of diffText.split("\n")) {
+  if (line.startsWith("+") && !line.startsWith("+++")) {
+    addedLines.push(line);
+  }
+}
+const addedText = addedLines.join("\n");
+const secretHits: Array<{ kind: string; sample: string }> = [];
+for (const { name, re } of SECRET_PATTERNS) {
+  const m = addedText.match(re);
+  if (m) {
+    // Redact the match so the failure message doesn't itself leak the secret.
+    const sample = m[0].slice(0, 8) + "…[redacted]";
+    secretHits.push({ kind: name, sample });
+  }
+}
+if (secretHits.length > 0) {
+  const lines = secretHits.map((h) => `  ${h.kind}: ${h.sample}`).join("\n");
+  hardFail(
+    "potential secret in diff",
+    `Diff contains strings matching secret patterns:\n${lines}\n` +
+      `If these are false positives, narrow the regex in develop.ts. ` +
+      `Never commit real secrets.`
+  );
+}
+
+// ── Gate 3: Plan/diff alignment ──────────────────────────────────────
+// `plan.files_to_change` and `plan.files_to_create` are the agent's contract.
+// Files the agent touches must be within the allowed set, with a small
+// allowance for adjacent test files. We do NOT enforce alignment when the
+// plan was vague (empty file lists) — that's a separate signal handled by
+// the no-op short-circuit earlier in develop.ts.
+const planChange: string[] = Array.isArray(plan.files_to_change) ? plan.files_to_change.filter((s: unknown) => typeof s === "string") : [];
+const planCreate: string[] = Array.isArray(plan.files_to_create) ? plan.files_to_create.filter((s: unknown) => typeof s === "string") : [];
+const planSet = new Set<string>([...planChange, ...planCreate]);
+
+if (planSet.size > 0) {
+  function isAllowed(path: string): boolean {
+    if (planSet.has(path)) return true;
+    // Allow test files paired with planned source files:
+    //   src/foo.ts → src/__tests__/foo.test.ts (and similar)
+    const testFor = (p: string) => {
+      const m = p.match(/^src\/(.+)\.ts$/);
+      if (!m) return [];
+      const stem = m[1];
+      return [
+        `src/__tests__/${stem}.test.ts`,
+        `src/__tests__/${stem}-${"".padEnd(0)}.test.ts`,
+      ];
+    };
+    for (const planned of planSet) {
+      for (const t of testFor(planned)) {
+        if (path === t) return true;
+      }
+    }
+    // Allow co-located tests in the same folder.
+    const colocated = path.match(/^(.*)\/[^/]+\.test\.ts$/);
+    if (colocated) {
+      const folder = colocated[1];
+      for (const planned of planSet) {
+        if (planned.startsWith(folder + "/")) return true;
+      }
+    }
+    return false;
+  }
+  const offPlan = changedFiles.filter((f) => !isAllowed(f));
+  if (offPlan.length > 0) {
+    const planned = [...planSet].map((p) => `  - ${p}`).join("\n");
+    const off = offPlan.map((p) => `  - ${p}`).join("\n");
+    hardFail(
+      "off-plan files in diff",
+      `Changed files extend beyond plan.files_to_change ∪ plan.files_to_create.\n` +
+        `Planned:\n${planned}\nOff-plan:\n${off}\n` +
+        `If the additional files are legitimate, update the plan or relax the gate in develop.ts.`
+    );
+  }
+}
+
+// ── Ensure dev deps exist in the worktree for typecheck/lint ─────────
+// The worktree shares .git with the main checkout but starts with no
+// node_modules. `bun install` is idempotent and fast when the global cache
+// is warm. (The repo gitignores bun.lock, so --frozen-lockfile isn't an
+// option; we resolve from package.json on each run.)
+log(`bun install (deps for typecheck + lint)`);
+const installR = spawnSync("bun", ["install"], {
+  cwd: wt,
+  encoding: "utf-8",
+  timeout: 120_000,
+});
+if (installR.status !== 0) {
+  hardFail(
+    "bun install failed in worktree",
+    `cwd=${wt}\n${(installR.stdout ?? "") + "\n" + (installR.stderr ?? "")}`
+  );
+}
+
+// ── Gate 4: Typecheck ────────────────────────────────────────────────
+log(`bun run typecheck`);
+const tscR = spawnSync("bun", ["run", "typecheck"], {
+  cwd: wt,
+  encoding: "utf-8",
+  timeout: 120_000,
+});
+if (tscR.status !== 0) {
+  const tail = ((tscR.stdout ?? "") + "\n" + (tscR.stderr ?? "")).slice(-3000);
+  hardFail(
+    `typecheck failed (exit ${tscR.status})`,
+    `branch=${branch} worktree=${wtRoot}\n${tail}`
+  );
+}
+
+// ── Gate 5: Lint ─────────────────────────────────────────────────────
+log(`bun run lint`);
+const lintR = spawnSync("bun", ["run", "lint"], {
+  cwd: wt,
+  encoding: "utf-8",
+  timeout: 120_000,
+});
+if (lintR.status !== 0) {
+  const tail = ((lintR.stdout ?? "") + "\n" + (lintR.stderr ?? "")).slice(-3000);
+  hardFail(
+    `lint failed (exit ${lintR.status})`,
+    `branch=${branch} worktree=${wtRoot}\n${tail}`
+  );
+}
+
 // ─── Run tests ────────────────────────────────────────────────────────
 
 log(`running bun test`);
@@ -360,8 +567,7 @@ if (!testsPassed) {
 
 let commitSha = "";
 if (porcelain) {
-  log(`committing staged + unstaged changes`);
-  spawnSync("git", ["-C", wtRoot, "add", "."], { stdio: "inherit" });
+  log(`committing staged changes (already staged by safety gates)`);
   const msg = `feat(assembly): ${agentSummary.slice(0, 100)}\n\nAutomated commit by develop station for workpiece ${wpId}.`;
   const commitR = spawnSync(
     "git",

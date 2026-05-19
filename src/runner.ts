@@ -49,7 +49,7 @@ export interface RunOptions {
 
 export async function run(options: RunOptions): Promise<Workpiece> {
   const startTime = Date.now();
-  const { config, stations, linePath } = await loadLine(options.linePath);
+  const { config, stations } = await loadLine(options.linePath);
 
   const defaultProvider: Provider = config.defaults?.provider ?? "api";
   const defaultModel = config.defaults?.model ?? "claude-sonnet-4-20250514";
@@ -110,7 +110,7 @@ export async function run(options: RunOptions): Promise<Workpiece> {
   }
 
   // Track total tokens and cost
-  let totalTokens = { in: 0, out: 0, cache_read: 0, cache_creation: 0 };
+  const totalTokens = { in: 0, out: 0, cache_read: 0, cache_creation: 0 };
   let totalCost = 0;
 
   // Execute each station
@@ -142,9 +142,9 @@ export async function run(options: RunOptions): Promise<Workpiece> {
 
       let envelope: StationEnvelope | undefined;
       let evalResult: EvalResult | undefined;
-      let cumulativeTokens = { in: 0, out: 0, cache_read: 0, cache_creation: 0 };
+      const cumulativeTokens = { in: 0, out: 0, cache_read: 0, cache_creation: 0 };
       let stationCost = 0;
-      let evalTokens = { in: 0, out: 0, cache_read: 0, cache_creation: 0 };
+      const evalTokens = { in: 0, out: 0, cache_read: 0, cache_creation: 0 };
       let evalCost = 0;
       let lastModel = stationModel;
       let evalFeedback: string | undefined;
@@ -672,7 +672,7 @@ async function runStationEval(
   console.log(`  🔍 Evaluating output (attempt ${attempt}/${maxAttempts})...`);
 
   let evalResult: EvalResult;
-  let tokens = { in: 0, out: 0, cache_read: 0, cache_creation: 0 };
+  const tokens = { in: 0, out: 0, cache_read: 0, cache_creation: 0 };
   let cost_usd = 0;
 
   if (evalConfig.provider === "script") {
@@ -763,7 +763,7 @@ async function runStationEval(
  */
 function flattenSequence(
   sequence: SequenceStep[],
-  workpiece: Workpiece
+  _workpiece: Workpiece
 ): string[] {
   const result: string[] = [];
 

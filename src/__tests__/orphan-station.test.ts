@@ -7,7 +7,6 @@ import {
   writeFileSync,
   readFileSync,
   readdirSync,
-  appendFileSync,
 } from "fs";
 import { startOrchestrator, type OrchestratorHandle } from "../orchestrator";
 import { createWorkpiece, writeStation } from "../workpiece";

@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach, afterAll } from "bun:test";
 import { resolve } from "path";
-import { mkdirSync, rmSync, existsSync, readFileSync, chmodSync } from "fs";
+import { mkdirSync, rmSync, existsSync } from "fs";
 import {
   appendTaskEvent,
   readTaskEvents,

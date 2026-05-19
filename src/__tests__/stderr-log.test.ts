@@ -6,11 +6,9 @@ import {
   existsSync,
   writeFileSync,
   readFileSync,
-  openSync,
   writeSync,
   closeSync,
   unlinkSync,
-  renameSync,
 } from "fs";
 import {
   openStderrSink,

@@ -5,7 +5,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from
 import { homedir } from "os";
 import { run } from "./runner";
 import { validateLine } from "./line";
-import { loadWorkpiece, createWorkpiece } from "./workpiece";
+import { loadWorkpiece } from "./workpiece";
 import { startGlobalOrchestrator } from "./global-orchestrator";
 import { startGlobalDashboard } from "./global-dashboard";
 import { listHeld, releaseHeldTasks, InvalidTaskFileError } from "./held";
@@ -571,7 +571,7 @@ async function handleDaemon(args: string[]) {
   }
 }
 
-async function handleDaemonStart(args: string[]) {
+async function handleDaemonStart(_args: string[]) {
   console.log(`\n🏭 Assembly — Daemon Mode\n`);
 
   let handle;

@@ -91,16 +91,6 @@ async function readOauthToken(): Promise<string> {
   return token;
 }
 
-function parseRetryAfterMs(res: Response): number | null {
-  const hdr = res.headers.get("retry-after");
-  if (!hdr) return null;
-  const asNum = Number(hdr);
-  if (Number.isFinite(asNum)) return Math.max(0, asNum) * 1000;
-  const asDate = Date.parse(hdr);
-  if (!Number.isNaN(asDate)) return Math.max(0, asDate - Date.now());
-  return null;
-}
-
 function computeBackoffMs(retryAfterMs: number | null): number {
   // Exponential with retry-after as a floor: 60s, 2m, 4m, 8m, 16m, 30m cap.
   const exp = Math.min(MAX_BACKOFF_MS, 60_000 * 2 ** (consecutive429s - 1));

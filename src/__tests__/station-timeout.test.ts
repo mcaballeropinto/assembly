@@ -1,15 +1,12 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
-import { resolve, basename } from "path";
+import { resolve } from "path";
 import {
   mkdirSync,
   rmSync,
   existsSync,
   writeFileSync,
-  readFileSync,
 } from "fs";
 import { loadLine, validateLine } from "../line";
-import { type SectionInfo } from "../orchestrator";
-import { initSectionQueue } from "../queue";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-timeout-${Date.now()}`);
 

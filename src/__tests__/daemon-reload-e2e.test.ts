@@ -114,7 +114,7 @@ afterEach(async () => {
  * sees ONLY lines under `testHome`.
  */
 function sandboxedEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env, HOME: testHome, ASSEMBLY_DISABLE_USAGE_GATE: "1" };
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: testHome, ASSEMBLY_DISABLE_USAGE_GATE: "1" };
   delete env.ASSEMBLY_LINE_DIRS;
   return env;
 }

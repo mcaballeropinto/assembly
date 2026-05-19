@@ -113,7 +113,7 @@ describe("DEFAULT_CLAUDE_ENV", () => {
   });
 
   it("all values are strings", () => {
-    for (const [key, val] of Object.entries(DEFAULT_CLAUDE_ENV)) {
+    for (const val of Object.values(DEFAULT_CLAUDE_ENV)) {
       expect(typeof val).toBe("string");
     }
   });

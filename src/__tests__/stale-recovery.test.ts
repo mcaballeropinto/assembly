@@ -1,15 +1,14 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
-import { resolve, basename } from "path";
+import { resolve } from "path";
 import {
   mkdirSync,
   rmSync,
   existsSync,
   writeFileSync,
   readFileSync,
-  readdirSync,
 } from "fs";
 import { recoverStaleProcessing, type SectionInfo } from "../orchestrator";
-import { initSectionQueue, initLineQueue } from "../queue";
+import { initSectionQueue } from "../queue";
 import {
   createWorkpiece,
   writeStation,
@@ -326,7 +325,7 @@ describe("recoverStaleProcessing()", () => {
     const subDir = `preserve-${Date.now()}`;
     // Station-2 is in processing, but station-1 was already completed
     const section2 = createTestSection("station-2", subDir);
-    const { log, events } = createTestLog();
+    const { log } = createTestLog();
     const errorDir = resolve(TEMP_DIR, `error-preserve-${Date.now()}`);
     mkdirSync(errorDir, { recursive: true });
 

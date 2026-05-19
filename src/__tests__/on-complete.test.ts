@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
-import { resolve, basename } from "path";
+import { resolve } from "path";
 import {
   mkdirSync,
   rmSync,
@@ -97,7 +97,7 @@ describe("resolvePath()", () => {
   });
 
   test("resolves input path (input.market_type)", () => {
-    let wp = createTestWorkpiece();
+    const wp = createTestWorkpiece();
     wp.input = { market_type: "equity", region: "US" };
     const result = resolvePath(wp, "input.market_type");
     expect(result).toBe("equity");

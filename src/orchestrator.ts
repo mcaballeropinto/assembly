@@ -9,12 +9,10 @@ import {
   watchFolder,
   claimFile,
   moveFile,
-  writeToQueue,
   readFromQueue,
   listQueue,
   listCompletedTaskKeys,
   filterReadyByDeps,
-  type LineQueuePaths,
   type QueuePaths,
 } from "./queue";
 import type { Workpiece, LineConfig, FailureClass, RetryPolicy, RetryPolicyMap } from "./types";
@@ -25,7 +23,7 @@ import { evaluateAndSnapshot } from "./usage";
 import { computeRoundsFromProgress } from "./tool-rounds";
 import { recordEmit, isEmitted, quarantineUnverified, bootstrapManifest } from "./emit-manifest";
 import type { HandoffWorker, HandoffLineSnapshot, HandoffState } from "./handoff";
-import { findLatestHandoff, isPidAlive } from "./handoff";
+import { isPidAlive } from "./handoff";
 import { tailStderrSink, appendStderrMarker } from "./stderr-log";
 
 // ─── Process-group helpers ────────────────────────────────────────
@@ -237,7 +235,7 @@ export async function startOrchestrator(
 ): Promise<OrchestratorHandle> {
   loadEnvFiles();
 
-  const { config, stations, linePath } = await loadLine(options.linePath);
+  const { config, linePath } = await loadLine(options.linePath);
   // line.yaml retry_policy wins over the programmatic option; both merge on top of the defaults.
   const retryPolicy = mergeRetryPolicy({
     ...(options.retryPolicy ?? {}),
@@ -1314,7 +1312,6 @@ export async function startOrchestrator(
         try { stopStderrTail(); } catch {}
       }
 
-      const stdout = stdoutChunks.join('');
       const stderr = stderrChunks.join('');
 
       if (stderr.trim()) {

@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { beforeAll, afterAll, afterEach, beforeEach, expect, test } from "bun:test";
 
 // Set up happy-dom before any imports that touch DOM
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
