@@ -1471,12 +1471,12 @@ describe("getKanbanState", () => {
     expect(out.concurrency).toBe(3);
 
     const keys = out.columns.map((c) => c.key);
-    // Held is omitted when empty; review/error omitted when empty
-    expect(keys).not.toContain("held");
+    // Review/error omitted when empty; held is always present
     expect(keys).not.toContain("review");
     expect(keys).not.toContain("error");
     // Always-present columns
     expect(keys).toContain("inbox");
+    expect(keys).toContain("held");
     expect(keys).toContain("station-a:inbox");
     expect(keys).toContain("station-a:processing");
     expect(keys).toContain("station-a:output");
@@ -1601,6 +1601,29 @@ describe("getKanbanState", () => {
     expect(heldCol!.count).toBe(1);
     expect(heldCol!.cards[0].state).toBe("held");
     expect(heldCol!.cards[0].title).toBe("on hold");
+  });
+
+  test("held column is always present even with zero held tasks", async () => {
+    const dir = setupKanbanLine("kanban-held-empty");
+    // Don't write any held files
+    const out = (await getKanbanState(dir)) as KanbanState;
+    const heldCol = out.columns.find((c) => c.key === "held");
+    expect(heldCol).toBeDefined();
+    expect(heldCol!.count).toBe(0);
+    expect(heldCol!.cards).toHaveLength(0);
+    expect(heldCol!.title).toBe("Held");
+  });
+
+  test("held column is positioned after inbox and before first station", async () => {
+    const dir = setupKanbanLine("kanban-held-order");
+    const out = (await getKanbanState(dir)) as KanbanState;
+    const keys = out.columns.map((c) => c.key);
+    const inboxIdx = keys.indexOf("inbox");
+    const heldIdx = keys.indexOf("held");
+    const firstStationIdx = keys.findIndex((k) => k.includes(":"));
+    expect(inboxIdx).toBeGreaterThanOrEqual(0);
+    expect(heldIdx).toBe(inboxIdx + 1);
+    expect(firstStationIdx).toBe(heldIdx + 1);
   });
 
   test("dismissed errors are excluded from error column; active errors appear", async () => {

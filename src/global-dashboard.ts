@@ -953,6 +953,13 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
     .kanban-col.over .kanban-col-header { color: var(--color-error); }
     .kanban-col.hot { border-color: var(--color-warning); background: var(--color-warning-dim); }
     .kanban-col.over { border-color: var(--color-error); background: var(--color-error-dim); }
+    .kanban-col[data-col-key="held"] {
+      border-left: 3px solid var(--status-info);
+    }
+    .kanban-col[data-col-key="held"] .kanban-empty {
+      color: var(--text-muted);
+      font-style: italic;
+    }
     .kanban-station {
       display: grid;
       grid-template-rows: auto 1fr;
@@ -2302,8 +2309,9 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       var headerClass = '';
       if (col.wipLimit && col.count > col.wipLimit * 2) headerClass = ' over';
       else if (col.wipLimit && col.count > col.wipLimit) headerClass = ' hot';
+      var emptyMsg = col.key === 'held' ? 'No held tasks' : '\\u2014';
       var cardsHtml = col.cards.length === 0
-        ? '<div class="kanban-empty">\\u2014</div>'
+        ? '<div class="kanban-empty">' + emptyMsg + '</div>'
         : col.cards.map(renderKanbanCard).join('');
       var html = '<div class="kanban-col' + headerClass + '" data-col-key="' + escapeJs(col.key) + '">';
       html += '<div class="kanban-col-header"><span class="col-title">' + esc(col.title) + '</span><span class="col-count">' + col.count + '</span>' + renderRetryChips(col) + '</div>';
