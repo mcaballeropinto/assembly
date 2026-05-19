@@ -1178,6 +1178,256 @@ export function diffKanban(
   return moves;
 }
 
+// ─── Flow Metrics (Tier 4 #29) ──────────────────────────────────────
+
+export interface FlowMetricsTile {
+  label: string;
+  value: string;           // formatted primary number
+  rawValue: number;        // raw number for client-side formatting
+  unit: string;            // "items", "items/day", "ms", "%"
+  delta?: number | null;   // percentage change vs prior period, null if no prior data
+  sparkline?: number[];    // 7 data points (one per day) for sparkline tiles
+  explanation: string;     // plain-language hover tooltip
+}
+
+export interface FlowMetrics {
+  tiles: FlowMetricsTile[];
+  periodDays: number;
+  timestamp: string;
+}
+
+function formatDurationCompact(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const remS = s % 60;
+  if (m < 60) return remS > 0 ? `${m}m ${remS}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  return remM > 0 ? `${h}h ${remM}m` : `${h}h`;
+}
+
+/**
+ * Compute flow metrics for the line detail metrics row.
+ * Returns 5 tiles: Items in Flight, Throughput 7d, Avg Cycle Time, Avg Wait Time, Success Rate 7d.
+ */
+export function computeFlowMetrics(linePath: string, sequence: string[]): FlowMetrics {
+  const now = Date.now();
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+  const currentWindowStart = now - sevenDaysMs;
+  const priorWindowStart = now - 2 * sevenDaysMs;
+
+  const tiles: FlowMetricsTile[] = [];
+
+  // Tile 1: Items in Flight
+  let inFlightCount = 0;
+  try {
+    const lineState = getLineQueueState(linePath);
+    inFlightCount += lineState.inbox;
+    for (const name of sequence) {
+      const stationDir = resolve(linePath, "stations", name);
+      const queueState = getSectionQueueState(stationDir);
+      inFlightCount += queueState.inbox + queueState.processing;
+    }
+  } catch {}
+
+  tiles.push({
+    label: "Items in Flight",
+    value: String(inFlightCount),
+    rawValue: inFlightCount,
+    unit: "items",
+    explanation: "Total workpieces currently in inbox or processing queues across all stations",
+  });
+
+  // Read done and error files from the last 14 days
+  const doneDir = resolve(linePath, "queues", "done");
+  const errorDir = resolve(linePath, "queues", "error");
+
+  interface FileEntry {
+    path: string;
+    mtime: number;
+    source: "done" | "error";
+  }
+
+  const allFiles: FileEntry[] = [];
+
+  if (existsSync(doneDir)) {
+    try {
+      const files = readdirSync(doneDir).filter(f => f.endsWith(".json"));
+      for (const f of files) {
+        const path = resolve(doneDir, f);
+        const mtime = Bun.file(path).lastModified ?? 0;
+        if (mtime >= priorWindowStart && mtime <= now) {
+          allFiles.push({ path, mtime, source: "done" });
+        }
+      }
+    } catch {}
+  }
+
+  if (existsSync(errorDir)) {
+    try {
+      const files = readdirSync(errorDir).filter(f => f.endsWith(".json"));
+      for (const f of files) {
+        const path = resolve(errorDir, f);
+        const mtime = Bun.file(path).lastModified ?? 0;
+        if (mtime >= priorWindowStart && mtime <= now) {
+          allFiles.push({ path, mtime, source: "error" });
+        }
+      }
+    } catch {}
+  }
+
+  // Cap at 200 files to bound I/O
+  allFiles.sort((a, b) => b.mtime - a.mtime);
+  const selectedFiles = allFiles.slice(0, 200);
+
+  // Partition into current and prior periods
+  const currentDone: FileEntry[] = [];
+  const priorDone: FileEntry[] = [];
+  const currentError: FileEntry[] = [];
+  const priorError: FileEntry[] = [];
+
+  for (const f of selectedFiles) {
+    if (f.mtime >= currentWindowStart) {
+      if (f.source === "done") currentDone.push(f);
+      else currentError.push(f);
+    } else {
+      if (f.source === "done") priorDone.push(f);
+      else priorError.push(f);
+    }
+  }
+
+  // Tile 2: Throughput 7d
+  const dailyBuckets: number[] = [0, 0, 0, 0, 0, 0, 0];
+  for (const f of currentDone) {
+    const dayOffset = Math.floor((now - f.mtime) / (24 * 60 * 60 * 1000));
+    const bucketIdx = 6 - Math.min(dayOffset, 6);
+    if (bucketIdx >= 0 && bucketIdx < 7) dailyBuckets[bucketIdx]++;
+  }
+
+  const currentThroughput = currentDone.length / 7; // items per day
+  const priorThroughput = priorDone.length / 7;
+  const throughputDelta = priorThroughput > 0
+    ? ((currentThroughput - priorThroughput) / priorThroughput) * 100
+    : null;
+
+  tiles.push({
+    label: "Throughput 7d",
+    value: currentThroughput.toFixed(1),
+    rawValue: currentThroughput,
+    unit: "items/day",
+    delta: throughputDelta,
+    sparkline: dailyBuckets,
+    explanation: "Average completed workpieces per day over the last 7 days, with daily sparkline",
+  });
+
+  // Tile 3 & 4: Avg Cycle Time and Wait Time
+  const currentCycleTimes: number[] = [];
+  const currentWaitTimes: number[] = [];
+  const priorCycleTimes: number[] = [];
+  const priorWaitTimes: number[] = [];
+
+  function computeTimings(files: FileEntry[], cycleTimes: number[], waitTimes: number[]) {
+    for (const f of files) {
+      try {
+        const wp = JSON.parse(readFileSync(f.path, "utf-8")) as Workpiece;
+        if (!wp.stations) continue;
+
+        const stationVals = Object.values(wp.stations);
+        const allStarted = stationVals.map(s => s.started_at).filter(Boolean).sort();
+        const allFinished = stationVals.map(s => s.finished_at).filter(Boolean).sort();
+
+        if (allStarted.length === 0 || allFinished.length === 0) continue;
+
+        const cycleStart = new Date(allStarted[0]).getTime();
+        const cycleEnd = new Date(allFinished[allFinished.length - 1]).getTime();
+        const cycleTime = cycleEnd - cycleStart;
+
+        if (cycleTime >= 0) {
+          cycleTimes.push(cycleTime);
+
+          // Compute wait time = cycle time - sum of station durations
+          let totalProcessing = 0;
+          for (const sr of stationVals) {
+            if (sr.started_at && sr.finished_at) {
+              const dur = new Date(sr.finished_at).getTime() - new Date(sr.started_at).getTime();
+              if (dur >= 0) totalProcessing += dur;
+            }
+          }
+          const waitTime = Math.max(0, cycleTime - totalProcessing);
+          waitTimes.push(waitTime);
+        }
+      } catch {}
+    }
+  }
+
+  computeTimings([...currentDone, ...currentError], currentCycleTimes, currentWaitTimes);
+  computeTimings([...priorDone, ...priorError], priorCycleTimes, priorWaitTimes);
+
+  const avgCycleCurrent = currentCycleTimes.length > 0
+    ? currentCycleTimes.reduce((a, b) => a + b, 0) / currentCycleTimes.length
+    : 0;
+  const avgCyclePrior = priorCycleTimes.length > 0
+    ? priorCycleTimes.reduce((a, b) => a + b, 0) / priorCycleTimes.length
+    : 0;
+  const cycleDelta = avgCyclePrior > 0
+    ? ((avgCycleCurrent - avgCyclePrior) / avgCyclePrior) * 100
+    : null;
+
+  tiles.push({
+    label: "Avg Cycle Time",
+    value: avgCycleCurrent > 0 ? formatDurationCompact(avgCycleCurrent) : "0s",
+    rawValue: avgCycleCurrent,
+    unit: "ms",
+    delta: cycleDelta,
+    explanation: "Average end-to-end time from first station start to last station finish",
+  });
+
+  const avgWaitCurrent = currentWaitTimes.length > 0
+    ? currentWaitTimes.reduce((a, b) => a + b, 0) / currentWaitTimes.length
+    : 0;
+  const avgWaitPrior = priorWaitTimes.length > 0
+    ? priorWaitTimes.reduce((a, b) => a + b, 0) / priorWaitTimes.length
+    : 0;
+  const waitDelta = avgWaitPrior > 0
+    ? ((avgWaitCurrent - avgWaitPrior) / avgWaitPrior) * 100
+    : null;
+
+  tiles.push({
+    label: "Avg Wait Time",
+    value: avgWaitCurrent > 0 ? formatDurationCompact(avgWaitCurrent) : "0s",
+    rawValue: avgWaitCurrent,
+    unit: "ms",
+    delta: waitDelta,
+    explanation: "Average time workpieces spend queued between stations (cycle time minus processing time)",
+  });
+
+  // Tile 5: Success Rate 7d
+  const currentTotal = currentDone.length + currentError.length;
+  const priorTotal = priorDone.length + priorError.length;
+  const currentRate = currentTotal > 0 ? (currentDone.length / currentTotal) * 100 : 0;
+  const priorRate = priorTotal > 0 ? (priorDone.length / priorTotal) * 100 : 0;
+  const rateDelta = priorTotal > 0
+    ? currentRate - priorRate  // percentage point difference
+    : null;
+
+  tiles.push({
+    label: "Success Rate 7d",
+    value: currentRate.toFixed(1) + "%",
+    rawValue: currentRate,
+    unit: "%",
+    delta: rateDelta,
+    explanation: "Percentage of workpieces that completed successfully (done vs error)",
+  });
+
+  return {
+    tiles,
+    periodDays: 7,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 /**
  * Find a workpiece by filename across all queue folders.
  * The returned object is annotated with a `_source` field identifying which

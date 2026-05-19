@@ -1,5 +1,5 @@
 import { discoverLines, type GlobalState } from "./global-orchestrator";
-import { getFullState, findWorkpiece, getWorkpieceActivity, getHistory, getKanbanState, getTaskEventStations, getTaskEvents } from "./dashboard-data";
+import { getFullState, findWorkpiece, getWorkpieceActivity, getHistory, getKanbanState, getTaskEventStations, getTaskEvents, computeFlowMetrics } from "./dashboard-data";
 import { dismissFilenames, undismissFilenames } from "./error-dismiss";
 import { releaseHeldTasks, InvalidTaskFileError } from "./held";
 import {
@@ -326,6 +326,27 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
         try {
           const hist = await getHistory(dl.linePath, { limit, include });
           return Response.json(hist);
+        } catch (err) {
+          return Response.json({ error: (err as Error).message }, { status: 500 });
+        }
+      }
+
+      // Per-line flow metrics API (Tier 4 #29)
+      const flowMetricsMatch = url.pathname.match(/^\/api\/line\/([^/]+)\/flow-metrics$/);
+      if (flowMetricsMatch && req.method === "GET") {
+        const lineName = decodeURIComponent(flowMetricsMatch[1]);
+        const dl = linesByName.get(lineName);
+        if (!dl) return Response.json({ error: `Line "${lineName}" not found` }, { status: 404 });
+        try {
+          const { config } = await loadLine(dl.linePath);
+          const sequence: string[] = [];
+          for (const step of config.sequence) {
+            if (typeof step === "string") sequence.push(step);
+            else if ("parallel" in step) sequence.push(...step.parallel);
+            else if ("station" in step) sequence.push((step as { station: { name: string } }).station.name);
+          }
+          const metrics = computeFlowMetrics(dl.linePath, sequence);
+          return Response.json(metrics);
         } catch (err) {
           return Response.json({ error: (err as Error).message }, { status: 500 });
         }
@@ -1111,6 +1132,113 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       margin-top: var(--space-sm);
     }
     .kanban-col-actions .release-all-btn { margin: 0; }
+
+    /* Flow metrics row (Tier 4 #29) */
+    .flow-metrics-row {
+      display: flex;
+      gap: var(--space-md);
+      margin-bottom: var(--space-lg);
+      flex-wrap: wrap;
+    }
+    .flow-metric-tile {
+      flex: 1 1 0;
+      min-width: 140px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-sm);
+      padding: var(--space-md);
+      cursor: default;
+      transition: border-color 150ms;
+    }
+    .flow-metric-tile:hover {
+      border-color: var(--color-info);
+    }
+    .flow-metric-tile .metric-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      margin-bottom: var(--space-xs);
+    }
+    .flow-metric-tile .metric-value {
+      font-size: 28px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--text-primary);
+      line-height: 1.1;
+    }
+    .flow-metric-tile .metric-context {
+      margin-top: var(--space-xs);
+      font-size: 12px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: var(--space-xs);
+    }
+    .metric-delta.positive { color: var(--color-success); }
+    .metric-delta.negative { color: var(--color-error); }
+    .metric-context-live { color: var(--color-info); font-size: 11px; }
+    .metric-sparkline svg { display: block; }
+
+    /* Skeleton loading */
+    .flow-metrics-skeleton {
+      display: flex;
+      gap: var(--space-md);
+      margin-bottom: var(--space-lg);
+      flex-wrap: wrap;
+    }
+    .flow-metrics-skeleton .flow-metric-tile {
+      position: relative;
+      overflow: hidden;
+    }
+    .flow-metrics-skeleton .skeleton-line {
+      height: 14px;
+      background: var(--bg-elevated);
+      border-radius: 4px;
+      margin-bottom: 6px;
+    }
+    .flow-metrics-skeleton .skeleton-line.large {
+      height: 28px;
+      width: 60%;
+    }
+    .flow-metrics-skeleton .skeleton-line.small {
+      height: 10px;
+      width: 40%;
+    }
+    @keyframes shimmer {
+      0% { background-position: -200px 0; }
+      100% { background-position: 200px 0; }
+    }
+    .flow-metrics-skeleton .skeleton-line {
+      background: linear-gradient(90deg, var(--bg-elevated) 25%, var(--bg-surface) 50%, var(--bg-elevated) 75%);
+      background-size: 200px 100%;
+      animation: shimmer 1.5s infinite;
+    }
+
+    /* Empty state */
+    .flow-metrics-empty {
+      width: 100%;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 12px;
+      padding: var(--space-md);
+      background: var(--bg-surface);
+      border: 1px dashed var(--border-default);
+      border-radius: var(--radius-sm);
+      margin-bottom: var(--space-lg);
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .flow-metrics-row, .flow-metrics-skeleton { gap: var(--space-sm); }
+      .flow-metric-tile { min-width: calc(50% - var(--space-sm)); flex: 0 0 calc(50% - var(--space-sm)); }
+      .flow-metric-tile .metric-value { font-size: 24px; }
+    }
+    @media (max-width: 600px) {
+      .flow-metric-tile { min-width: 100%; flex: 0 0 100%; }
+    }
+
     /* Retry visualization */
     .retry-badge {
       display: inline-flex;
@@ -1937,6 +2065,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
     var historyData = null;        // last fetched LineHistory
     var historyInclude = 'done';   // 'done' or 'done,error'
     var historyLimit = 10;
+    var flowMetricsData = null;    // last fetched FlowMetrics
     // Client-side set of fileNames the user just dismissed; cleared once the server
     // catches up (the file no longer appears in the polled active-errors list).
     // Filters bannerErrors at every call site of updateErrorBanner so a poll firing
@@ -2466,6 +2595,22 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       } catch (e) {}
     }
 
+    async function loadFlowMetrics(lineName) {
+      if (!lineName) return;
+      try {
+        var res = await fetch('/api/line/' + encodeURIComponent(lineName) + '/flow-metrics');
+        if (!res.ok) return;
+        var data = await res.json();
+        flowMetricsData = data;
+        var mount = document.getElementById('flow-metrics-row');
+        if (mount && typeof AssemblyDashboard !== 'undefined') {
+          mount.innerHTML = AssemblyDashboard.buildMetricsRow(flowMetricsData);
+        }
+      } catch (e) {
+        // Metrics are non-critical; swallow fetch errors
+      }
+    }
+
     function onKanbanCardKeydown(ev, fileName) {
       if (ev.key === 'Enter' || ev.key === ' ') {
         ev.preventDefault();
@@ -2938,6 +3083,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         historyData: historyData,
         historyLimit: historyLimit,
         historyInclude: historyInclude,
+        flowMetrics: flowMetricsData,
       });
       var target = document.getElementById('content');
       if (!target) return;
@@ -2950,6 +3096,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       });
       updateErrorBanner(filteredDetail, selectedLine);
       loadKanban(selectedLine);
+      loadFlowMetrics(selectedLine);
     }
 
     function applyViewState(state) {
@@ -2968,6 +3115,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       if (drawerOpen) closeDrawer();
       activityFilters = {};
       historyData = null;
+      flowMetricsData = null;
       applyViewState('detail');
       selectedLine = name;
       window._detailShellLine = null;
