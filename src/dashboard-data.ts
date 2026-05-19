@@ -996,21 +996,6 @@ export async function getKanbanState(
   const concurrency = config.concurrency;
   const columns: KanbanColumn[] = [];
 
-  // Line-level inbox (always visible)
-  const inboxCards = collectCards(
-    resolve(linePath, "queues", "inbox"),
-    "inbox",
-    undefined,
-    undefined,
-    retriesByWp,
-  );
-  columns.push({
-    key: "inbox",
-    title: "Inbox",
-    count: inboxCards.length,
-    cards: inboxCards,
-  });
-
   // Held (always visible)
   const heldCards = collectCards(
     resolve(linePath, "queues", "held"),
@@ -1024,6 +1009,21 @@ export async function getKanbanState(
     title: "Held",
     count: heldCards.length,
     cards: heldCards,
+  });
+
+  // Line-level inbox (always visible)
+  const inboxCards = collectCards(
+    resolve(linePath, "queues", "inbox"),
+    "inbox",
+    undefined,
+    undefined,
+    retriesByWp,
+  );
+  columns.push({
+    key: "inbox",
+    title: "Inbox",
+    count: inboxCards.length,
+    cards: inboxCards,
   });
 
   // Station column-groups (three lanes each)
