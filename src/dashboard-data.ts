@@ -807,6 +807,8 @@ export interface KanbanCard {
   costUsd?: number;
   evalScore?: number;
   retry?: RetryState;
+  finished_at?: string | null;
+  duration_ms?: number | null;
 }
 
 export interface KanbanColumn {
@@ -934,6 +936,18 @@ function buildKanbanCard(
     const retryState = readRetryState(filePath);
     if (retryState && retryState.retry_count > 0) {
       card.retry = retryState;
+    }
+    // Compute finish time and total duration for done cards
+    if (columnKey === "done") {
+      const stationVals = Object.values(wp.stations ?? {});
+      const allStarted = stationVals.map(s => s.started_at).filter(Boolean).sort();
+      const allFinished = stationVals.map(s => s.finished_at).filter(Boolean).sort();
+      const wpFinishedAt = allFinished.length > 0 ? allFinished[allFinished.length - 1] : null;
+      const wpStartedAt = allStarted.length > 0 ? allStarted[0] : null;
+      if (wpFinishedAt) card.finished_at = wpFinishedAt;
+      if (wpFinishedAt && wpStartedAt) {
+        card.duration_ms = new Date(wpFinishedAt).getTime() - new Date(wpStartedAt).getTime();
+      }
     }
   }
   return card;

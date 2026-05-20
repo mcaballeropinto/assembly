@@ -1117,6 +1117,69 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
     .kanban-card.state-escalated .card-state { color: var(--status-warn); }
     .kanban-card.stuck { border-left: 3px solid var(--color-warning); }
     .kanban-card.in-flight { opacity: 0.5; }
+    /* Done-card variant: title-first layout */
+    .kanban-card.state-done .card-head-done {
+      display: flex;
+      align-items: baseline;
+      gap: var(--space-xs);
+    }
+    .kanban-card.state-done .card-head-done .card-state {
+      flex-shrink: 0;
+      font-size: 13px;
+    }
+    .kanban-card.state-done .card-head-done .card-title-primary {
+      color: var(--text-primary);
+      font-weight: 600;
+      font-size: 12px;
+      line-height: 1.3;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      word-break: break-word;
+      flex: 1;
+    }
+    .kanban-card.state-done .card-meta {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      display: flex;
+      gap: var(--space-sm);
+      flex-wrap: wrap;
+    }
+    .kanban-card.state-done .card-id-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      overflow: hidden;
+    }
+    .kanban-card.state-done .card-id-row .card-id-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .kanban-card.state-done .copy-id-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 10px;
+      padding: 0 2px;
+      line-height: 1;
+      opacity: 0.6;
+      transition: opacity 150ms;
+      flex-shrink: 0;
+    }
+    .kanban-card.state-done .copy-id-btn:hover {
+      opacity: 1;
+      color: var(--color-info);
+    }
+    .kanban-card.state-done .copy-id-btn.copied {
+      color: var(--status-ok);
+    }
     .kanban-card.entering { opacity: 0; transform: translateY(-4px); }
     .kanban-card.leaving { opacity: 0; transform: translateY(4px); }
     .kanban-empty {
@@ -2358,6 +2421,34 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       return Math.floor(h / 24) + 'd';
     }
 
+    function formatDuration(ms) {
+      if (ms == null) return '';
+      if (ms < 1000) return ms + 'ms';
+      var seconds = Math.floor(ms / 1000);
+      if (seconds < 60) return seconds + 's';
+      var minutes = Math.floor(seconds / 60);
+      var remainSec = seconds % 60;
+      if (minutes < 60) return minutes + 'm' + (remainSec > 0 ? ' ' + remainSec + 's' : '');
+      var hours = Math.floor(minutes / 60);
+      var remainMin = minutes % 60;
+      return hours + 'h' + (remainMin > 0 ? ' ' + remainMin + 'm' : '');
+    }
+
+    function copyCardId(event, id) {
+      event.stopPropagation();
+      var btn = event.currentTarget;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(id).then(function() {
+          btn.textContent = '\u2713';  // checkmark
+          btn.classList.add('copied');
+          setTimeout(function() {
+            btn.textContent = '\u2398';  // clipboard icon
+            btn.classList.remove('copied');
+          }, 1500);
+        });
+      }
+    }
+
     function renderKanbanCard(card) {
       var cls = 'kanban-card state-' + card.state;
       var ageMs = card.enteredColumnAt ? Date.now() - new Date(card.enteredColumnAt).getTime() : 0;
@@ -2375,6 +2466,46 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       html += ' onclick="openDrawer(\\'' + escapeJs(selectedLine) + '\\', \\'' + escapeJs(card.fileName) + '\\')"';
       html += ' onkeydown="onKanbanCardKeydown(event, \\'' + escapeJs(card.fileName) + '\\')"';
       html += '>';
+
+      // Done-card variant: title-first layout
+      if (card.column === 'done') {
+        // Primary line: outcome icon + title
+        html += '<div class="card-head-done">';
+        html += '<span class="card-state" aria-label="' + esc(card.state) + '">' + stateIcon(card.state) + '</span>';
+        html += '<span class="card-title-primary">' + esc(card.title || card.id) + '</span>';
+        html += '</div>';
+        // Preview line (if present)
+        if (card.preview) {
+          html += '<div class="card-preview">' + esc(card.preview) + '</div>';
+        }
+        // Meta line: relative time, duration, cost
+        var metaParts = [];
+        if (card.finished_at) {
+          metaParts.push('<span title="' + esc(card.finished_at) + '">' + formatElapsedShort(card.finished_at) + ' ago</span>');
+        } else if (card.enteredColumnAt) {
+          metaParts.push('<span title="' + esc(card.enteredColumnAt) + '">' + formatElapsedShort(card.enteredColumnAt) + ' ago</span>');
+        }
+        if (card.duration_ms != null) {
+          metaParts.push(formatDuration(card.duration_ms));
+        }
+        if (card.costUsd && card.costUsd > 0) {
+          metaParts.push(formatCardCost(card.costUsd));
+        }
+        if (card.evalScore != null) {
+          metaParts.push('\\u25d0 ' + card.evalScore);
+        }
+        if (metaParts.length > 0) {
+          html += '<div class="card-meta">' + metaParts.join(' \\u00b7 ') + '</div>';
+        }
+        // Run ID row: small muted ID + copy button
+        html += '<div class="card-id-row">';
+        html += '<span class="card-id-text">' + esc(card.id) + '</span>';
+        html += '<button class="copy-id-btn" aria-label="Copy run ID" title="Copy run ID" onclick="copyCardId(event, \\'' + escapeJs(card.id) + '\\')">\u2398</button>';
+        html += '</div>';
+        html += '</div>';
+        return html;
+      }
+
       html += '<div class="card-head">';
       html += '<span class="card-id">' + esc(card.id) + '</span>';
       html += '<span class="card-state" aria-label="' + esc(card.state) + '">' + stateIcon(card.state) + '</span>';
