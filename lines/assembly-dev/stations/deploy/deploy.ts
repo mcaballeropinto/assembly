@@ -76,6 +76,7 @@ if (developData?.no_op === true) {
       pushed: false,
       worktree_cleaned: true,
       dashboard_restarted: false,
+      daemon_reloaded: false,
       conflicts: [],
     },
   });
@@ -346,20 +347,40 @@ if (brDelR.status !== 0) {
   worktreeCleaned = false;
 }
 
-// ─── 6. Restart dashboard service (best-effort, opt-in via env) ───────
+// ─── 6. Reload live services with new build (best-effort) ────────────
+//
+// Dashboard: systemctl restart — clean SIGTERM, then Restart=on-failure
+// brings it back. The service ExecStart runs `bun run src/cli.ts dashboard
+// start`, which re-reads the just-merged source from disk.
+//
+// Daemon: we do NOT call `assembly daemon reload` from inside a deploy
+// worker running under a systemd-managed daemon. Reload's handoff design
+// (old daemon spawns detached successor, exits 0) is incompatible with
+// `Type=simple`/`Restart=on-failure`: systemd sees a clean MainPID exit,
+// marks the service deactivated, and the detached successor — not tracked
+// as MainPID — gets killed when its grandparent shell exits. Verified
+// outage on 2026-05-19 23:38.
+//
+// Station scripts (this file, plan/develop/deploy AGENT.md, etc.) are read
+// off disk per task invocation, so changes to those land immediately on
+// the next task. For changes to daemon code itself (orchestrator, runner,
+// queue, etc.), a manual `systemctl restart assembly` is required.
+// `daemon_reloaded` stays false to signal that.
 
-const dashboardService = process.env.ASSEMBLY_DASHBOARD_SERVICE;
+const dashboardService = process.env.ASSEMBLY_DASHBOARD_SERVICE ?? "assembly-dashboard";
 let dashboardRestarted = false;
-if (dashboardService) {
+{
   const rcR = spawnSync("systemctl", ["restart", dashboardService], { encoding: "utf-8" });
   const activeR = spawnSync("systemctl", ["is-active", dashboardService], { encoding: "utf-8" });
   dashboardRestarted = (activeR.stdout ?? "").trim() === "active";
   if (!dashboardRestarted) {
     log(`dashboard restart failed or not active (non-fatal): rc=${rcR.status} active=${(activeR.stdout ?? "").trim()}`);
+  } else {
+    log(`dashboard restarted (${dashboardService})`);
   }
-} else {
-  log("ASSEMBLY_DASHBOARD_SERVICE not set; skipping dashboard restart");
 }
+
+const daemonReloaded = false;
 
 // ─── 7. Emit envelope ─────────────────────────────────────────────────
 
@@ -370,6 +391,7 @@ emit({
     `Pushed to origin; remote_sha=${remoteSha}.`,
     `worktree_cleaned=${worktreeCleaned}`,
     `dashboard_restarted=${dashboardRestarted}`,
+    `daemon_reloaded=${daemonReloaded}`,
   ].join("\n"),
   data: {
     merged: true,
@@ -377,6 +399,7 @@ emit({
     pushed: true,
     worktree_cleaned: worktreeCleaned,
     dashboard_restarted: dashboardRestarted,
+    daemon_reloaded: daemonReloaded,
     conflicts: [],
   },
 });

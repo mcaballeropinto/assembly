@@ -12,6 +12,7 @@ guardrails:
         pushed: boolean
         worktree_cleaned: boolean
         dashboard_restarted: boolean
+        daemon_reloaded: boolean
 ---
 
 > **Note**: This station is now a deterministic script (`deploy.ts`), not an LLM agent.
@@ -95,13 +96,22 @@ git -C ${ASSEMBLY_REPO_ROOT} branch -d {develop.data.branch_name}
 # set worktree_cleaned: false but does NOT fail the station — the merge is done.
 ```
 
-### 5. Restart Dashboard
+### 5. Reload Live Services With New Build
 
 ```bash
+# Dashboard: clean restart picks up the new bundle on next ExecStart.
 systemctl restart assembly-dashboard 2>/dev/null || true
 sleep 1
 systemctl is-active assembly-dashboard || echo "assembly-dashboard not active"
 ```
+
+**Daemon (intentionally not reloaded):** `assembly daemon reload` is incompatible
+with the production `assembly.service` unit (`Type=simple`, `Restart=on-failure`)
+— the old daemon exits cleanly mid-handoff, systemd marks the unit deactivated,
+and the detached successor isn't tracked as MainPID. For changes to daemon code
+itself (orchestrator, runner, queue, etc.), require a manual `systemctl restart
+assembly`. Station scripts are read off disk per invocation, so AGENT.md /
+station code changes land immediately on the next task without any reload.
 
 ### 6. Final Verification
 
@@ -127,4 +137,5 @@ Return JSON with:
   - `pushed`: Boolean — did `git push origin main` succeed and the remote match the local SHA?
   - `worktree_cleaned`: Boolean — worktree removed AND branch deleted.
   - `dashboard_restarted`: Boolean — is `assembly-dashboard.service` now active?
+  - `daemon_reloaded`: Boolean — did `assembly daemon reload` complete (successor adopted workers and took the PID file)?
   - `conflicts`: Array of conflicting files if the merge failed, empty array otherwise.
