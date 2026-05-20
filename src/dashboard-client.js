@@ -775,9 +775,9 @@
     var html = '';
     for (var i = 0; i < metrics.tiles.length; i++) {
       var tile = metrics.tiles[i];
-      html += '<div class="flow-metric-tile" title="' + escapeHtml(tile.explanation) + '">';
-      html += '<div class="metric-label">' + escapeHtml(tile.label) + '</div>';
-      html += '<div class="metric-value">' + escapeHtml(tile.value) + '</div>';
+      html += '<div class="flow-metric-tile" title="' + esc(tile.explanation) + '">';
+      html += '<div class="metric-label">' + esc(tile.label) + '</div>';
+      html += '<div class="metric-value">' + esc(tile.value) + '</div>';
       html += '<div class="metric-context">';
 
       // Sparkline for throughput
