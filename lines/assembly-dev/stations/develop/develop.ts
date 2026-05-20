@@ -14,7 +14,8 @@
  *   stderr  — progress log (tee'd into activity via section-worker stderr capture)
  *   exit 0  — envelope written; non-zero = failure, stderr surfaced to caller
  */
-import { readFileSync, existsSync, statSync } from "fs";
+import { readFileSync, existsSync, statSync, unlinkSync } from "fs";
+import { resolve as resolvePath } from "path";
 import { spawnSync } from "child_process";
 
 const REPO = process.env.ASSEMBLY_REPO_ROOT;
@@ -158,6 +159,8 @@ const impl = (plan.implementation_steps ?? []) as Array<{
   details?: string;
 }>;
 
+const envelopePath = resolvePath(wt, ".envelope.json");
+
 const systemPrompt = `You are a senior developer implementing a plan inside an Assembly framework worktree.
 
 ## Your cwd IS the worktree
@@ -170,8 +173,12 @@ const systemPrompt = `You are a senior developer implementing a plan inside an A
 ## Your job
 Read the plan, implement it inside the current directory, run \`bun test\` until it passes. That is all.
 
-## When you finish
-Your entire final assistant response MUST be a single JSON object with exactly these fields:
+## Envelope file — REQUIRED, this is how you report results
+Before you finish, you MUST use the Write tool to create this file:
+
+  ${envelopePath}
+
+The file MUST contain a single JSON object with exactly these fields:
 
 {
   "summary": "<one-line changelog>",
@@ -184,7 +191,12 @@ Your entire final assistant response MUST be a single JSON object with exactly t
   }
 }
 
-No preamble, no code fences, no trailing text. Tool output does not count — only your final assistant message.`;
+The harness reads this file after you exit. Without it, the station fails with no
+parseable envelope and the work is discarded. Your final assistant message can
+say anything — only the file matters. If you ran out of room mid-task, still
+write the envelope describing what you DID change (so the harness sees a real
+diff with a matching file list); the deploy step will fail on test failures and
+the orchestrator will retry develop with feedback.`;
 
 // Prior eval feedback — set by the runner when retrying develop after eval
 // rejected the previous attempt (usually because tests failed). Read from the
@@ -222,7 +234,7 @@ const userMsg = [
   ),
   ``,
   dashboardAffected
-    ? `# Dashboard affected\nYes. After you change dashboard-related files, run \`bun run src/cli.ts dashboard --port 4199 &\` briefly to confirm it starts without errors. Kill it when done.`
+    ? `# Dashboard affected\nYes — but DO NOT start, stop, restart, or signal any \`assembly\` service, dashboard, or daemon. The dashboard and daemon both run from the same source tree as this worktree, and the production dashboard owns \`~/.assembly/dashboard.pid\`; spinning up another \`bun run src/cli.ts dashboard\` (even on a different --port) collides with that file and kills the live service. The deploy station restarts the dashboard and reloads the daemon with the new build after merge — that is the only path. Limit yourself to \`bun test\` and static checks.`
     : `# Dashboard affected\nNo.`,
   ``,
   pendingFeedback ?? "",
@@ -234,7 +246,13 @@ if (pendingFeedback) {
 
 // ─── Spawn claude with cwd=worktree ───────────────────────────────────
 
-log(`spawning claude cwd=${wt} model=${MODEL}`);
+// Clear any stale envelope from a prior failed run in this worktree —
+// otherwise we'd read the old agent's output and skip the live one's failure.
+if (existsSync(envelopePath)) {
+  try { unlinkSync(envelopePath); } catch {}
+}
+
+log(`spawning claude cwd=${wt} model=${MODEL} envelope=${envelopePath}`);
 
 const claudeArgs = [
   "-p",
@@ -263,8 +281,9 @@ const payload = JSON.stringify({
 proc.stdin.write(payload);
 await proc.stdin.end();
 
-// Stream stdout, extract final "result" event
-let finalResult = "";
+// Stream stdout for tool-use logs only — the envelope comes from the file,
+// not from the model's final assistant turn. We still read stdout to drain
+// the pipe (otherwise the child blocks on backpressure).
 let buffer = "";
 const stdoutReader = proc.stdout.getReader();
 const dec = new TextDecoder();
@@ -279,10 +298,6 @@ while (true) {
     if (!line.trim()) continue;
     try {
       const ev = JSON.parse(line);
-      if (ev.type === "result" && typeof ev.result === "string") {
-        finalResult = ev.result;
-      }
-      // Tee a compact progress line to stderr
       if (ev.type === "assistant" && ev.message?.content) {
         for (const block of ev.message.content) {
           if (block.type === "tool_use") {
@@ -306,31 +321,79 @@ if (exitCode !== 0) {
   );
 }
 
-// ─── Parse agent envelope ─────────────────────────────────────────────
+// ─── Load + validate agent envelope (file-based handoff) ──────────────
+//
+// We don't trust the model's final assistant turn to be valid JSON — it
+// drifts to "Implementation attempted" defaults when context runs low,
+// when tool output bleeds into the final message, or when the model
+// produces prose-then-JSON. Instead the system prompt instructs the agent
+// to Write the envelope to a known file path; we read it here.
+//
+// Every failure path is a hardFail (not a silent default) so the
+// orchestrator retries with feedback rather than feeding garbage into
+// Gate 0 and downstream stations.
 
-let agentEnv: any = null;
-if (finalResult) {
-  const cleaned = finalResult.trim();
-  // Try direct parse, then fenced, then first-brace-to-last-brace
-  const attempts: string[] = [cleaned];
-  const fence = cleaned.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
-  if (fence) attempts.push(fence[1].trim());
-  const i0 = cleaned.indexOf("{");
-  const i1 = cleaned.lastIndexOf("}");
-  if (i0 !== -1 && i1 > i0) attempts.push(cleaned.slice(i0, i1 + 1));
-  for (const a of attempts) {
-    try {
-      agentEnv = JSON.parse(a);
-      break;
-    } catch {
-      /* try next */
-    }
-  }
+if (!existsSync(envelopePath)) {
+  hardFail(
+    "agent did not write the envelope file",
+    `expected at ${envelopePath}\n` +
+      `The agent finished without using Write to create the envelope. ` +
+      `Either context exhausted before it got to that step, or it ignored ` +
+      `the instruction. Stderr tail:\n${stderrText.slice(-1500)}`
+  );
 }
 
-const agentSummary: string = agentEnv?.summary ?? "Implementation attempted";
-const agentContent: string = agentEnv?.content ?? finalResult.slice(0, 4000);
-const agentData = (agentEnv?.data ?? {}) as Record<string, unknown>;
+let envelopeRaw: string;
+try {
+  envelopeRaw = readFileSync(envelopePath, "utf-8");
+} catch (e) {
+  hardFail("envelope file unreadable", `${envelopePath}\n${String(e)}`);
+}
+
+let agentEnv: any;
+try {
+  agentEnv = JSON.parse(envelopeRaw);
+} catch (e) {
+  hardFail(
+    "envelope file is not valid JSON",
+    `${envelopePath}\n${String(e)}\n--- first 2000 bytes ---\n${envelopeRaw.slice(0, 2000)}`
+  );
+}
+
+if (!agentEnv || typeof agentEnv !== "object" || Array.isArray(agentEnv)) {
+  hardFail(
+    "envelope is not a JSON object",
+    `${envelopePath} parsed to: ${typeof agentEnv} (${Array.isArray(agentEnv) ? "array" : "non-object"})`
+  );
+}
+
+const agentSummary = typeof agentEnv.summary === "string" ? agentEnv.summary : "";
+const agentContent = typeof agentEnv.content === "string" ? agentEnv.content : "";
+const agentData = (agentEnv.data && typeof agentEnv.data === "object" && !Array.isArray(agentEnv.data))
+  ? (agentEnv.data as Record<string, unknown>)
+  : null;
+
+if (!agentSummary.trim()) {
+  hardFail("envelope.summary is missing or empty", `${envelopePath}`);
+}
+if (!agentData) {
+  hardFail("envelope.data is missing or not an object", `${envelopePath}`);
+}
+if (!Array.isArray(agentData.files_changed)) {
+  hardFail(
+    "envelope.data.files_changed must be an array",
+    `got: ${JSON.stringify(agentData.files_changed)}`
+  );
+}
+if (!Array.isArray(agentData.files_created)) {
+  hardFail(
+    "envelope.data.files_created must be an array",
+    `got: ${JSON.stringify(agentData.files_created)}`
+  );
+}
+
+// Remove the envelope so it doesn't get staged into the commit by `git add -A`.
+try { unlinkSync(envelopePath); } catch {}
 
 // ─── Verify there are actual changes in the worktree ──────────────────
 
@@ -378,6 +441,58 @@ const diffR = spawnSync(
 const diffText = diffR.stdout ?? "";
 
 log(`safety gates: ${changedFiles.length} changed files, ${diffText.length} bytes of diff`);
+
+// ── Gate 0: Envelope ↔ diff scope cross-check ────────────────────────
+//
+// Catches "agent lied about scope" envelopes — e.g. summary "Implementation
+// attempted" with `files_changed: []` / `files_created: []` while the
+// worktree actually has hundreds of lines deleted across multiple files.
+// Real failure observed 2026-05-19: agent gutted ~800 lines of dashboard
+// code, claimed no files changed, deploy almost merged it. Only an unrelated
+// flaky test held the line.
+//
+// We require the envelope's claimed file set to be non-empty AND to roughly
+// match the actual diff. "Roughly" = the agent must claim at least one of
+// the actually-changed files. We're lenient on extras because plan-alignment
+// gate (Gate 3) handles the strict ⊆ check.
+{
+  const claimedChanged = Array.isArray(agentData.files_changed) ? (agentData.files_changed as unknown[]).filter((s): s is string => typeof s === "string") : [];
+  const claimedCreated = Array.isArray(agentData.files_created) ? (agentData.files_created as unknown[]).filter((s): s is string => typeof s === "string") : [];
+  const claimedAll = new Set<string>([...claimedChanged, ...claimedCreated]);
+
+  if (changedFiles.length > 0 && claimedAll.size === 0) {
+    hardFail(
+      "agent envelope claims no files changed but worktree has real diff",
+      [
+        `agent_summary=${agentSummary}`,
+        `envelope.files_changed=${JSON.stringify(claimedChanged)}`,
+        `envelope.files_created=${JSON.stringify(claimedCreated)}`,
+        `actual changed files (${changedFiles.length}):`,
+        ...changedFiles.slice(0, 30).map((f) => `  ${f}`),
+        changedFiles.length > 30 ? `  ... and ${changedFiles.length - 30} more` : "",
+      ].filter(Boolean).join("\n")
+    );
+  }
+
+  // Belt-and-suspenders: at least one claimed path must exist in the actual
+  // diff. An agent that fabricates a totally unrelated file list is also bad
+  // news. We compare basenames to tolerate path-normalization differences.
+  if (changedFiles.length > 0 && claimedAll.size > 0) {
+    const actualBasenames = new Set(changedFiles.map((f) => f.split("/").pop()!));
+    const claimedBasenames = [...claimedAll].map((f) => f.split("/").pop()!);
+    const overlap = claimedBasenames.some((b) => actualBasenames.has(b));
+    if (!overlap) {
+      hardFail(
+        "agent envelope file list does not overlap with actual diff",
+        [
+          `envelope.files_changed+files_created=${JSON.stringify([...claimedAll])}`,
+          `actual changed files (${changedFiles.length}):`,
+          ...changedFiles.slice(0, 30).map((f) => `  ${f}`),
+        ].join("\n")
+      );
+    }
+  }
+}
 
 // ── Gate 1: Path blocklist ───────────────────────────────────────────
 const BLOCKED_PATH_PATTERNS: Array<{ re: RegExp; reason: string }> = [
