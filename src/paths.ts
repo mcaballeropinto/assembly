@@ -11,7 +11,21 @@ import YAML from "yaml";
  * Explicit: full path to a line   (direct reference)
  */
 
-export const ASSEMBLY_HOME = resolve(homedir(), ".assembly");
+/**
+ * Root directory for runtime state (PID files, handoff state, usage snapshots,
+ * `~/.assembly/lines/`, etc).
+ *
+ * Honors `ASSEMBLY_HOME` env var so tests can point at a tmp directory without
+ * polluting the real `~/.assembly/` — the previous test pattern (mutate
+ * `$HOME` + `delete require.cache[...]`) silently no-oped under Bun's module
+ * loader and was writing fictional handoff state into production paths.
+ *
+ * Captured once at module load. Mid-process changes to `process.env.ASSEMBLY_HOME`
+ * are NOT picked up — point at a fresh dir before the first import.
+ */
+export const ASSEMBLY_HOME = resolve(
+  process.env.ASSEMBLY_HOME ?? resolve(homedir(), ".assembly")
+);
 export const GLOBAL_LINES_DIR = resolve(ASSEMBLY_HOME, "lines");
 export const GLOBAL_STATIONS_DIR = resolve(ASSEMBLY_HOME, "stations");
 export const GLOBAL_RUNS_DIR = resolve(ASSEMBLY_HOME, "runs");

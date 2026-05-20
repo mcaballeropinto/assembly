@@ -1,30 +1,36 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { resolve } from "path";
-import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
+import { existsSync, writeFileSync, readdirSync, unlinkSync, mkdirSync, rmSync } from "fs";
 import {
   HANDOFF_VERSION,
+  handoffPathForPid,
+  writeHandoffState,
+  findLatestHandoff,
+  consumeHandoffState,
+  isPidAlive,
   type HandoffState,
 } from "../handoff";
+import { ASSEMBLY_HOME } from "../paths";
 
-// We rewrite ASSEMBLY_HOME for the duration of these tests so we don't
-// trample a real handoff file on the developer's box.
-const originalHome = process.env.HOME;
-let testHome: string;
+// `ASSEMBLY_HOME` is pinned to /tmp/assembly-test-home-<pid> by the preload at
+// src/__tests__/setup.ts (configured in bunfig.toml). We clear handoff-*.json
+// files between tests so order doesn't matter; the directory itself is shared
+// across tests in this file and across all test files in this process.
+function clearHandoffFiles() {
+  if (!existsSync(ASSEMBLY_HOME)) return;
+  for (const f of readdirSync(ASSEMBLY_HOME)) {
+    if (f.startsWith("handoff-") && f.endsWith(".json")) {
+      try { unlinkSync(resolve(ASSEMBLY_HOME, f)); } catch {}
+    }
+  }
+}
 
-beforeEach(async () => {
-  testHome = resolve("/tmp", `assembly-test-handoff-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(resolve(testHome, ".assembly"), { recursive: true });
-  process.env.HOME = testHome;
-  // paths.ts captures ASSEMBLY_HOME at import time from os.homedir() which
-  // reads $HOME on Linux. We need a fresh module each test.
-  delete require.cache[require.resolve("../paths")];
-  delete require.cache[require.resolve("../handoff")];
+beforeEach(() => {
+  clearHandoffFiles();
 });
 
 afterEach(() => {
-  try { rmSync(testHome, { recursive: true, force: true }); } catch {}
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
+  clearHandoffFiles();
 });
 
 function makeState(pid: number, extra: Partial<HandoffState> = {}): HandoffState {
@@ -40,7 +46,6 @@ function makeState(pid: number, extra: Partial<HandoffState> = {}): HandoffState
 
 describe("handoff state file", () => {
   test("writeHandoffState round-trips through findLatestHandoff", () => {
-    const handoffMod = require("../handoff") as typeof import("../handoff");
     const state = makeState(12345, {
       workers: [{
         pid: 99999,
@@ -62,9 +67,9 @@ describe("handoff state file", () => {
         usage_paused: false,
       }],
     });
-    handoffMod.writeHandoffState(state);
+    writeHandoffState(state);
 
-    const loaded = handoffMod.findLatestHandoff();
+    const loaded = findLatestHandoff();
     expect(loaded).not.toBeNull();
     expect(loaded!.state.old_pid).toBe(12345);
     expect(loaded!.state.workers.length).toBe(1);
@@ -73,43 +78,39 @@ describe("handoff state file", () => {
   });
 
   test("findLatestHandoff picks the newest file when multiple exist", async () => {
-    const handoffMod = require("../handoff") as typeof import("../handoff");
-    handoffMod.writeHandoffState(makeState(111));
+    writeHandoffState(makeState(111));
     // small sleep to give mtime resolution
     await new Promise((r) => setTimeout(r, 30));
-    handoffMod.writeHandoffState(makeState(222));
-    const loaded = handoffMod.findLatestHandoff();
+    writeHandoffState(makeState(222));
+    const loaded = findLatestHandoff();
     expect(loaded!.state.old_pid).toBe(222);
   });
 
   test("findLatestHandoff rejects unknown version", () => {
-    const handoffMod = require("../handoff") as typeof import("../handoff");
-    const path = handoffMod.handoffPathForPid(333);
+    const path = handoffPathForPid(333);
     // Hand-write an unknown version so we don't accidentally invoke the
     // version-bump path.
     writeFileSync(path, JSON.stringify({ version: 999, old_pid: 333, workers: [], lines: [] }));
-    expect(handoffMod.findLatestHandoff()).toBeNull();
+    expect(findLatestHandoff()).toBeNull();
   });
 
   test("consumeHandoffState removes the file", () => {
-    const handoffMod = require("../handoff") as typeof import("../handoff");
-    const path = handoffMod.writeHandoffState(makeState(444));
+    const path = writeHandoffState(makeState(444));
     expect(existsSync(path)).toBe(true);
-    handoffMod.consumeHandoffState(path);
+    consumeHandoffState(path);
     expect(existsSync(path)).toBe(false);
   });
 
   test("isPidAlive returns true for our own pid, false for pid 1 and a definitely-dead pid", () => {
-    const handoffMod = require("../handoff") as typeof import("../handoff");
-    expect(handoffMod.isPidAlive(process.pid)).toBe(true);
+    expect(isPidAlive(process.pid)).toBe(true);
     // pid 1 is init — treated as not-adoptable by isPidAlive guard.
-    expect(handoffMod.isPidAlive(1)).toBe(false);
-    expect(handoffMod.isPidAlive(0)).toBe(false);
+    expect(isPidAlive(1)).toBe(false);
+    expect(isPidAlive(0)).toBe(false);
     // A pid that's almost certainly unused. If by cosmic luck this is in use,
     // we re-roll once.
     let dead = 2147483647;
-    if (handoffMod.isPidAlive(dead)) dead = 2147483646;
-    expect(handoffMod.isPidAlive(dead)).toBe(false);
+    if (isPidAlive(dead)) dead = 2147483646;
+    expect(isPidAlive(dead)).toBe(false);
   });
 });
 

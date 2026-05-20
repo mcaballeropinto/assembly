@@ -116,6 +116,12 @@ afterEach(async () => {
 function sandboxedEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: testHome, ASSEMBLY_DISABLE_USAGE_GATE: "1" };
   delete env.ASSEMBLY_LINE_DIRS;
+  // The test-runner preload sets ASSEMBLY_HOME to /tmp/assembly-test-home-<pid>
+  // for isolation. Subprocesses inherit it via {...process.env, ...}, which
+  // would point the spawned daemon at the WRONG runtime dir — testHome is what
+  // this test set up. Clear it so the daemon falls back to homedir()/.assembly,
+  // which under HOME=testHome resolves to testHome/.assembly.
+  delete env.ASSEMBLY_HOME;
   return env;
 }
 
