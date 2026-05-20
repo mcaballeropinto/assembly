@@ -670,26 +670,38 @@ const planCreate: string[] = Array.isArray(plan.files_to_create) ? plan.files_to
 const planSet = new Set<string>([...planChange, ...planCreate]);
 
 if (planSet.size > 0) {
+  // Whether the plan touches anything under src/ — if it does, tests in
+  // src/__tests__/ are presumed-related and allowed without needing a
+  // stem match. Tests in this repo cross-cut multiple src/ files (e.g.
+  // dashboard-morph.test.ts exercises behavior that lives in
+  // dashboard-client.js + global-dashboard.ts), so requiring an exact
+  // stem pair was too strict and forced retries on legitimate work.
+  const planTouchesSrc = [...planSet].some((p) => /^src\//.test(p));
+
   function isAllowed(path: string): boolean {
     if (planSet.has(path)) return true;
-    // Allow test files paired with planned source files:
-    //   src/foo.ts → src/__tests__/foo.test.ts (and similar)
-    const testFor = (p: string) => {
-      const m = p.match(/^src\/(.+)\.ts$/);
-      if (!m) return [];
-      const stem = m[1];
-      return [
-        `src/__tests__/${stem}.test.ts`,
-        `src/__tests__/${stem}-${"".padEnd(0)}.test.ts`,
-      ];
+
+    // Direct stem pair: src/foo.{ts,js} → src/__tests__/foo.test.ts
+    const stemPairFor = (p: string) => {
+      const m = p.match(/^src\/(.+)\.(?:ts|tsx|js|jsx)$/);
+      if (!m) return null;
+      return `src/__tests__/${m[1]}.test.ts`;
     };
     for (const planned of planSet) {
-      for (const t of testFor(planned)) {
-        if (path === t) return true;
-      }
+      const t = stemPairFor(planned);
+      if (t && path === t) return true;
     }
-    // Allow co-located tests in the same folder.
-    const colocated = path.match(/^(.*)\/[^/]+\.test\.ts$/);
+
+    // Any src/__tests__/*.test.ts is allowed if the plan touches src/ at all.
+    // Tests in this repo cross-reference multiple src files; an exact-stem
+    // requirement causes false-positive off-plan failures on legitimate work.
+    if (planTouchesSrc && /^src\/__tests__\/.+\.test\.(?:ts|tsx|js|jsx)$/.test(path)) {
+      return true;
+    }
+
+    // Co-located test files: src/foo/bar/baz.test.ts allowed if any planned
+    // file is in the same folder (e.g. src/foo/bar/anything.ts).
+    const colocated = path.match(/^(.*)\/[^/]+\.test\.(?:ts|tsx|js|jsx)$/);
     if (colocated) {
       const folder = colocated[1];
       for (const planned of planSet) {
