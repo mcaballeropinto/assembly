@@ -790,34 +790,52 @@ if (installR.status !== 0) {
   );
 }
 
-// ── Gate 4: Typecheck ────────────────────────────────────────────────
+// ── Gate 4: Typecheck (soft — failure routes through eval retry) ────
+//
+// Typecheck and lint were hardFails until 2026-05-21. That made them
+// crash-class failures that the orchestrator retried by re-spawning
+// develop with NO feedback to the agent — the agent re-ran with the
+// same file state and produced the same code, looping until max
+// retries. We now capture the failure into the envelope so eval.ts
+// can emit action:retry with the actual error text as feedback,
+// which develop.ts threads back into the agent's prompt on next run.
 log(`bun run typecheck`);
 const tscR = spawnSync("bun", ["run", "typecheck"], {
   cwd: wt,
   encoding: "utf-8",
   timeout: 120_000,
 });
-if (tscR.status !== 0) {
-  const tail = ((tscR.stdout ?? "") + "\n" + (tscR.stderr ?? "")).slice(-3000);
-  hardFail(
-    `typecheck failed (exit ${tscR.status})`,
-    `branch=${branch} worktree=${wtRoot}\n${tail}`
-  );
+const typecheckPassed = tscR.status === 0;
+const typecheckOutput = typecheckPassed
+  ? ""
+  : ((tscR.stdout ?? "") + "\n" + (tscR.stderr ?? "")).slice(-3000);
+if (!typecheckPassed) {
+  log(`typecheck failed (exit ${tscR.status}) — deferring to eval for retry-with-feedback`);
 }
 
-// ── Gate 5: Lint ─────────────────────────────────────────────────────
+// ── Gate 5a: Auto-fix what's auto-fixable ────────────────────────────
+//
+// Run eslint --fix BEFORE the lint check. Trivial issues like unused
+// imports, missing semicolons, or stale formatting are stamped out
+// automatically — no agent retry needed. After fix, re-stage so any
+// fix-touched files land in the upcoming commit.
+log(`bun run lint:fix (auto-fix trivially-fixable issues)`);
+spawnSync("bun", ["run", "lint:fix"], { cwd: wt, encoding: "utf-8", timeout: 120_000 });
+spawnSync("git", ["-C", wtRoot, "add", "-A"], { encoding: "utf-8" });
+
+// ── Gate 5b: Lint (soft — failure routes through eval retry) ────────
 log(`bun run lint`);
 const lintR = spawnSync("bun", ["run", "lint"], {
   cwd: wt,
   encoding: "utf-8",
   timeout: 120_000,
 });
-if (lintR.status !== 0) {
-  const tail = ((lintR.stdout ?? "") + "\n" + (lintR.stderr ?? "")).slice(-3000);
-  hardFail(
-    `lint failed (exit ${lintR.status})`,
-    `branch=${branch} worktree=${wtRoot}\n${tail}`
-  );
+const lintPassed = lintR.status === 0;
+const lintOutput = lintPassed
+  ? ""
+  : ((lintR.stdout ?? "") + "\n" + (lintR.stderr ?? "")).slice(-3000);
+if (!lintPassed) {
+  log(`lint failed (exit ${lintR.status}) — deferring to eval for retry-with-feedback`);
 }
 
 // ─── Run tests ────────────────────────────────────────────────────────
@@ -832,8 +850,12 @@ if (!testsPassed) {
 
 // ─── Commit ───────────────────────────────────────────────────────────
 
+// Re-check porcelain — eslint --fix above may have modified files.
+const porcelainAfterFix = (spawnSync("git", ["-C", wtRoot, "status", "--porcelain"], { encoding: "utf-8" }).stdout ?? "").trim();
+const hasUncommitted = !!porcelainAfterFix;
+
 let commitSha = "";
-if (porcelain) {
+if (hasUncommitted) {
   log(`committing staged changes (already staged by safety gates)`);
   const msg = `feat(assembly): ${agentSummary.slice(0, 100)}\n\nAutomated commit by develop station for workpiece ${wpId}.`;
   const commitR = spawnSync(
@@ -866,19 +888,13 @@ if (!(aheadR.stdout ?? "").trim()) {
   );
 }
 
-// ─── Gate on tests ────────────────────────────────────────────────────
-
-// Develop owns the "tests pass before we hand off" contract. A test failure
-// is a real failure of the station — we hard-fail (exit 1) so the orchestrator
-// marks the station failed and skips eval + deploy. The inner agent is
-// responsible for writing code that passes; if it didn't, this attempt is
-// done and the orchestrator's retry policy (crash class) decides whether to
-// re-run develop from scratch.
+// Test failures are no longer hardFailed here — they route through eval
+// like lint and typecheck (above), so the next develop attempt sees the
+// failing test output as agent feedback. eval.ts re-runs the suite and
+// emits action:retry with the output when any of {tests, typecheck,
+// lint} are failing.
 if (!testsPassed) {
-  hardFail(
-    `tests failed (exit ${testR.status})`,
-    `branch=${branch} commit=${commitSha.slice(0, 8)} worktree=${wtRoot}\n${testOut}`
-  );
+  log(`tests failed (exit ${testR.status}) — deferring to eval for retry-with-feedback`);
 }
 
 // ─── Emit envelope ────────────────────────────────────────────────────
@@ -897,5 +913,10 @@ emit({
     tests_passed: testsPassed,
     test_output: testOut,
     commit_sha: commitSha,
+    // Quality-gate results — surfaced for eval.ts to decide retry vs pass.
+    typecheck_passed: typecheckPassed,
+    typecheck_output: typecheckOutput,
+    lint_passed: lintPassed,
+    lint_output: lintOutput,
   },
 });

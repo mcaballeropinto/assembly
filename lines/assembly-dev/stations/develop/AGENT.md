@@ -14,6 +14,10 @@ guardrails:
         tests_passed: boolean
         test_output: string
         commit_sha: string
+        typecheck_passed: boolean
+        typecheck_output: string
+        lint_passed: boolean
+        lint_output: string
 ---
 
 # Develop Station — Assembly Dev Line (scripted)

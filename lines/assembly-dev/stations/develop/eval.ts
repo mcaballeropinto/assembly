@@ -1,21 +1,30 @@
 #!/usr/bin/env bun
 /**
- * Develop station eval — runs tests in the worktree and reports pass/fail.
+ * Develop station eval — re-checks quality gates against the just-produced
+ * envelope and signals retry-with-feedback when any of {typecheck, lint,
+ * tests} are failing.
  *
- * Called by runner.ts / section-worker.ts when `eval.provider: script` is
- * configured on the station. The contract:
- *   argv[1] — path to a workpiece JSON that includes the just-produced
- *             envelope under workpiece.stations.develop (as if it had been
- *             written normally).
- *   stdout  — one-line JSON matching EvalResult: { pass, feedback, action?, score? }
- *   exit 0  — envelope written (eval completed — pass or fail is in the JSON)
+ * Contract:
+ *   argv[1] — path to workpiece JSON (envelope under workpiece.stations.develop)
+ *   stdout  — JSON { pass, feedback, action?, score? }
+ *   exit 0  — eval completed (pass or fail is in the JSON)
  *   non-zero — eval infrastructure itself broke; runner treats as pass+warn
  *
- * Philosophy: develop itself already runs `bun test` and hard-fails when tests
- * don't pass. This eval is a belt-and-suspenders second check — it runs tests
- * again from the merge target's perspective and catches regressions that
- * passed-in-isolation but conflict with main. On test failure it sets
- * action=retry so the runner re-invokes develop with the failure as feedback.
+ * Develop produces quality results in its envelope:
+ *   typecheck_passed / typecheck_output
+ *   lint_passed     / lint_output
+ *   tests_passed    / test_output
+ *
+ * Eval treats those as authoritative for typecheck + lint (develop ran them
+ * milliseconds ago in the worktree). For tests we ALSO re-run independently
+ * — that's the original belt-and-suspenders the eval was written for, and
+ * it catches "passes-in-isolation but breaks under different load/order"
+ * regressions.
+ *
+ * On ANY failure: action:retry, feedback = concatenated outputs. The runner
+ * threads feedback into the next develop attempt via _pending_eval_feedback,
+ * and develop.ts puts it in the agent's user message so the agent sees
+ * exactly what to fix.
  */
 import { readFileSync, existsSync } from "fs";
 import { spawnSync } from "child_process";
@@ -41,48 +50,70 @@ try {
 
 const dev = wp.stations?.develop?.data ?? {};
 const worktreePath: string | undefined = dev.worktree_path;
-const wtAssembly = worktreePath ? `${worktreePath}/assembly` : undefined;
 
-if (!wtAssembly || !existsSync(wtAssembly)) {
+// The worktree IS the assembly checkout — develop.ts sets worktree_path to
+// /tmp/assembly-dev/<wpId> directly, not /tmp/assembly-dev/<wpId>/assembly.
+// The previous "/assembly" suffix here always produced a missing-dir
+// retry loop that ate max_retries silently.
+if (!worktreePath || !existsSync(worktreePath)) {
   emit({
     pass: false,
-    feedback: `Worktree missing at ${wtAssembly ?? "(undefined)"} — develop's state is incomplete. Re-run develop to rebuild the worktree.`,
+    feedback: `Worktree missing at ${worktreePath ?? "(undefined)"} — develop's state is incomplete. Re-run develop to rebuild the worktree.`,
     action: "retry",
   });
 }
 
-process.stderr.write(`[develop-eval] running bun test in ${wtAssembly}\n`);
+// ── Collect quality failures from develop's envelope ───────────────
+const feedbackParts: string[] = [];
+
+if (dev.typecheck_passed === false) {
+  const out = typeof dev.typecheck_output === "string" ? dev.typecheck_output : "(no output captured)";
+  feedbackParts.push(`## Typecheck failed\n\n${out}`);
+}
+
+if (dev.lint_passed === false) {
+  const out = typeof dev.lint_output === "string" ? dev.lint_output : "(no output captured)";
+  feedbackParts.push(`## Lint failed (after auto-fix)\n\nThe \`bun run lint:fix\` step before this gate auto-fixes anything ESLint marks as fixable. The errors below remain after auto-fix — they need manual attention.\n\n${out}`);
+}
+
+// ── Re-run tests in the worktree (belt-and-suspenders + catches order-
+//    sensitivity regressions that develop's own run didn't hit). ────
+process.stderr.write(`[develop-eval] running bun test in ${worktreePath}\n`);
 const testR = spawnSync("bun", ["test"], {
-  cwd: wtAssembly,
+  cwd: worktreePath,
   encoding: "utf-8",
   timeout: 300_000,
 });
 const testOut = ((testR.stdout ?? "") + "\n" + (testR.stderr ?? "")).slice(-6000);
 
-// bun test can exit 0 yet still have failures reported in some modes; check
-// both the exit code and the fail/error summary markers.
 const failMatch = testOut.match(/(\d+)\s+fail\b/);
 const errorMatch = testOut.match(/(\d+)\s+errors?\b/);
+const passMatch = testOut.match(/(\d+)\s+pass\b/);
 const failCount = failMatch ? parseInt(failMatch[1], 10) : 0;
 const errorCount = errorMatch ? parseInt(errorMatch[1], 10) : 0;
-const passMatch = testOut.match(/(\d+)\s+pass\b/);
 const passCount = passMatch ? parseInt(passMatch[1], 10) : 0;
-const exitOk = testR.status === 0;
+const testsOk = testR.status === 0 && failCount === 0 && errorCount === 0;
 
-if (exitOk && failCount === 0 && errorCount === 0) {
+if (!testsOk) {
+  feedbackParts.push(
+    `## Tests failed in develop worktree\n\n` +
+      `bun test exit=${testR.status}, ${failCount} fail, ${errorCount} errors, ${passCount} pass.\n\n` +
+      `Test output (last 6k chars):\n\n${testOut}\n\n` +
+      `Fix the failing tests — read the output above, identify each failing assertion, and correct either the test or the implementation. Do not skip or delete failing tests unless the plan explicitly calls for it.`
+  );
+}
+
+if (feedbackParts.length === 0) {
   emit({
     pass: true,
-    feedback: `Tests pass in worktree: ${passCount} pass, 0 fail, 0 errors`,
+    feedback: `All quality gates pass: typecheck, lint, ${passCount} tests.`,
   });
 }
 
-// Tests failed — hand back the tail of the test output so develop's inner
-// agent can see exactly what to fix on retry.
 emit({
   pass: false,
   feedback:
-    `Tests failed in the develop worktree (bun test exit=${testR.status}, ${failCount} fail, ${errorCount} errors, ${passCount} pass).\n\n` +
-    `Test output (last 6k chars):\n\n${testOut}\n\n` +
-    `Fix the failing tests — read the output above carefully, identify each failing assertion, and correct either the test or the implementation. Do not skip or delete failing tests unless the plan explicitly calls for it.`,
+    `Develop produced code that doesn't pass all quality gates. Fix each issue below, then the orchestrator will re-run develop.\n\n` +
+    feedbackParts.join("\n\n---\n\n"),
   action: "retry",
 });
