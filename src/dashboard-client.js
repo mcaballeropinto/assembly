@@ -246,7 +246,7 @@
     html += '<div class="summary-bar">';
     html += metricCard('Lines', t.lines, '');
     html += metricCard('Running', t.linesRunning, 'running');
-    html += metricCard('Inbox', t.totalInbox, 'inbox');
+    html += metricCard('Incoming', t.totalInbox, 'inbox');
     html += metricCard('Done', t.totalDone, 'done');
     html += metricCard('Errors', t.totalErrors, 'error');
     html += metricCard('Review', t.totalReview || 0, 'review');
@@ -268,7 +268,7 @@
       if (line.state && line.state.lineQueue) {
         var lq = line.state.lineQueue;
         html += '<div class="line-metrics">';
-        html += 'inbox: ' + lq.inbox + ' \u00b7 done: ' + lq.done + ' \u00b7 errors: ' + (lq.errorActive != null ? lq.errorActive : lq.error) + ' \u00b7 review: ' + (lq.review || 0);
+        html += 'incoming: ' + lq.inbox + ' \u00b7 done: ' + lq.done + ' \u00b7 errors: ' + (lq.errorActive != null ? lq.errorActive : lq.error) + ' \u00b7 review: ' + (lq.review || 0);
         html += '</div>';
 
         if (line.state.sequence && line.state.sequence.length > 0) {

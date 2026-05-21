@@ -814,6 +814,7 @@ export interface KanbanCard {
 export interface KanbanColumn {
   key: string;
   title: string;
+  tooltip?: string;
   station?: string;
   lane?: KanbanLane;
   count: number;
@@ -1021,6 +1022,7 @@ export async function getKanbanState(
   columns.push({
     key: "held",
     title: "Held",
+    tooltip: "Tasks paused by the operator — release to move to Incoming",
     count: heldCards.length,
     cards: heldCards,
   });
@@ -1035,7 +1037,8 @@ export async function getKanbanState(
   );
   columns.push({
     key: "inbox",
-    title: "Inbox",
+    title: "Incoming",
+    tooltip: "Tasks enqueued to this line, not yet assigned to any station",
     count: inboxCards.length,
     cards: inboxCards,
   });
@@ -1066,7 +1069,8 @@ export async function getKanbanState(
     );
     columns.push({
       key: `${name}:inbox`,
-      title: "inbox",
+      title: "waiting",
+      tooltip: "Tasks assigned to this station, waiting for a worker slot",
       station: name,
       lane: "inbox",
       count: inbox.length,
@@ -1076,6 +1080,7 @@ export async function getKanbanState(
     columns.push({
       key: `${name}:processing`,
       title: "processing",
+      tooltip: "Tasks currently being processed by a worker",
       station: name,
       lane: "processing",
       count: processing.length,
@@ -1085,6 +1090,7 @@ export async function getKanbanState(
     columns.push({
       key: `${name}:output`,
       title: "output",
+      tooltip: "Completed station work, waiting to be routed forward",
       station: name,
       lane: "output",
       count: output.length,
@@ -1106,6 +1112,7 @@ export async function getKanbanState(
   columns.push({
     key: "done",
     title: "Done",
+    tooltip: "Tasks that completed all stations successfully",
     count: doneCards.length,
     cards: doneCards.slice(0, 10),
   });
@@ -1122,6 +1129,7 @@ export async function getKanbanState(
     columns.push({
       key: "review",
       title: "Review",
+      tooltip: "Tasks escalated for human review",
       count: reviewCards.length,
       cards: reviewCards,
     });
@@ -1136,6 +1144,7 @@ export async function getKanbanState(
     columns.push({
       key: "error",
       title: "Error",
+      tooltip: "Tasks that failed after exhausting retries",
       count: activeErrorCards.length,
       cards: activeErrorCards,
     });
