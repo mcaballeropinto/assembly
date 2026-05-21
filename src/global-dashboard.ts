@@ -997,6 +997,8 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-sm);
       background: var(--bg-base);
+      min-width: 0;
+      overflow: hidden;
     }
     .kanban-station-header {
       display: flex;
@@ -1022,6 +1024,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       display: flex;
       flex-direction: column;
       gap: 0;
+      min-width: 0;
     }
     .kanban-lane {
       display: flex;
