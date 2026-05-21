@@ -131,6 +131,55 @@ const wt = wtRoot;
 
 log(`worktree=${wtRoot} branch=${branch}`);
 
+// Auto-cleanup of stale worktrees holding the same branch.
+//
+// Plan generates content-based branch names (e.g. assembly-dev/station-
+// health-indicator), so retries of the same task — or re-runs of similar
+// tasks — try to claim a branch already checked out in a leftover
+// worktree from a prior failed run. `git worktree add` refuses with
+// "branch X is already used by worktree at Y". We auto-remove any such
+// orphan if its branch has NO commits ahead of main (i.e. the agent's
+// session produced no committed work — just transient edits that
+// already cost us a failed run). Worktrees with real ahead-of-main
+// commits are preserved and we hardFail so the operator can inspect.
+function findWorktreeForBranch(targetBranch: string): string | null {
+  const r = spawnSync("git", ["-C", REPO, "worktree", "list", "--porcelain"], { encoding: "utf-8" });
+  if (r.status !== 0) return null;
+  const blocks = (r.stdout ?? "").split("\n\n");
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    let path = "";
+    let br = "";
+    for (const line of lines) {
+      if (line.startsWith("worktree ")) path = line.slice("worktree ".length).trim();
+      else if (line.startsWith("branch ")) br = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "");
+    }
+    if (br === targetBranch && path !== wtRoot) return path;
+  }
+  return null;
+}
+
+const stalePath = findWorktreeForBranch(branch);
+if (stalePath) {
+  const aheadR = spawnSync("git", ["-C", REPO, "log", `main..${branch}`, "--oneline"], { encoding: "utf-8" });
+  const aheadOfMain = (aheadR.stdout ?? "").trim();
+  if (!aheadOfMain) {
+    log(`stale worktree at ${stalePath} holds branch ${branch} with no commits ahead of main — removing`);
+    spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", stalePath], { encoding: "utf-8" });
+    spawnSync("git", ["-C", REPO, "branch", "-D", branch], { encoding: "utf-8" });
+  } else {
+    hardFail(
+      "branch already checked out in another worktree with unmerged commits",
+      `branch=${branch} stale_worktree=${stalePath}\n` +
+        `That worktree has commits ahead of main — refusing to auto-remove.\n` +
+        `Inspect the commits there and either merge them, abandon the branch ` +
+        `(git -C ${REPO} worktree remove --force ${stalePath} && git -C ${REPO} branch -D ${branch}), ` +
+        `or pick a different branch name in the plan.\n` +
+        `Commits ahead of main:\n${aheadOfMain}`
+    );
+  }
+}
+
 if (!existsSync(wtRoot)) {
   const branchExists = spawnSync("git", ["-C", REPO, "rev-parse", "--verify", branch]).status === 0;
   const args = branchExists
