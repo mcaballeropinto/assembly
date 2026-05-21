@@ -1712,6 +1712,175 @@ describe("getKanbanState", () => {
     const uniqueTitles = new Set(topLevelTitles);
     expect(uniqueTitles.size).toBe(topLevelTitles.length);
   });
+
+  test("processing card has stationStartedAt from workpiece station result", async () => {
+    const dir = setupKanbanLine("kanban-timestamps");
+    const now = new Date();
+    const stationStarted = new Date(now.getTime() - 5 * 60 * 1000).toISOString(); // 5 minutes ago
+    const wpData = JSON.stringify({
+      id: "wp-ts-proc",
+      line: "kanban-timestamps",
+      task: "processing with timestamps",
+      input: {},
+      stations: {
+        "station-a": {
+          summary: "running",
+          status: "running",
+          started_at: stationStarted,
+          finished_at: "",
+          model: "test",
+          tokens: { in: 10, out: 5 },
+          cost_usd: 0.001,
+        },
+      },
+    });
+    writeFileSync(
+      resolve(dir, "stations", "station-a", "queue", "processing", "wp-ts-proc.json"),
+      wpData
+    );
+
+    const out = (await getKanbanState(dir)) as KanbanState;
+    const card = out.columns
+      .find((c) => c.key === "station-a:processing")!
+      .cards.find((x) => x.id === "wp-ts-proc")!;
+
+    expect(card.stationStartedAt).toBe(stationStarted);
+    expect(card.firstStationStartedAt).toBe(stationStarted);
+    expect(card.totalElapsedMs).toBeGreaterThan(0);
+    expect(card.totalElapsedMs).toBeLessThan(10 * 60 * 1000); // Less than 10 minutes
+  });
+
+  test("firstStationStartedAt is earliest across all stations", async () => {
+    const dir = setupKanbanLine("kanban-multi-station-ts");
+    const now = new Date();
+    const stationAStarted = new Date(now.getTime() - 10 * 60 * 1000).toISOString(); // 10 min ago
+    const stationBStarted = new Date(now.getTime() - 5 * 60 * 1000).toISOString();  // 5 min ago
+    const wpData = JSON.stringify({
+      id: "wp-multi-ts",
+      line: "kanban-multi-station-ts",
+      task: "multi-station with timestamps",
+      input: {},
+      stations: {
+        "station-a": {
+          summary: "completed",
+          status: "done",
+          started_at: stationAStarted,
+          finished_at: new Date(now.getTime() - 8 * 60 * 1000).toISOString(),
+          model: "test",
+          tokens: { in: 10, out: 5 },
+          cost_usd: 0.001,
+        },
+        "station-b": {
+          summary: "running",
+          status: "running",
+          started_at: stationBStarted,
+          finished_at: "",
+          model: "test",
+          tokens: { in: 10, out: 5 },
+          cost_usd: 0.001,
+        },
+      },
+    });
+    writeFileSync(
+      resolve(dir, "stations", "station-b", "queue", "processing", "wp-multi-ts.json"),
+      wpData
+    );
+
+    const out = (await getKanbanState(dir)) as KanbanState;
+    const card = out.columns
+      .find((c) => c.key === "station-b:processing")!
+      .cards.find((x) => x.id === "wp-multi-ts")!;
+
+    expect(card.stationStartedAt).toBe(stationBStarted); // Current station
+    expect(card.firstStationStartedAt).toBe(stationAStarted); // Earliest station
+    expect(card.totalElapsedMs).toBeGreaterThan(8 * 60 * 1000); // More than 8 minutes
+  });
+
+  test("inbox card without station result has no stationStartedAt", async () => {
+    const dir = setupKanbanLine("kanban-inbox-ts");
+    const wpData = JSON.stringify({
+      id: "wp-inbox-ts",
+      line: "kanban-inbox-ts",
+      task: "waiting in inbox",
+      input: {},
+      stations: {},
+    });
+    writeFileSync(
+      resolve(dir, "queues", "inbox", "wp-inbox-ts.json"),
+      wpData
+    );
+
+    const out = (await getKanbanState(dir)) as KanbanState;
+    const card = out.columns
+      .find((c) => c.key === "inbox")!
+      .cards.find((x) => x.id === "wp-inbox-ts")!;
+
+    expect(card.stationStartedAt).toBeUndefined();
+    expect(card.firstStationStartedAt).toBeUndefined();
+    expect(card.totalElapsedMs).toBeUndefined();
+    expect(card.enteredColumnAt).toBeTruthy(); // Still has file mtime
+  });
+
+  test("done card retains existing finished_at and duration_ms alongside new fields", async () => {
+    const dir = setupKanbanLine("kanban-done-ts");
+    const now = new Date();
+    const started = new Date(now.getTime() - 15 * 60 * 1000).toISOString(); // 15 min ago
+    const finished = new Date(now.getTime() - 5 * 60 * 1000).toISOString();  // 5 min ago
+    const wpData = JSON.stringify({
+      id: "wp-done-ts",
+      line: "kanban-done-ts",
+      task: "completed with timestamps",
+      input: {},
+      stations: {
+        "station-a": {
+          summary: "all done",
+          status: "done",
+          started_at: started,
+          finished_at: finished,
+          model: "test",
+          tokens: { in: 100, out: 50 },
+          cost_usd: 0.01,
+        },
+      },
+    });
+    writeFileSync(
+      resolve(dir, "queues", "done", "wp-done-ts.json"),
+      wpData
+    );
+
+    const out = (await getKanbanState(dir)) as KanbanState;
+    const card = out.columns
+      .find((c) => c.key === "done")!
+      .cards.find((x) => x.id === "wp-done-ts")!;
+
+    expect(card.finished_at).toBe(finished);
+    expect(card.duration_ms).toBe(10 * 60 * 1000); // 10 minutes
+    expect(card.firstStationStartedAt).toBe(started);
+    expect(card.totalElapsedMs).toBeGreaterThan(0);
+  });
+
+  test("backward compatibility — existing card fields unchanged", async () => {
+    const dir = setupKanbanLine("kanban-compat");
+    writeFileSync(
+      resolve(dir, "stations", "station-a", "queue", "processing", "wp-compat.json"),
+      makeWorkpiece("wp-compat", "compatibility test")
+    );
+
+    const out = (await getKanbanState(dir)) as KanbanState;
+    const card = out.columns
+      .find((c) => c.key === "station-a:processing")!
+      .cards.find((x) => x.id === "wp-compat")!;
+
+    // All existing fields should be present
+    expect(card.id).toBe("wp-compat");
+    expect(card.state).toBe("running");
+    expect(card.station).toBe("station-a");
+    expect(card.lane).toBe("processing");
+    expect(card.enteredColumnAt).toBeTruthy();
+    expect(card.title).toBe("compatibility test");
+    expect(card.column).toBe("station-a:processing");
+    expect(card.fileName).toBe("wp-compat.json");
+  });
 });
 
 describe("computeFlowMetrics", () => {

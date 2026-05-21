@@ -2479,6 +2479,43 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       return hours + 'h' + (remainMin > 0 ? ' ' + remainMin + 'm' : '');
     }
 
+    function buildCardDurationLabel(card) {
+      // Processing: time since station started processing
+      if (card.lane === 'processing' && card.stationStartedAt) {
+        return formatElapsedShort(card.stationStartedAt) + ' in ' + (card.station || '?');
+      }
+      // Station inbox: time waiting in station queue
+      if (card.lane === 'inbox' && card.station && card.enteredColumnAt) {
+        return formatElapsedShort(card.enteredColumnAt) + ' waiting';
+      }
+      // Station output: time since station completed
+      if (card.lane === 'output' && card.enteredColumnAt) {
+        return formatElapsedShort(card.enteredColumnAt) + ' routed';
+      }
+      // Line inbox / held: time since queued
+      if (card.enteredColumnAt) {
+        return formatElapsedShort(card.enteredColumnAt) + ' queued';
+      }
+      return '\u2014';
+    }
+
+    function buildCardDurationTooltip(card) {
+      var parts = [];
+      if (card.firstStationStartedAt) {
+        parts.push('enqueued ' + formatElapsedShort(card.firstStationStartedAt) + ' ago');
+      }
+      if (card.stationStartedAt && card.station) {
+        parts.push('started ' + card.station + ' ' + formatElapsedShort(card.stationStartedAt) + ' ago');
+      }
+      if (card.totalElapsedMs != null && card.totalElapsedMs >= 0) {
+        parts.push('total: ' + formatDuration(card.totalElapsedMs));
+      }
+      if (card.enteredColumnAt) {
+        parts.push('in current queue ' + formatElapsedShort(card.enteredColumnAt));
+      }
+      return parts.length > 0 ? parts.join(' \u00b7 ') : '';
+    }
+
     function copyCardId(event, id) {
       event.stopPropagation();
       var btn = event.currentTarget;
@@ -2526,12 +2563,12 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         // Meta line: relative time, duration, cost
         var metaParts = [];
         if (card.finished_at) {
-          metaParts.push('<span title="' + esc(card.finished_at) + '">' + formatElapsedShort(card.finished_at) + ' ago</span>');
+          metaParts.push('<span title="' + esc(card.finished_at) + '">\\u23f1 ' + formatElapsedShort(card.finished_at) + ' ago</span>');
         } else if (card.enteredColumnAt) {
-          metaParts.push('<span title="' + esc(card.enteredColumnAt) + '">' + formatElapsedShort(card.enteredColumnAt) + ' ago</span>');
+          metaParts.push('<span title="' + esc(card.enteredColumnAt) + '">\\u23f1 ' + formatElapsedShort(card.enteredColumnAt) + ' ago</span>');
         }
         if (card.duration_ms != null) {
-          metaParts.push(formatDuration(card.duration_ms));
+          metaParts.push('\\u23f1 ' + formatDuration(card.duration_ms));
         }
         if (card.costUsd && card.costUsd > 0) {
           metaParts.push(formatCardCost(card.costUsd));
@@ -2559,12 +2596,14 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       if (card.preview) {
         html += '<div class="card-preview">' + esc(card.preview) + '</div>';
       }
-      var footer = [];
-      footer.push('\\u23f1 ' + (card.enteredColumnAt ? formatElapsedShort(card.enteredColumnAt) : '\\u2014'));
-      if (card.retries && card.retries > 0) footer.push('\\u21ba ' + card.retries);
-      if (card.costUsd && card.costUsd > 0) footer.push(formatCardCost(card.costUsd));
-      if (card.evalScore != null) footer.push('\\u25d0 ' + card.evalScore);
-      html += '<div class="card-foot">' + esc(footer.join(' \\u00b7 ')) + '</div>';
+      var footParts = [];
+      var durLabel = buildCardDurationLabel(card);
+      var durTooltip = buildCardDurationTooltip(card);
+      footParts.push('<span' + (durTooltip ? ' title="' + esc(durTooltip) + '"' : '') + '>\\u23f1 ' + esc(durLabel) + '</span>');
+      if (card.retries && card.retries > 0) footParts.push('<span>\\u21ba ' + card.retries + '</span>');
+      if (card.costUsd && card.costUsd > 0) footParts.push('<span>' + formatCardCost(card.costUsd) + '</span>');
+      if (card.evalScore != null) footParts.push('<span>\\u25d0 ' + card.evalScore + '</span>');
+      html += '<div class="card-foot">' + footParts.join(' \\u00b7 ') + '</div>';
       // Retry row (visible only when card.retry exists with retry_count > 0)
       if (card.retry && card.retry.retry_count > 0) {
         var retryBadgeCls = 'retry-badge' + (card.retry.exhausted ? ' exhausted' : '');

@@ -959,6 +959,9 @@ export interface KanbanCard {
   station?: string;
   lane?: KanbanLane;
   enteredColumnAt: string | null;
+  stationStartedAt?: string | null;      // wp.stations[station].started_at
+  firstStationStartedAt?: string | null;  // earliest started_at across all stations
+  totalElapsedMs?: number | null;         // Date.now() - firstStationStartedAt
   retries?: number;
   costUsd?: number;
   evalScore?: number;
@@ -1089,6 +1092,22 @@ function buildKanbanCard(
     if (station) {
       const sr = wp.stations?.[station];
       if (sr?.eval?.score != null) card.evalScore = sr.eval.score;
+    }
+    // Lifecycle timestamps for duration labels
+    if (station) {
+      const sr = wp.stations?.[station];
+      if (sr?.started_at) {
+        card.stationStartedAt = sr.started_at;
+      }
+    }
+    // Compute earliest station start (proxy for pipeline entry)
+    const allStationStarts = Object.values(wp.stations ?? {})
+      .map(s => s.started_at)
+      .filter(Boolean)
+      .sort();
+    if (allStationStarts.length > 0) {
+      card.firstStationStartedAt = allStationStarts[0];
+      card.totalElapsedMs = Date.now() - new Date(allStationStarts[0]).getTime();
     }
     // Read retry sidecar if present
     const retryState = readRetryState(filePath);
