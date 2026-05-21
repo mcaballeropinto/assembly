@@ -368,14 +368,25 @@
 
     var html = '';
 
-    // Back button
-    html += '<div class="back-btn" onclick="goBack()">\u2190 All Lines</div>';
-
-    // Header
-    html += '<h1>' + esc(state.line) + '</h1>';
+    // Line detail header strip — breadcrumb, title, meta
+    html += '<div class="line-detail-header">';
+    html += '<a class="ldh-nav" href="javascript:void(0)" onclick="goBack()" aria-label="Back to all lines">\u2190 All Lines</a>';
+    html += '<div class="ldh-title">';
+    html += '<span class="ldh-line-name">' + esc(state.line) + '</span>';
     if (state.description) {
-      html += '<div class="subtitle" style="margin-bottom:24px">' + esc(state.description) + '</div>';
+      html += '<span class="ldh-sep"> \u00b7 </span>';
+      html += '<span class="ldh-description">' + esc(state.description) + '</span>';
     }
+    html += '</div>';
+    html += '<div class="ldh-meta">';
+    if (state.health) {
+      html += buildHealthChip(state.health);
+    }
+    if (state.timestamp) {
+      html += '<span class="ldh-timestamp">' + formatRelativeTime(state.timestamp) + '</span>';
+    }
+    html += '</div>';
+    html += '</div>';
 
     // Flow metrics row — injected between header and kanban
     var metricsData = ctx.flowMetrics !== undefined ? ctx.flowMetrics : null;
