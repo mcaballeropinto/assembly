@@ -1684,6 +1684,34 @@ describe("getKanbanState", () => {
       .cards.find((x) => x.id === "wp-move")!;
     expect(card.state).toBe("routed");
   });
+
+  test("line-level inbox column titled 'Incoming', station inbox lane titled 'waiting' with tooltips", async () => {
+    const dir = setupKanbanLine("kanban-labels");
+    const out = (await getKanbanState(dir)) as KanbanState;
+    // Line-level column renamed
+    const incomingCol = out.columns.find((c) => c.key === "inbox")!;
+    expect(incomingCol.title).toBe("Incoming");
+    expect(incomingCol.tooltip).toBeDefined();
+    expect(typeof incomingCol.tooltip).toBe("string");
+    // Station-level inbox lane renamed
+    const stationInbox = out.columns.find((c) => c.key === "station-a:inbox")!;
+    expect(stationInbox.title).toBe("waiting");
+    expect(stationInbox.tooltip).toBeDefined();
+    // Processing and output lanes have tooltips
+    const stationProc = out.columns.find((c) => c.key === "station-a:processing")!;
+    expect(stationProc.tooltip).toBeDefined();
+    const stationOut = out.columns.find((c) => c.key === "station-a:output")!;
+    expect(stationOut.tooltip).toBeDefined();
+    // Held and Done columns have tooltips
+    const heldCol = out.columns.find((c) => c.key === "held")!;
+    expect(heldCol.tooltip).toBeDefined();
+    const doneCol = out.columns.find((c) => c.key === "done")!;
+    expect(doneCol.tooltip).toBeDefined();
+    // No two top-level column titles are the same
+    const topLevelTitles = out.columns.filter((c) => !c.station).map((c) => c.title);
+    const uniqueTitles = new Set(topLevelTitles);
+    expect(uniqueTitles.size).toBe(topLevelTitles.length);
+  });
 });
 
 describe("computeFlowMetrics", () => {

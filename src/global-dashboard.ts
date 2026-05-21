@@ -970,6 +970,16 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       font-size: 12px;
       color: var(--text-muted);
     }
+    .col-info {
+      font-size: 11px;
+      color: var(--text-dim);
+      cursor: help;
+      margin-left: 4px;
+      opacity: 0.6;
+    }
+    .col-info:hover {
+      opacity: 1;
+    }
     .kanban-col.hot .kanban-col-header { color: var(--color-warning); }
     .kanban-col.over .kanban-col-header { color: var(--color-error); }
     .kanban-col.hot { border-color: var(--color-warning); background: var(--color-warning-dim); }
@@ -2580,8 +2590,9 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       var cardsHtml = col.cards.length === 0
         ? '<div class="kanban-empty">' + emptyMsg + '</div>'
         : col.cards.map(renderKanbanCard).join('');
+      var tooltipHtml = col.tooltip ? '<span class="col-info" title="' + esc(col.tooltip) + '">\u24d8</span>' : '';
       var html = '<div class="kanban-col' + headerClass + '" data-col-key="' + escapeJs(col.key) + '">';
-      html += '<div class="kanban-col-header"><span class="col-title">' + esc(col.title) + '</span><span class="col-count">' + col.count + '</span>' + renderRetryChips(col) + '</div>';
+      html += '<div class="kanban-col-header"><span class="col-title">' + esc(col.title) + '</span><span class="col-count">' + col.count + '</span>' + renderRetryChips(col) + tooltipHtml + '</div>';
       html += '<div class="kanban-col-body" data-col-body="' + escapeJs(col.key) + '">' + cardsHtml + '</div>';
       if (col.key === 'held' && col.count > 0) {
         html += '<div class="kanban-col-actions" onclick="event.stopPropagation()">';
@@ -2614,8 +2625,9 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       html += '<div class="kanban-lanes">';
       for (var j = 0; j < lanes.length; j++) {
         var lane = lanes[j];
+        var laneTooltip = lane.tooltip ? '<span class="col-info" title="' + esc(lane.tooltip) + '">\u24d8</span>' : '';
         html += '<div class="kanban-lane" data-col-key="' + escapeJs(lane.key) + '">';
-        html += '<div class="kanban-lane-label"><span>' + esc(lane.lane) + '</span><span class="lane-count">' + lane.count + '</span></div>';
+        html += '<div class="kanban-lane-label"><span>' + esc(lane.title) + '</span><span class="lane-count">' + lane.count + '</span>' + laneTooltip + '</div>';
         html += '<div class="kanban-col-body" data-col-body="' + escapeJs(lane.key) + '">';
         html += lane.cards.length === 0 ? '<div class="kanban-empty">\\u2014</div>' : lane.cards.map(renderKanbanCard).join('');
         html += '</div>';
