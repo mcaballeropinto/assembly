@@ -69,13 +69,16 @@ export function retryErroredWorkpiece(
 
   const inboxDir = resolve(linePath, "queues", "inbox");
   mkdirSync(inboxDir, { recursive: true });
+  // Producer-allowlist BEFORE the file appears in the watched dir.
+  // watchFolder fires on file creation; if recordEmit runs after
+  // writeFileSync, the watcher can race in and quarantine the file as
+  // producer_unknown before the allowlist entry exists (observed
+  // 2026-05-21 00:58:51 — 1ms race window).
+  recordEmit(inboxDir, newFileName, "release");
   writeFileSync(
     resolve(inboxDir, newFileName),
     JSON.stringify(copy, null, 2)
   );
-  // Producer-allowlist: manual-retry copies are an authorized writer.
-  // Without this, the new task would be quarantined by the inbox watcher.
-  recordEmit(inboxDir, newFileName, "release");
 
   dismissFilenames(linePath, [fileName]);
 

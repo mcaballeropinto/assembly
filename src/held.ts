@@ -165,11 +165,12 @@ function _releaseOne(
   }
 
   try {
-    renameSync(src, dst);
-    // Producer-allowlist record. The inbox watcher checks this before
-    // routing the workpiece into sections[0]. Without it, a released
-    // held task would be quarantined as `producer_unknown`.
+    // Producer-allowlist BEFORE the rename makes the file visible in
+    // the watched inbox dir. watchFolder fires on appearance; if
+    // recordEmit ran after renameSync, the watcher could race in and
+    // quarantine the released task as producer_unknown.
     recordEmit(inbox, file, "release");
+    renameSync(src, dst);
     result.released.push(file);
   } catch (err: unknown) {
     const nodeErr = err as NodeJS.ErrnoException;
