@@ -1018,6 +1018,36 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
     .kanban-station.hot .kanban-station-header { background: var(--color-warning-dim); color: var(--color-warning); }
     .kanban-station.over .kanban-station-header { background: var(--color-error-dim); color: var(--color-error); }
     .kanban-station.hottest { box-shadow: 0 0 0 1px var(--color-warning); }
+
+    /* Station freshness indicator */
+    .station-freshness {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin-left: var(--space-xs);
+      cursor: default;
+    }
+    .station-freshness-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      transition: background-color 300ms ease;
+    }
+    .station-freshness-icon {
+      font-size: 10px;
+      line-height: 1;
+    }
+    .station-freshness.fresh .station-freshness-dot { background: var(--color-success); }
+    .station-freshness.fresh .station-freshness-icon { color: var(--color-success); }
+    .station-freshness.stale .station-freshness-dot { background: var(--color-warning); }
+    .station-freshness.stale .station-freshness-icon { color: var(--color-warning); }
+    .station-freshness.disconnected .station-freshness-dot { background: var(--color-error); }
+    .station-freshness.disconnected .station-freshness-icon { color: var(--color-error); }
+    .station-freshness.completed .station-freshness-dot { background: var(--text-dim); opacity: 0.5; }
+    .station-freshness.completed .station-freshness-icon { color: var(--text-dim); }
+
     .kanban-lanes {
       display: flex;
       flex-direction: column;
@@ -2145,8 +2175,10 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
     // mid-dismiss can't repaint the banner with a still-active file.
     var _locallyDismissedFiles = new Set();
     let connectionHealthTimer = null;
+    let stationFreshnessTimer = null;
     const CONN_LIVE_MS = 5000;
     const CONN_STALE_MS = 30000;
+    const FRESHNESS_POLL_INTERVAL_MS = 30000; // matches FRESHNESS_POLL_INTERVAL_MS from dashboard-data.ts
 
     // Usage-limits panel — independent poll/render cycle.
     let usageTimer = null;
@@ -2604,7 +2636,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       return html;
     }
 
-    function renderKanbanStationGroup(stationName, lanes) {
+    function renderKanbanStationGroup(stationName, lanes, freshness) {
       var total = 0;
       var stationRetrying = 0;
       var stationExhausted = 0;
@@ -2621,7 +2653,22 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       var stationChips = '';
       if (stationRetrying > 0) stationChips += '<span class="col-retry-chip"> · ↻ ' + stationRetrying + '</span>';
       if (stationExhausted > 0) stationChips += '<span class="col-retry-chip exhausted"> · ✗ ' + stationExhausted + '</span>';
-      html += '<div class="kanban-station-header"><span class="station-name">' + esc(stationName) + '</span><span class="station-count">' + total + '</span>' + stationChips + '</div>';
+
+      // Build freshness indicator HTML
+      var freshnessHtml = '';
+      if (freshness) {
+        var iconMap = { fresh: '\u2713', stale: '\u23f1', disconnected: '\u2717', completed: '\u2014' };
+        var icon = iconMap[freshness.state] || '';
+        freshnessHtml = '<span class="station-freshness ' + freshness.state + '" tabindex="0" role="status" ';
+        freshnessHtml += 'aria-label="' + esc(freshness.label) + '" title="' + esc(freshness.label) + '" ';
+        freshnessHtml += 'data-station-last-update="' + (freshness.last_updated_at || '') + '" ';
+        freshnessHtml += 'data-station-state="' + freshness.state + '">';
+        freshnessHtml += '<span class="station-freshness-dot" aria-hidden="true"></span>';
+        freshnessHtml += '<span class="station-freshness-icon" aria-hidden="true">' + icon + '</span>';
+        freshnessHtml += '</span>';
+      }
+
+      html += '<div class="kanban-station-header"><span class="station-name">' + esc(stationName) + '</span>' + freshnessHtml + '<span class="station-count">' + total + '</span>' + stationChips + '</div>';
       html += '<div class="kanban-lanes">';
       for (var j = 0; j < lanes.length; j++) {
         var lane = lanes[j];
@@ -2658,7 +2705,10 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       for (var k = 0; k < grouped.length; k++) {
         var g = grouped[k];
         if (g.type === 'col') parts.push(renderKanbanColumn(g.col));
-        else parts.push(renderKanbanStationGroup(g.station, lanesByStation[g.station]));
+        else {
+          var freshness = kb.stationFreshness ? kb.stationFreshness[g.station] : null;
+          parts.push(renderKanbanStationGroup(g.station, lanesByStation[g.station], freshness));
+        }
       }
       return parts.join('');
     }
@@ -3708,6 +3758,58 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    function updateStationFreshnessDots() {
+      var elements = document.querySelectorAll('.station-freshness[data-station-last-update]');
+      var now = Date.now();
+      var threshold2x = 2 * FRESHNESS_POLL_INTERVAL_MS; // 60s
+      var threshold5x = 5 * FRESHNESS_POLL_INTERVAL_MS; // 150s
+      var iconMap = { fresh: '\u2713', stale: '\u23f1', disconnected: '\u2717', completed: '\u2014' };
+
+      for (var i = 0; i < elements.length; i++) {
+        var el = elements[i];
+        var lastUpdateStr = el.getAttribute('data-station-last-update');
+        var currentState = el.getAttribute('data-station-state');
+
+        // Skip completed stations — they don't age
+        if (currentState === 'completed') continue;
+        if (!lastUpdateStr) continue;
+
+        var lastUpdateMs = new Date(lastUpdateStr).getTime();
+        var ageMs = now - lastUpdateMs;
+        var ageSec = Math.floor(ageMs / 1000);
+
+        // Reclassify
+        var newState, icon, label;
+        if (ageMs < threshold2x) {
+          newState = 'fresh';
+          icon = iconMap.fresh;
+          label = 'Updated ' + ageSec + 's ago';
+        } else if (ageMs < threshold5x) {
+          newState = 'stale';
+          icon = iconMap.stale;
+          label = 'Stale — ' + ageSec + 's ago';
+        } else {
+          newState = 'disconnected';
+          icon = iconMap.disconnected;
+          label = 'Disconnected — ' + ageSec + 's ago';
+        }
+
+        // Update only if state changed
+        if (newState !== currentState) {
+          el.className = 'station-freshness ' + newState;
+          el.setAttribute('data-station-state', newState);
+          el.setAttribute('aria-label', label);
+          el.setAttribute('title', label);
+          var iconEl = el.querySelector('.station-freshness-icon');
+          if (iconEl) iconEl.textContent = icon;
+        } else {
+          // Update label even if state hasn't changed (time elapsed)
+          el.setAttribute('aria-label', label);
+          el.setAttribute('title', label);
+        }
+      }
+    }
+
     function formatRelativeTime(isoString) {
       if (!isoString) return '';
       var now = Date.now();
@@ -3768,6 +3870,9 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       // Start the 1s connection health ticker once at bootstrap
       connectionHealthTimer = setInterval(updateConnectionIndicator, 1000);
       updateConnectionIndicator();
+
+      // Start the 1s station freshness ticker once at bootstrap
+      stationFreshnessTimer = setInterval(updateStationFreshnessDots, 1000);
 
       // Usage panel — own 60s poll, independent of the 3s main refresh.
       loadUsage();

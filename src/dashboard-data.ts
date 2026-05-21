@@ -150,6 +150,158 @@ export function connectionHealth(ageMs: number): ConnectionState {
   return "disconnected";
 }
 
+// ─── Per-Station Freshness (station-level liveness) ──────────────────
+
+export const FRESHNESS_POLL_INTERVAL_MS = 30_000; // matches HEARTBEAT_MS from section-worker.ts
+
+export type StationFreshnessState = "fresh" | "stale" | "disconnected" | "completed";
+
+export interface StationFreshness {
+  state: StationFreshnessState;
+  last_updated_at: string | null;
+  silent_s: number;
+  icon: string;
+  label: string;
+}
+
+/**
+ * Compute per-station freshness based on heartbeats and station lifecycle.
+ *
+ * Thresholds (default poll interval = 30s):
+ * - fresh: age < 2 × 30s = 60s
+ * - stale: 60s ≤ age < 5 × 30s = 150s
+ * - disconnected: age ≥ 150s
+ * - completed: station has finished_at and is not running
+ *
+ * Scans activity.jsonl for the latest station_heartbeat or station_done event per station.
+ */
+export function computeStationFreshness(
+  linePath: string,
+  sequence: string[],
+  sections: Record<string, { inbox: number; processing: number; output: number }>,
+  stationTimings: Record<string, { started_at: string; finished_at?: string; running?: boolean }>
+): Record<string, StationFreshness> {
+  const freshness: Record<string, StationFreshness> = {};
+  const now = Date.now();
+  const threshold2x = 2 * FRESHNESS_POLL_INTERVAL_MS;
+  const threshold5x = 5 * FRESHNESS_POLL_INTERVAL_MS;
+
+  // Read activity log in reverse to find latest heartbeat per station
+  const logPath = resolve(linePath, "queues", "activity.jsonl");
+  const lastHeartbeatByStation: Record<string, { ts: string; event: string }> = {};
+
+  if (existsSync(logPath)) {
+    try {
+      const lines = readFileSync(logPath, "utf-8")
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+
+      // Scan last 200 lines in reverse
+      const recent = lines.slice(-200).reverse();
+      for (const line of recent) {
+        try {
+          const entry = JSON.parse(line);
+          const stationName = entry.station;
+          if (!stationName || lastHeartbeatByStation[stationName]) continue;
+
+          if (entry.event === "station_heartbeat" || entry.event === "station_done") {
+            lastHeartbeatByStation[stationName] = { ts: entry.ts, event: entry.event };
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+
+  for (const name of sequence) {
+    const timing = stationTimings[name];
+    const section = sections[name];
+    const lastHeartbeat = lastHeartbeatByStation[name];
+
+    // Check if station is completed (finished and not running, no active processing/inbox)
+    const isCompleted =
+      timing?.finished_at &&
+      !timing?.running &&
+      section?.processing === 0 &&
+      section?.inbox === 0;
+
+    if (isCompleted) {
+      const finishedAt = timing.finished_at!;
+      const ageMs = now - new Date(finishedAt).getTime();
+      const ageSec = Math.floor(ageMs / 1000);
+      const ageMin = Math.floor(ageSec / 60);
+      const label = ageMin > 0 ? `Completed ${ageMin}m ago` : `Completed ${ageSec}s ago`;
+
+      freshness[name] = {
+        state: "completed",
+        last_updated_at: finishedAt,
+        silent_s: ageSec,
+        icon: "—",
+        label,
+      };
+      continue;
+    }
+
+    // Station is not completed — check heartbeat freshness
+    if (!lastHeartbeat) {
+      // No heartbeat data — check if station is idle (never ran) or just starting
+      if (!timing && section?.processing === 0 && section?.inbox === 0) {
+        // Idle station, never ran
+        freshness[name] = {
+          state: "completed",
+          last_updated_at: null,
+          silent_s: 0,
+          icon: "—",
+          label: "Idle",
+        };
+      } else {
+        // Station is starting or has active work — give benefit of the doubt
+        freshness[name] = {
+          state: "fresh",
+          last_updated_at: timing?.started_at || null,
+          silent_s: 0,
+          icon: "✓",
+          label: "Starting",
+        };
+      }
+      continue;
+    }
+
+    // Have heartbeat data — classify by age
+    const lastUpdateMs = new Date(lastHeartbeat.ts).getTime();
+    const ageMs = now - lastUpdateMs;
+    const ageSec = Math.floor(ageMs / 1000);
+
+    let state: StationFreshnessState;
+    let icon: string;
+    let label: string;
+
+    if (ageMs < threshold2x) {
+      state = "fresh";
+      icon = "✓";
+      label = `Updated ${ageSec}s ago`;
+    } else if (ageMs < threshold5x) {
+      state = "stale";
+      icon = "⏱";
+      label = `Stale — ${ageSec}s ago`;
+    } else {
+      state = "disconnected";
+      icon = "✕";
+      label = `Disconnected — ${ageSec}s ago`;
+    }
+
+    freshness[name] = {
+      state,
+      last_updated_at: lastHeartbeat.ts,
+      silent_s: ageSec,
+      icon,
+      label,
+    };
+  }
+
+  return freshness;
+}
+
 // ─── Throughput (rolling completion rate) ─────────────────────────
 
 export interface ThroughputCounts {
@@ -405,6 +557,9 @@ export async function getFullState(linePath: string) {
   // Station timings — find the most recent/active workpiece per station
   const stationTimings = getStationTimings(linePath, sequence);
 
+  // Station freshness — per-station liveness indicators
+  const stationFreshness = computeStationFreshness(linePath, sequence, sections, stationTimings);
+
   // Total pipeline time
   let pipelineTotalMs: number | null = null;
   const allTimings = Object.values(stationTimings);
@@ -431,6 +586,7 @@ export async function getFullState(linePath: string) {
     held,
     sections,
     stationTimings,
+    stationFreshness,
     pipelineTotalMs,
     activity,
     completed,
@@ -830,6 +986,7 @@ export interface KanbanState {
   columns: KanbanColumn[];
   concurrency?: number;
   lastUpdated: string;
+  stationFreshness?: Record<string, StationFreshness>;
 }
 
 function readWorkpieceSafe(path: string): Workpiece | null {
@@ -1153,12 +1310,29 @@ export async function getKanbanState(
 
   // Compute retry aggregates for each column
   for (const col of columns) applyRetryAggregates(col);
+
+  // Build sections map from columns for station freshness
+  const sections: Record<string, { inbox: number; processing: number; output: number }> = {};
+  for (const col of columns) {
+    if (col.station && col.lane) {
+      if (!sections[col.station]) {
+        sections[col.station] = { inbox: 0, processing: 0, output: 0 };
+      }
+      sections[col.station][col.lane] = col.count;
+    }
+  }
+
+  // Compute station timings and freshness
+  const stationTimings = getStationTimings(linePath, sequence);
+  const stationFreshness = computeStationFreshness(linePath, sequence, sections, stationTimings);
+
   return {
     line: config.name,
     sequence,
     columns,
     concurrency,
     lastUpdated: new Date().toISOString(),
+    stationFreshness,
   };
 }
 
