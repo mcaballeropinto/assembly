@@ -1231,6 +1231,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       font-family: var(--font-mono);
       font-style: italic;
       padding: 2px 0;
+      text-align: center;
     }
     .kanban-col-actions {
       display: flex;
@@ -2660,7 +2661,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       var headerClass = '';
       if (col.wipLimit && col.count > col.wipLimit * 2) headerClass = ' over';
       else if (col.wipLimit && col.count > col.wipLimit) headerClass = ' hot';
-      var emptyMsg = col.key === 'held' ? 'No held tasks' : '\\u2014';
+      var emptyMsg = col.key === 'held' ? 'No held tasks' : 'No items';
       var cardsHtml = col.cards.length === 0
         ? '<div class="kanban-empty">' + emptyMsg + '</div>'
         : col.cards.map(renderKanbanCard).join('');
@@ -2718,7 +2719,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         html += '<div class="kanban-lane" data-col-key="' + escapeJs(lane.key) + '">';
         html += '<div class="kanban-lane-label"><span>' + esc(lane.title) + '</span><span class="lane-count">' + lane.count + '</span>' + laneTooltip + '</div>';
         html += '<div class="kanban-col-body" data-col-body="' + escapeJs(lane.key) + '">';
-        html += lane.cards.length === 0 ? '<div class="kanban-empty">\\u2014</div>' : lane.cards.map(renderKanbanCard).join('');
+        html += lane.cards.length === 0 ? '<div class="kanban-empty">No items</div>' : lane.cards.map(renderKanbanCard).join('');
         html += '</div>';
         html += '</div>';
       }
