@@ -968,6 +968,7 @@ export interface KanbanCard {
   retry?: RetryState;
   finished_at?: string | null;
   duration_ms?: number | null;
+  failedStation?: string;
 }
 
 export interface KanbanColumn {
@@ -983,6 +984,19 @@ export interface KanbanColumn {
   exhausted_count?: number;
 }
 
+export type StationStatusState = "running" | "idle" | "blocked" | "errored" | "muted";
+
+export interface StationStatus {
+  state: StationStatusState;
+  label: string;        // plain-language tooltip text, e.g. "Running · 1 item · started 4m ago"
+  icon: string;         // unicode icon: ▶ (running), ◯ (idle), ! (blocked), ✕ (errored)
+  itemCount: number;    // total items in this station's lanes
+  startedAt?: string;   // ISO timestamp of when processing began (for running state)
+  lastErrorStation?: string; // station name that last errored (for errored state)
+}
+
+export const STATION_BLOCKED_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes — same as card-level stuck
+
 export interface KanbanState {
   line: string;
   sequence: string[];
@@ -990,6 +1004,7 @@ export interface KanbanState {
   concurrency?: number;
   lastUpdated: string;
   stationFreshness?: Record<string, StationFreshness>;
+  stationStatuses?: Record<string, StationStatus>;
 }
 
 function readWorkpieceSafe(path: string): Workpiece | null {
@@ -998,6 +1013,14 @@ function readWorkpieceSafe(path: string): Workpiece | null {
   } catch {
     return null;
   }
+}
+
+function formatRelativeShort(ms: number): string {
+  if (ms < 0) return 'just now';
+  if (ms < 60000) return Math.floor(ms / 1000) + 's ago';
+  if (ms < 3600000) return Math.floor(ms / 60000) + 'm ago';
+  if (ms < 86400000) return Math.floor(ms / 3600000) + 'h ago';
+  return Math.floor(ms / 86400000) + 'd ago';
 }
 
 function fileMtimeIso(path: string): string | null {
@@ -1093,6 +1116,13 @@ function buildKanbanCard(
       const sr = wp.stations?.[station];
       if (sr?.eval?.score != null) card.evalScore = sr.eval.score;
     }
+    // For error cards, record which station failed
+    if (columnKey === 'error') {
+      const failedEntry = Object.entries(wp.stations ?? {}).find(
+        ([, sr]) => sr.status === 'failed'
+      );
+      if (failedEntry) card.failedStation = failedEntry[0];
+    }
     // Lifecycle timestamps for duration labels
     if (station) {
       const sr = wp.stations?.[station];
@@ -1157,6 +1187,130 @@ function applyRetryAggregates(col: KanbanColumn): void {
   }
   if (retrying > 0) col.retrying_count = retrying;
   if (exhausted > 0) col.exhausted_count = exhausted;
+}
+
+export function computeStationStatuses(
+  columns: KanbanColumn[],
+  sequence: string[],
+  errorColumns: KanbanColumn[],
+  linePath: string,
+): Record<string, StationStatus> {
+  const statuses: Record<string, StationStatus> = {};
+  const now = Date.now();
+
+  // Build a set of station names that have errored workpieces
+  const errorsByStation = new Map<string, { count: number; newestFinishedAt: string | null }>();
+  for (const errCol of errorColumns) {
+    for (const card of errCol.cards) {
+      const fs = (card as KanbanCard).failedStation;
+      if (fs) {
+        const existing = errorsByStation.get(fs) || { count: 0, newestFinishedAt: null };
+        existing.count++;
+        // Use enteredColumnAt as a proxy for when the error occurred
+        if (card.enteredColumnAt && (!existing.newestFinishedAt || card.enteredColumnAt > existing.newestFinishedAt)) {
+          existing.newestFinishedAt = card.enteredColumnAt;
+        }
+        errorsByStation.set(fs, existing);
+      }
+    }
+  }
+
+  // Build per-station lane data from columns
+  const stationLanes = new Map<string, { inbox: KanbanCard[]; processing: KanbanCard[]; output: KanbanCard[] }>();
+  for (const col of columns) {
+    if (!col.station) continue;
+    if (!stationLanes.has(col.station)) {
+      stationLanes.set(col.station, { inbox: [], processing: [], output: [] });
+    }
+    const lanes = stationLanes.get(col.station)!;
+    if (col.lane === 'inbox') lanes.inbox = col.cards;
+    else if (col.lane === 'processing') lanes.processing = col.cards;
+    else if (col.lane === 'output') lanes.output = col.cards;
+  }
+
+  for (const stationName of sequence) {
+    const lanes = stationLanes.get(stationName);
+    const errInfo = errorsByStation.get(stationName);
+    const totalItems = lanes
+      ? lanes.inbox.length + lanes.processing.length + lanes.output.length
+      : 0;
+
+    // Priority 1: Errored
+    if (errInfo && errInfo.count > 0) {
+      const ageStr = errInfo.newestFinishedAt
+        ? formatRelativeShort(now - new Date(errInfo.newestFinishedAt).getTime())
+        : 'unknown';
+      statuses[stationName] = {
+        state: 'errored',
+        label: `Errored · ${errInfo.count} error${errInfo.count !== 1 ? 's' : ''} · last ${ageStr}`,
+        icon: '✕',
+        itemCount: totalItems,
+      };
+      continue;
+    }
+
+    // Priority 2: Running
+    if (lanes && lanes.processing.length > 0) {
+      const oldestProcessing = lanes.processing.reduce((oldest, card) => {
+        if (!oldest.enteredColumnAt) return card;
+        if (!card.enteredColumnAt) return oldest;
+        return card.enteredColumnAt < oldest.enteredColumnAt ? card : oldest;
+      }, lanes.processing[0]);
+      const startedAgo = oldestProcessing.enteredColumnAt
+        ? formatRelativeShort(now - new Date(oldestProcessing.enteredColumnAt).getTime())
+        : '';
+      statuses[stationName] = {
+        state: 'running',
+        label: `Running · ${lanes.processing.length} item${lanes.processing.length !== 1 ? 's' : ''}${startedAgo ? ' · started ' + startedAgo : ''}`,
+        icon: '▶',
+        itemCount: totalItems,
+        startedAt: oldestProcessing.enteredColumnAt ?? undefined,
+      };
+      continue;
+    }
+
+    // Priority 3: Blocked
+    if (lanes && lanes.inbox.length > 0) {
+      const oldestInbox = lanes.inbox.reduce((oldest, card) => {
+        if (!oldest.enteredColumnAt) return card;
+        if (!card.enteredColumnAt) return oldest;
+        return card.enteredColumnAt < oldest.enteredColumnAt ? card : oldest;
+      }, lanes.inbox[0]);
+      const oldestAge = oldestInbox.enteredColumnAt
+        ? now - new Date(oldestInbox.enteredColumnAt).getTime()
+        : 0;
+      if (oldestAge > STATION_BLOCKED_THRESHOLD_MS) {
+        statuses[stationName] = {
+          state: 'blocked',
+          label: `Blocked · ${lanes.inbox.length} item${lanes.inbox.length !== 1 ? 's' : ''} waiting · oldest ${formatRelativeShort(oldestAge)}`,
+          icon: '!',
+          itemCount: totalItems,
+        };
+        continue;
+      }
+    }
+
+    // Priority 4: Idle (has had activity before or has items in output)
+    if (lanes && (lanes.output.length > 0 || totalItems > 0)) {
+      statuses[stationName] = {
+        state: 'idle',
+        label: `Idle · ${totalItems} item${totalItems !== 1 ? 's' : ''}`,
+        icon: '◯',
+        itemCount: totalItems,
+      };
+      continue;
+    }
+
+    // Priority 5: Idle (no work, healthy)
+    statuses[stationName] = {
+      state: 'idle',
+      label: 'Idle · no work',
+      icon: '◯',
+      itemCount: 0,
+    };
+  }
+
+  return statuses;
 }
 
 /**
@@ -1345,6 +1499,10 @@ export async function getKanbanState(
   const stationTimings = getStationTimings(linePath, sequence);
   const stationFreshness = computeStationFreshness(linePath, sequence, sections, stationTimings);
 
+  // Compute per-station health status indicators
+  const errorCols = columns.filter(c => c.key === 'error');
+  const stationStatuses = computeStationStatuses(columns, sequence, errorCols, linePath);
+
   return {
     line: config.name,
     sequence,
@@ -1352,6 +1510,7 @@ export async function getKanbanState(
     concurrency,
     lastUpdated: new Date().toISOString(),
     stationFreshness,
+    stationStatuses,
   };
 }
 

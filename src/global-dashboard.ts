@@ -1062,7 +1062,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
     .kanban-station-header {
       display: flex;
       justify-content: space-between;
-      align-items: baseline;
+      align-items: center;
       padding: var(--space-sm);
       border-bottom: 1px solid var(--lane-divider);
       font-size: 13px;
@@ -1075,6 +1075,50 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       font-family: var(--font-mono);
       font-size: 12px;
       color: var(--text-muted);
+    }
+    .station-status-dot {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      font-size: 10px;
+      line-height: 1;
+      margin-right: 6px;
+      flex-shrink: 0;
+      cursor: help;
+      font-weight: 700;
+      transition: opacity 0.2s ease;
+    }
+    .station-status-dot:focus-visible {
+      outline: 2px solid var(--color-info);
+      outline-offset: 1px;
+    }
+    .station-status-dot.status-running {
+      background: var(--color-success);
+      color: #fff;
+      animation: station-dot-pulse 2s infinite;
+    }
+    .station-status-dot.status-idle {
+      background: var(--text-dim);
+      color: var(--bg-base);
+    }
+    .station-status-dot.status-blocked {
+      background: var(--color-warning);
+      color: #000;
+    }
+    .station-status-dot.status-errored {
+      background: var(--color-error);
+      color: #fff;
+    }
+    .station-status-dot.status-muted {
+      background: var(--border-subtle);
+      color: var(--text-dim);
+    }
+    @keyframes station-dot-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
     }
     .kanban-station.hot .kanban-station-header { background: var(--color-warning-dim); color: var(--color-warning); }
     .kanban-station.over .kanban-station-header { background: var(--color-error-dim); color: var(--color-error); }
@@ -1459,6 +1503,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       }
       .kanban-card.entering, .kanban-card.leaving { opacity: 1; transform: none; }
       .retry-badge { transition: none; }
+      .station-status-dot.status-running { animation: none; }
     }
 
     .silent-indicator {
@@ -2725,8 +2770,14 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         ? '<div class="kanban-empty">' + emptyMsg + '</div>'
         : col.cards.map(renderKanbanCard).join('');
       var tooltipHtml = col.tooltip ? '<span class="col-info" title="' + esc(col.tooltip) + '">\u24d8</span>' : '';
+      var colStatusDot = '';
+      if (col.key === 'error') {
+        colStatusDot = '<span class="station-status-dot status-errored" role="img" aria-label="' + col.count + ' errored task' + (col.count !== 1 ? 's' : '') + '" title="' + col.count + ' errored task' + (col.count !== 1 ? 's' : '') + '" tabindex="0">✕</span>';
+      } else if (col.key === 'review') {
+        colStatusDot = '<span class="station-status-dot status-blocked" role="img" aria-label="' + col.count + ' task' + (col.count !== 1 ? 's' : '') + ' for review" title="' + col.count + ' task' + (col.count !== 1 ? 's' : '') + ' for review" tabindex="0">!</span>';
+      }
       var html = '<div class="kanban-col' + headerClass + '" data-col-key="' + escapeJs(col.key) + '">';
-      html += '<div class="kanban-col-header"><span class="col-title">' + esc(col.title) + '</span><span class="col-count">' + col.count + '</span>' + renderRetryChips(col) + tooltipHtml + '</div>';
+      html += '<div class="kanban-col-header">' + colStatusDot + '<span class="col-title">' + esc(col.title) + '</span><span class="col-count">' + col.count + '</span>' + renderRetryChips(col) + tooltipHtml + '</div>';
       html += '<div class="kanban-col-body" data-col-body="' + escapeJs(col.key) + '">' + cardsHtml + '</div>';
       if (col.key === 'held' && col.count > 0) {
         html += '<div class="kanban-col-actions" onclick="event.stopPropagation()">';
@@ -2738,7 +2789,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       return html;
     }
 
-    function renderKanbanStationGroup(stationName, lanes, freshness) {
+    function renderKanbanStationGroup(stationName, lanes, freshness, stationStatuses) {
       var total = 0;
       var stationRetrying = 0;
       var stationExhausted = 0;
@@ -2756,6 +2807,14 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       if (stationRetrying > 0) stationChips += '<span class="col-retry-chip"> · ↻ ' + stationRetrying + '</span>';
       if (stationExhausted > 0) stationChips += '<span class="col-retry-chip exhausted"> · ✗ ' + stationExhausted + '</span>';
 
+      // Station status indicator
+      var status = stationStatuses && stationStatuses[stationName];
+      var statusDot = '';
+      if (status) {
+        var dotCls = 'station-status-dot status-' + status.state;
+        statusDot = '<span class="' + dotCls + '" role="img" aria-label="' + esc(status.label) + '" title="' + esc(status.label) + '" tabindex="0">' + esc(status.icon) + '</span>';
+      }
+
       // Build freshness indicator HTML
       var freshnessHtml = '';
       if (freshness) {
@@ -2770,7 +2829,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         freshnessHtml += '</span>';
       }
 
-      html += '<div class="kanban-station-header"><span class="station-name">' + esc(stationName) + '</span>' + freshnessHtml + '<span class="station-count">' + total + '</span>' + stationChips + '</div>';
+      html += '<div class="kanban-station-header">' + statusDot + '<span class="station-name">' + esc(stationName) + '</span>' + freshnessHtml + '<span class="station-count">' + total + '</span>' + stationChips + '</div>';
       html += '<div class="kanban-lanes">';
       for (var j = 0; j < lanes.length; j++) {
         var lane = lanes[j];
@@ -2809,7 +2868,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         if (g.type === 'col') parts.push(renderKanbanColumn(g.col));
         else {
           var freshness = kb.stationFreshness ? kb.stationFreshness[g.station] : null;
-          parts.push(renderKanbanStationGroup(g.station, lanesByStation[g.station], freshness));
+          parts.push(renderKanbanStationGroup(g.station, lanesByStation[g.station], freshness, kb.stationStatuses));
         }
       }
       return parts.join('');
