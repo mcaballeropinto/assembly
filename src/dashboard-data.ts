@@ -1342,6 +1342,45 @@ export function computeStationStatuses(
  * Build the kanban board state for a line.
  * The filesystem is the state machine — each card is placed based on which folder its file lives in.
  */
+/**
+ * Get a paginated slice of done cards.
+ * @param linePath Path to the assembly line
+ * @param offset Index to start from (0-based)
+ * @param limit Maximum number of cards to return
+ * @param retriesByWp Optional pre-computed retry counts map
+ * @returns Object with cards array and total count
+ */
+export async function getDoneCards(
+  linePath: string,
+  offset: number,
+  limit: number,
+  retriesByWp?: Map<string, number>,
+): Promise<{ cards: KanbanCard[]; total: number }> {
+  // Load retry counts if not provided
+  const retries = retriesByWp ?? loadRetryCounts(linePath);
+
+  // List all done files (oldest first by default from listQueue)
+  const doneDir = resolve(linePath, "queues", "done");
+  const allFiles = listQueue(doneDir);
+
+  // Reverse to get newest first
+  allFiles.reverse();
+
+  const total = allFiles.length;
+
+  // Slice to requested window
+  const pageFiles = allFiles.slice(offset, offset + limit);
+
+  // Build cards only for the requested slice
+  const cards: KanbanCard[] = [];
+  for (const f of pageFiles) {
+    const card = buildKanbanCard(f, "done", undefined, undefined, retries);
+    if (card) cards.push(card);
+  }
+
+  return { cards, total };
+}
+
 export async function getKanbanState(
   linePath: string,
 ): Promise<KanbanState | { error: string }> {
@@ -1454,32 +1493,24 @@ export async function getKanbanState(
     });
   }
 
-  // Done (always visible)
-  const doneCards = collectCards(
-    resolve(linePath, "queues", "done"),
-    "done",
-    undefined,
-    undefined,
-    retriesByWp,
-  );
-  // Keep newest first — show last 10; full count still reported in header badge
-  doneCards.reverse();
-
   // Error (collect early so we can pin failures in Done)
   const errorDir = resolve(linePath, "queues", "error");
   const errorCards = collectCards(errorDir, "error", undefined, undefined, retriesByWp);
   const dismissedMap = readDismissed(linePath);
   const activeErrorCards = errorCards.filter((c) => !dismissedMap[c.fileName]);
 
+  // Done (always visible) - use paginated getDoneCards with pinned failures
+  const doneResult = await getDoneCards(linePath, 0, 10, retriesByWp);
+
   // Include active error cards in Done column, pinned at top (max 5)
   const pinnedFailures = activeErrorCards.slice(0, 5).map(c => ({ ...c, column: 'done' }));
-  const combinedDoneCards = [...pinnedFailures, ...doneCards.slice(0, 10)];
+  const combinedDoneCards = [...pinnedFailures, ...doneResult.cards];
 
   columns.push({
     key: "done",
     title: "Done",
     tooltip: "Tasks that completed all stations successfully",
-    count: doneCards.length + activeErrorCards.length,
+    count: doneResult.total + activeErrorCards.length,
     cards: combinedDoneCards,
     pinnedFailures: pinnedFailures.length,
   });
