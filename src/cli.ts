@@ -856,21 +856,25 @@ async function handleDashboardStart(args: string[]) {
 
   console.log(`\n🏭 Assembly — Dashboard\n`);
 
-  // PID file check
+  // PID file check — verify the PID is actually a dashboard process before
+  // trusting it. `process.kill(pid, 0)` only confirms *something* owns the PID,
+  // and PID recycling on busy systems (many short-lived bun workers) makes that
+  // a false-positive trap. Confirm via /proc/<pid>/cmdline.
   if (existsSync(DASHBOARD_PID_FILE)) {
     try {
       const pidData = JSON.parse(readFileSync(DASHBOARD_PID_FILE, "utf-8"));
       process.kill(pidData.pid, 0);
-      console.error(
-        `  Dashboard already running (PID: ${pidData.pid}). Use 'assembly dashboard stop' first.\n`
-      );
-      process.exit(1);
-    } catch (err) {
-      if ((err as Error).message.includes("already running")) process.exit(1);
-      try {
-        unlinkSync(DASHBOARD_PID_FILE);
-      } catch {}
-    }
+      const cmdline = readFileSync(`/proc/${pidData.pid}/cmdline`, "utf-8");
+      if (cmdline.includes("dashboard")) {
+        console.error(
+          `  Dashboard already running (PID: ${pidData.pid}). Use 'assembly dashboard stop' first.\n`
+        );
+        process.exit(1);
+      }
+    } catch {}
+    try {
+      unlinkSync(DASHBOARD_PID_FILE);
+    } catch {}
   }
 
   const dashboard = startGlobalDashboard({ port });
