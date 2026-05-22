@@ -842,8 +842,8 @@ if (!lintPassed) {
 
 log(`running bun test`);
 const testR = spawnSync("bun", ["test"], { cwd: wt, encoding: "utf-8", timeout: 180_000 });
-const testOut = ((testR.stdout ?? "") + "\n" + (testR.stderr ?? "")).slice(-4000);
-const testsPassed = testR.status === 0;
+let testOut = ((testR.stdout ?? "") + "\n" + (testR.stderr ?? "")).slice(-4000);
+let testsPassed = testR.status === 0;
 if (!testsPassed) {
   log(`tests failed (exit ${testR.status})`);
 }
@@ -888,13 +888,246 @@ if (!(aheadR.stdout ?? "").trim()) {
   );
 }
 
+// ─── Pre-merge with main: surface conflicts here, not in deploy ──────
+//
+// deploy.ts does `git merge <branch> --no-ff` on main and hardFails on
+// conflicts — and the orchestrator just retries deploy, which hits the
+// same conflict every time. We pre-resolve here, where the agent
+// context is still fresh and where retry-with-feedback already works:
+//
+//   1. `git merge main --no-edit --no-ff` inside the worktree.
+//   2. Clean / fast-forward / already-up-to-date → continue.
+//   3. Conflicts → spawn a focused resolution agent, verify markers
+//      gone, stage + commit the merge. Re-run tests on the merged tree.
+//
+// After this step, `commit_sha` points at the post-merge HEAD; deploy's
+// later `git merge <branch> --no-ff` on main becomes a clean fast-
+// forward-able merge (no conflicts since main is already in the branch).
+
+log(`pre-merge: bringing main into branch ${branch}`);
+const preMergeCommitMsg = `Merge main into ${branch} to pre-resolve before deploy`;
+const preMergeR = spawnSync(
+  "git",
+  [
+    "-C", wtRoot,
+    "-c", "user.name=assembly-dev",
+    "-c", "user.email=assembly-dev@local",
+    "merge", "main", "--no-edit", "--no-ff", "-m", preMergeCommitMsg,
+  ],
+  { encoding: "utf-8" }
+);
+
+let preMergeResolved = false;
+if (preMergeR.status !== 0) {
+  const conflictsR = spawnSync(
+    "git",
+    ["-C", wtRoot, "diff", "--name-only", "--diff-filter=U"],
+    { encoding: "utf-8" }
+  );
+  const conflictedFiles = ((conflictsR.stdout ?? "").trim().split("\n")).filter(Boolean);
+
+  if (conflictedFiles.length === 0) {
+    spawnSync("git", ["-C", wtRoot, "merge", "--abort"], { encoding: "utf-8" });
+    hardFail(
+      "pre-merge failed without reporting conflicts",
+      `${preMergeR.stdout ?? ""}\n${preMergeR.stderr ?? ""}`
+    );
+  }
+
+  log(`pre-merge conflicts in ${conflictedFiles.length} file(s): ${conflictedFiles.join(", ")}`);
+
+  const resolveSystemPrompt = `You are a senior developer resolving merge conflicts inside an Assembly framework worktree.
+
+## Your cwd IS the worktree
+- You are running at: ${wt}
+- The worktree just attempted \`git merge main --no-edit --no-ff\` and hit content conflicts.
+- The conflicted files have \`<<<<<<<\` / \`=======\` / \`>>>>>>>\` markers.
+- Do NOT edit anything under ${REPO} — that is a DIFFERENT checkout.
+- Do NOT run git commands. The script around you will stage and commit after you finish. NO \`git add\`, \`git commit\`, \`git merge\`, \`git reset\`, etc.
+
+## Your job
+For each conflicted file: read it, understand BOTH sides, write a merged version with no markers that preserves the intent of both. The branch's new work and main's drift both matter — don't drop either. If two sides edit the same logical block, integrate them.
+
+## Conflicted files
+${conflictedFiles.map((f) => `- ${f}`).join("\n")}
+
+## Verification
+After editing each file, re-read it and confirm no \`<<<<<<<\`, \`=======\` (between markers), or \`>>>>>>>\` lines remain. The script will reject files with leftover markers and hardFail.
+
+Only edit the conflicted files listed above. Auto-merged files are already staged correctly — do not touch them.`;
+
+  const resolveUserMsg = [
+    `# Merge-conflict resolution`,
+    ``,
+    `\`git merge main --no-edit --no-ff\` produced content conflicts in:`,
+    ...conflictedFiles.map((f) => `- ${f}`),
+    ``,
+    `Resolve each by editing out the markers while preserving both sides' intent. Refer to the original task and plan below for context on what the branch was trying to accomplish.`,
+    ``,
+    `# Original task`,
+    wp.task,
+    ``,
+    `# Plan summary`,
+    wp.stations?.plan?.summary ?? "(no summary)",
+  ].join("\n");
+
+  if (existsSync(envelopePath)) {
+    try { unlinkSync(envelopePath); } catch {}
+  }
+
+  log(`spawning claude for conflict resolution model=${MODEL}`);
+  const resolveProc = Bun.spawn(["claude", ...claudeArgs], {
+    cwd: wt,
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: process.env,
+  });
+
+  const resolvePayload = JSON.stringify({
+    type: "user",
+    system: resolveSystemPrompt,
+    message: { role: "user", content: resolveUserMsg },
+  }) + "\n";
+  resolveProc.stdin.write(resolvePayload);
+  await resolveProc.stdin.end();
+
+  let resolveBuffer = "";
+  const resolveReader = resolveProc.stdout.getReader();
+  while (true) {
+    const { done, value } = await resolveReader.read();
+    if (done) break;
+    resolveBuffer += dec.decode(value);
+    let idx;
+    while ((idx = resolveBuffer.indexOf("\n")) !== -1) {
+      const line = resolveBuffer.slice(0, idx);
+      resolveBuffer = resolveBuffer.slice(idx + 1);
+      if (!line.trim()) continue;
+      try {
+        const ev = JSON.parse(line);
+        if (ev.type === "assistant" && ev.message?.content) {
+          for (const block of ev.message.content) {
+            if (block.type === "tool_use") {
+              log(`resolve.tool_use ${block.name} ${JSON.stringify(block.input).slice(0, 160)}`);
+            }
+          }
+        }
+      } catch { /* non-JSON line — ignore */ }
+    }
+  }
+
+  const resolveStderr = await new Response(resolveProc.stderr).text();
+  const resolveExit = await resolveProc.exited;
+
+  if (resolveExit !== 0) {
+    spawnSync("git", ["-C", wtRoot, "merge", "--abort"], { encoding: "utf-8" });
+    hardFail(
+      "conflict-resolution agent exited non-zero",
+      `exit=${resolveExit}\n${resolveStderr.slice(-2000)}`
+    );
+  }
+
+  // Verify markers gone in every conflicted file.
+  const markerLeftovers: string[] = [];
+  for (const f of conflictedFiles) {
+    const absPath = resolvePath(wt, f);
+    if (!existsSync(absPath)) {
+      // Both sides deleted the file or agent removed it — accept the deletion.
+      continue;
+    }
+    const content = readFileSync(absPath, "utf-8");
+    if (
+      /^<{7} /m.test(content) ||
+      /^={7}$/m.test(content) ||
+      /^>{7} /m.test(content)
+    ) {
+      markerLeftovers.push(f);
+    }
+  }
+  if (markerLeftovers.length > 0) {
+    spawnSync("git", ["-C", wtRoot, "merge", "--abort"], { encoding: "utf-8" });
+    hardFail(
+      "conflict markers remain after resolution agent",
+      `Files still containing markers:\n${markerLeftovers.map((f) => `  ${f}`).join("\n")}\n` +
+        `Agent did not fully resolve the conflicts.`
+    );
+  }
+
+  // Stage resolved files and complete the merge commit.
+  const addR = spawnSync(
+    "git",
+    ["-C", wtRoot, "add", "--", ...conflictedFiles],
+    { encoding: "utf-8" }
+  );
+  if (addR.status !== 0) {
+    spawnSync("git", ["-C", wtRoot, "merge", "--abort"], { encoding: "utf-8" });
+    hardFail(
+      "git add of resolved conflict files failed",
+      `${addR.stdout ?? ""}\n${addR.stderr ?? ""}`
+    );
+  }
+
+  const mergeCommitR = spawnSync(
+    "git",
+    [
+      "-C", wtRoot,
+      "-c", "user.name=assembly-dev",
+      "-c", "user.email=assembly-dev@local",
+      "commit", "--no-edit",
+    ],
+    { encoding: "utf-8" }
+  );
+  if (mergeCommitR.status !== 0) {
+    hardFail(
+      "git commit of merge resolution failed",
+      `${mergeCommitR.stdout ?? ""}\n${mergeCommitR.stderr ?? ""}`
+    );
+  }
+
+  preMergeResolved = true;
+  log(`pre-merge conflicts resolved across ${conflictedFiles.length} file(s)`);
+
+  if (existsSync(envelopePath)) {
+    try { unlinkSync(envelopePath); } catch {}
+  }
+} else {
+  // mergeR.status === 0 — either fast-forward, no-op (Already up to date),
+  // or clean auto-merge. The stdout tells us which but we don't care.
+  log(`pre-merge clean: ${(preMergeR.stdout ?? "").trim().split("\n")[0] ?? "ok"}`);
+}
+
+// Refresh commitSha — merge or merge-commit may have moved HEAD.
+const postMergeShaR = spawnSync("git", ["-C", wtRoot, "rev-parse", "HEAD"], { encoding: "utf-8" });
+commitSha = (postMergeShaR.stdout ?? "").trim();
+
+// Re-run tests after merging main in — automerged code or our resolution
+// may have introduced semantic breakage even if markers are gone.
+if (preMergeResolved || preMergeR.status === 0) {
+  // Only re-run if main actually contributed something. "Already up to
+  // date" leaves HEAD unchanged, so the earlier run is still valid.
+  const ahead2R = spawnSync("git", ["-C", wtRoot, "log", "main..HEAD", "--oneline"], { encoding: "utf-8" });
+  const aheadCount = (ahead2R.stdout ?? "").trim().split("\n").filter(Boolean).length;
+  // After a real merge, branch has at least 2 commits ahead of main (the
+  // agent's commit + the merge commit). After "Already up to date", it
+  // has the original single commit and re-testing is wasteful.
+  if (preMergeResolved || aheadCount > 1) {
+    log(`re-running bun test on post-merge HEAD=${commitSha.slice(0, 8)}`);
+    const reTestR = spawnSync("bun", ["test"], { cwd: wt, encoding: "utf-8", timeout: 180_000 });
+    testOut = ((reTestR.stdout ?? "") + "\n" + (reTestR.stderr ?? "")).slice(-4000);
+    testsPassed = reTestR.status === 0;
+    if (!testsPassed) {
+      log(`post-merge tests failed (exit ${reTestR.status}) — deferring to eval for retry-with-feedback`);
+    }
+  }
+}
+
 // Test failures are no longer hardFailed here — they route through eval
 // like lint and typecheck (above), so the next develop attempt sees the
 // failing test output as agent feedback. eval.ts re-runs the suite and
 // emits action:retry with the output when any of {tests, typecheck,
 // lint} are failing.
 if (!testsPassed) {
-  log(`tests failed (exit ${testR.status}) — deferring to eval for retry-with-feedback`);
+  log(`tests failed — deferring to eval for retry-with-feedback`);
 }
 
 // ─── Emit envelope ────────────────────────────────────────────────────
