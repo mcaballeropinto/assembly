@@ -146,6 +146,12 @@ export function classifyError(err: Error): FailureClass {
   if (/exited with code|All models failed|produced no output|killed by signal|SIGKILL|SIGTERM/i.test(msg)) {
     return "crash";
   }
+  // Assembly's in-process stdout-idle watchdog (llm.ts) — conceptually the same
+  // as a station-level idle timeout, just enforced one layer deeper. Use the
+  // same FailureClass so retry policy treats it identically.
+  if (/stream stalled|stall watchdog/i.test(msg)) {
+    return "timeout";
+  }
   return "unknown";
 }
 

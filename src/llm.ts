@@ -558,6 +558,44 @@ Never write under the line/station tree (anywhere under lines/) outside the enve
     } catch {}
   });
 
+  // ── Stdout-idle watchdog ──────────────────────────────────────────
+  // Belt-and-suspenders to upstream CLAUDE_STREAM_IDLE_TIMEOUT_MS, which
+  // has been observed not to fire — observed 2026-05-21 when an em-prospector
+  // score task hung 24h with `child_live: false` from heartbeat #1 onward.
+  // Without this, callClaudeCode's `Promise.race(envelopeWatch, streamPromise)`
+  // can deadlock forever: streamPromise's reader.read() blocks until stdout
+  // closes, and envelopeWatch polls forever for a file the dead-silent agent
+  // can't write. SIGKILL closes stdout, which unblocks streamPromise and
+  // resolves the race naturally.
+  //
+  // Threshold is intentionally a bit larger than the env-var CLAUDE_STREAM_IDLE_TIMEOUT_MS
+  // we hand to claude (300s) so claude's own watchdog gets first shot.
+  const STREAM_STALL_MS = parseInt(
+    process.env.ASSEMBLY_CLAUDE_STREAM_STALL_MS ?? "420000",
+    10
+  );
+  let stallKilled = false;
+  const stallWatchdog = setInterval(() => {
+    if (Date.now() - lastActivityMs >= STREAM_STALL_MS) {
+      stallKilled = true;
+      if (logger) {
+        try {
+          logger("claude_stream_stall_kill", {
+            silent_ms: Date.now() - lastActivityMs,
+            threshold_ms: STREAM_STALL_MS,
+          });
+        } catch {}
+      }
+      try { proc.kill("SIGKILL"); } catch {}
+      clearInterval(stallWatchdog);
+    }
+  }, 15_000);
+  // Don't keep the event loop alive on the watchdog alone.
+  if ((stallWatchdog as unknown as { unref?: () => void }).unref) {
+    (stallWatchdog as unknown as { unref: () => void }).unref();
+  }
+  proc.exited.finally(() => clearInterval(stallWatchdog));
+
   // Write the stream-json payload via stdin (user message only — the system
   // prompt is supplied via --system-prompt-file above, which claude-code
   // actually honors; stdin's `system` field is silently dropped).
@@ -854,6 +892,16 @@ Never write under the line/station tree (anywhere under lines/) outside the enve
   // an error, surface that error — we have nothing to salvage from disk.
   if (usingWatcher && !envelopeFromWatcher && streamResultError) {
     throw streamResultError;
+  }
+
+  // The stall watchdog SIGKILL'd the subprocess due to stdout silence past
+  // the threshold AND no envelope ever appeared. Surface a clear error so
+  // the orchestrator routes this to error/ with a meaningful failure class
+  // (rather than the generic "exit code N" path below).
+  if (stallKilled && !envelopeFromWatcher) {
+    throw new Error(
+      `claude stream stalled (no stdout activity for ${Math.floor(STREAM_STALL_MS / 1000)}s) — killed by assembly stall watchdog`
+    );
   }
 
   // Wait for process exit (bounded — SIGKILL above guarantees it dies).
