@@ -558,6 +558,32 @@ export async function startOrchestrator(
     log("retry_sidecar_cleanup", { removed: sidecarsRemoved });
   }
 
+  // Sweep orphan `.envelope.json.tmp` files. The envelope-write protocol
+  // (llm.ts) tells the agent to Write to ${envelopePath}.tmp then mv into
+  // place. If the worker dies between those two tool calls — exactly what
+  // a station hang produces — the .tmp lingers forever. Anything older
+  // than ENVELOPE_TMP_TTL_MS is past any legitimate Write-to-mv gap.
+  const ENVELOPE_TMP_TTL_MS = 60 * 60 * 1000; // 1 hour
+  let envelopeTmpsRemoved = 0;
+  for (const section of sections) {
+    try {
+      for (const entry of readdirSync(section.queue.processing)) {
+        if (!entry.endsWith(".envelope.json.tmp")) continue;
+        const path = resolve(section.queue.processing, entry);
+        try {
+          const ageMs = Date.now() - statSync(path).mtimeMs;
+          if (ageMs >= ENVELOPE_TMP_TTL_MS) {
+            unlinkSync(path);
+            envelopeTmpsRemoved++;
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+  if (envelopeTmpsRemoved > 0) {
+    log("envelope_tmp_cleanup", { removed: envelopeTmpsRemoved });
+  }
+
   // Auto-archive old errors (>7 days)
   try {
     const archiveResult = autoArchiveOld(linePath);
