@@ -290,8 +290,15 @@ export async function startGlobalOrchestrator(
   });
 
   // 6. Cleanup handler
+  // Only unlink the PID file if it still points at us. Without this guard,
+  // a leaked successor daemon that exits later would wipe the canonical
+  // pointer — observed when reload-handoff races left multiple daemons
+  // running and the strays eventually died (or were killed) under a PID
+  // file that meanwhile had been reclaimed by another process.
   const cleanup = () => {
     try {
+      const cur = JSON.parse(readFileSync(ORCHESTRATOR_PID_FILE, "utf-8"));
+      if (cur?.pid !== process.pid) return;
       unlinkSync(ORCHESTRATOR_PID_FILE);
     } catch {}
   };
