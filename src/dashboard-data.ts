@@ -455,6 +455,7 @@ export async function getFullState(linePath: string) {
           task: wp.task.slice(0, 100),
           finished_at: wpFinishedAt,
           duration_ms: wpDurationMs,
+          outcome: "success",
           stations: Object.fromEntries(
             Object.entries(wp.stations).map(([k, v]) => [
               k,
@@ -494,6 +495,14 @@ export async function getFullState(linePath: string) {
           failed: failedStations,
           finished_at: errFinishedAt,
           duration_ms: errDurationMs,
+          outcome: "failed",
+          errorSummary: failedStations.length > 0 ? (failedStations[0].error || '').slice(0, 80) : '',
+          stations: Object.fromEntries(
+            Object.entries(wp.stations).map(([k, v]) => [
+              k,
+              { status: v.status, summary: v.summary },
+            ])
+          ),
         };
         if (dismissedMap[fName]) {
           dismissedErrors.push({
@@ -969,6 +978,8 @@ export interface KanbanCard {
   finished_at?: string | null;
   duration_ms?: number | null;
   failedStation?: string;
+  outcome?: "success" | "failed" | "escalated";
+  errorSummary?: string;
 }
 
 export interface KanbanColumn {
@@ -982,6 +993,7 @@ export interface KanbanColumn {
   cards: KanbanCard[];
   retrying_count?: number;
   exhausted_count?: number;
+  pinnedFailures?: number;
 }
 
 export type StationStatusState = "running" | "idle" | "blocked" | "errored" | "muted";
@@ -1121,7 +1133,20 @@ function buildKanbanCard(
       const failedEntry = Object.entries(wp.stations ?? {}).find(
         ([, sr]) => sr.status === 'failed'
       );
-      if (failedEntry) card.failedStation = failedEntry[0];
+      if (failedEntry) {
+        card.failedStation = failedEntry[0];
+        card.outcome = "failed";
+        card.errorSummary = (failedEntry[1].summary || '').slice(0, 80);
+      }
+    }
+    // For done cards, set outcome to success (or escalated if any station was escalated)
+    if (columnKey === 'done') {
+      const hasEscalated = Object.values(wp.stations ?? {}).some(sr => sr.status === 'escalated');
+      card.outcome = hasEscalated ? "escalated" : "success";
+    }
+    // For review cards, set outcome to escalated
+    if (columnKey === 'review') {
+      card.outcome = "escalated";
     }
     // Lifecycle timestamps for duration labels
     if (station) {
@@ -1468,14 +1493,26 @@ export async function getKanbanState(
     });
   }
 
-  // Done (always visible) - use paginated getDoneCards
+  // Error (collect early so we can pin failures in Done)
+  const errorDir = resolve(linePath, "queues", "error");
+  const errorCards = collectCards(errorDir, "error", undefined, undefined, retriesByWp);
+  const dismissedMap = readDismissed(linePath);
+  const activeErrorCards = errorCards.filter((c) => !dismissedMap[c.fileName]);
+
+  // Done (always visible) - use paginated getDoneCards with pinned failures
   const doneResult = await getDoneCards(linePath, 0, 10, retriesByWp);
+
+  // Include active error cards in Done column, pinned at top (max 5)
+  const pinnedFailures = activeErrorCards.slice(0, 5).map(c => ({ ...c, column: 'done' }));
+  const combinedDoneCards = [...pinnedFailures, ...doneResult.cards];
+
   columns.push({
     key: "done",
     title: "Done",
     tooltip: "Tasks that completed all stations successfully",
-    count: doneResult.total,
-    cards: doneResult.cards,
+    count: doneResult.total + activeErrorCards.length,
+    cards: combinedDoneCards,
+    pinnedFailures: pinnedFailures.length,
   });
 
   // Review (only visible if non-empty)
@@ -1497,10 +1534,6 @@ export async function getKanbanState(
   }
 
   // Error (only visible if non-empty, active only)
-  const errorDir = resolve(linePath, "queues", "error");
-  const errorCards = collectCards(errorDir, "error", undefined, undefined, retriesByWp);
-  const dismissedMap = readDismissed(linePath);
-  const activeErrorCards = errorCards.filter((c) => !dismissedMap[c.fileName]);
   if (activeErrorCards.length > 0) {
     columns.push({
       key: "error",
