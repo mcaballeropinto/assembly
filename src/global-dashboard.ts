@@ -1,5 +1,5 @@
 import { discoverLines, type GlobalState } from "./global-orchestrator";
-import { getFullState, findWorkpiece, getWorkpieceActivity, getHistory, getKanbanState, getTaskEventStations, getTaskEvents, computeFlowMetrics } from "./dashboard-data";
+import { getFullState, findWorkpiece, getWorkpieceActivity, getHistory, getKanbanState, getDoneCards, getTaskEventStations, getTaskEvents, computeFlowMetrics } from "./dashboard-data";
 import { dismissFilenames, undismissFilenames } from "./error-dismiss";
 import { releaseHeldTasks, InvalidTaskFileError } from "./held";
 import {
@@ -293,6 +293,23 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
           return Response.json({ events });
         } catch {
           return Response.json({ events: [] });
+        }
+      }
+
+      // Per-line paginated done cards API
+      const kanbanDoneMatch = url.pathname.match(/^\/api\/line\/([^/]+)\/kanban\/done$/);
+      if (kanbanDoneMatch && req.method === "GET") {
+        const lineName = decodeURIComponent(kanbanDoneMatch[1]);
+        const dl = linesByName.get(lineName);
+        if (!dl) return Response.json({ error: `Line "${lineName}" not found` }, { status: 404 });
+        try {
+          const offset = parseInt(url.searchParams.get("offset") ?? "0", 10) || 0;
+          const rawLimit = parseInt(url.searchParams.get("limit") ?? "20", 10) || 20;
+          const limit = Math.max(1, Math.min(50, rawLimit)); // Clamp to 1-50
+          const result = await getDoneCards(dl.linePath, offset, limit);
+          return Response.json({ cards: result.cards, total: result.total, offset, limit });
+        } catch (err) {
+          return Response.json({ error: (err as Error).message }, { status: 500 });
         }
       }
 
@@ -1335,6 +1352,40 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       font-style: italic;
       padding: 2px 0;
       text-align: center;
+    }
+    .kanban-done-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .kanban-done-footer .done-footer-count {
+      color: var(--text-secondary);
+    }
+    .kanban-done-footer .load-more-btn {
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: 4px;
+      padding: 4px 12px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .kanban-done-footer .load-more-btn:hover {
+      background: var(--color-info-dim);
+      color: var(--text-primary);
+    }
+    .kanban-done-footer .load-more-btn:focus-visible {
+      outline: 2px solid var(--color-info);
+      outline-offset: 1px;
+    }
+    .kanban-done-footer .load-more-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
     }
     .kanban-col-actions {
       display: flex;
@@ -2539,6 +2590,10 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
     // Track which card ids have already had their "exhausted" state announced
     // so the aria-live region only fires once per transition, not on every poll.
     window._retryExhaustedAnnounced = window._retryExhaustedAnnounced || {};
+    // Done column pagination state
+    window._doneExtraCards = window._doneExtraCards || [];
+    window._doneOffset = window._doneOffset || 10;
+    window._doneLoading = false;
 
     function stateIcon(state) {
       if (state === 'held') return '\\u23f8';
@@ -2785,6 +2840,18 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         html += '<span id="release-all-confirm" class="release-confirm hidden">Release all ' + col.count + '? <button onclick="releaseAllHeld()">Yes</button> <button onclick="cancelReleaseAll()">Cancel</button></span>';
         html += '</div>';
       }
+      if (col.key === 'done') {
+        var showing = col.cards.length + (window._doneExtraCards ? window._doneExtraCards.length : 0);
+        var total = col.count;
+        html += '<div class="kanban-done-footer" id="done-footer">';
+        html += '<span class="done-footer-count">Showing ' + showing + ' of ' + total + '</span>';
+        if (showing < total) {
+          var btnLabel = window._doneLoading ? 'Loading\u2026' : 'Load more';
+          var btnDisabled = window._doneLoading ? ' disabled' : '';
+          html += '<button class="load-more-btn"' + btnDisabled + ' onclick="loadMoreDone()" aria-label="Load more completed tasks"' + (window._doneLoading ? ' aria-busy="true"' : '') + '>' + btnLabel + '</button>';
+        }
+        html += '</div>';
+      }
       html += '</div>';
       return html;
     }
@@ -2935,6 +3002,28 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         }
       }
 
+      // Re-append extra done cards loaded via pagination
+      if (window._doneExtraCards && window._doneExtraCards.length > 0) {
+        var doneBody = mount.querySelector('[data-col-body="done"]');
+        if (doneBody) {
+          // Deduplicate: remove any extra cards that now appear in the initial 10
+          var initialFiles = new Set();
+          var initialCards = doneBody.querySelectorAll('.kanban-card');
+          for (var di = 0; di < initialCards.length; di++) {
+            var dk = initialCards[di].getAttribute('data-key');
+            if (dk) initialFiles.add(dk);
+          }
+          var dedupedExtra = window._doneExtraCards.filter(function(c) {
+            return !initialFiles.has(c.fileName);
+          });
+          window._doneExtraCards = dedupedExtra;
+          if (dedupedExtra.length > 0) {
+            doneBody.insertAdjacentHTML('beforeend', dedupedExtra.map(renderKanbanCard).join(''));
+          }
+        }
+        updateDoneFooter();
+      }
+
       window._kanbanPrev = kb;
       window._kanbanPrevLine = selectedLine;
     }
@@ -2947,6 +3036,70 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         var kb = await res.json();
         if (kb && kb.columns && selectedLine === lineName) { applyKanban(kb); if (typeof AssemblyDashboard !== 'undefined') AssemblyDashboard.startBackoffTickers(); }
       } catch (e) {}
+    }
+
+    async function loadMoreDone() {
+      if (!selectedLine || window._doneLoading) return;
+      window._doneLoading = true;
+      updateDoneFooter();
+      try {
+        var res = await fetch('/api/line/' + encodeURIComponent(selectedLine) + '/kanban/done?offset=' + window._doneOffset + '&limit=20');
+        if (!res.ok) { window._doneLoading = false; updateDoneFooter(); return; }
+        var data = await res.json();
+        if (data.cards && data.cards.length > 0) {
+          // Deduplicate by fileName against existing cards
+          var existingFiles = new Set();
+          var board = document.getElementById('kanban-board');
+          if (board) {
+            var existing = board.querySelectorAll('[data-col-body="done"] .kanban-card');
+            for (var i = 0; i < existing.length; i++) {
+              var f = existing[i].getAttribute('data-key');
+              if (f) existingFiles.add(f);
+            }
+          }
+          for (var j = 0; j < window._doneExtraCards.length; j++) {
+            existingFiles.add(window._doneExtraCards[j].fileName);
+          }
+          var newCards = data.cards.filter(function(c) { return !existingFiles.has(c.fileName); });
+          window._doneExtraCards = window._doneExtraCards.concat(newCards);
+          window._doneOffset = data.offset + data.cards.length;
+          // Append new cards to DOM
+          var colBody = document.querySelector('[data-col-body="done"]');
+          if (colBody && newCards.length > 0) {
+            var cardsHtml = newCards.map(renderKanbanCard).join('');
+            colBody.insertAdjacentHTML('beforeend', cardsHtml);
+          }
+        }
+      } catch (e) {}
+      window._doneLoading = false;
+      updateDoneFooter();
+    }
+
+    function updateDoneFooter() {
+      var footer = document.getElementById('done-footer');
+      if (!footer) return;
+      var board = document.getElementById('kanban-board');
+      var visibleCount = 0;
+      if (board) {
+        visibleCount = board.querySelectorAll('[data-col-body="done"] .kanban-card').length;
+      }
+      // Get total from the kanban state
+      var total = window._kanbanPrev && window._kanbanPrev.columns
+        ? (window._kanbanPrev.columns.find(function(c) { return c.key === 'done'; }) || {}).count || 0
+        : 0;
+      var countEl = footer.querySelector('.done-footer-count');
+      if (countEl) countEl.textContent = 'Showing ' + visibleCount + ' of ' + total;
+      var btn = footer.querySelector('.load-more-btn');
+      if (btn) {
+        if (visibleCount >= total) {
+          btn.style.display = 'none';
+        } else {
+          btn.style.display = '';
+          btn.disabled = window._doneLoading;
+          btn.textContent = window._doneLoading ? 'Loading\u2026' : 'Load more';
+          btn.setAttribute('aria-busy', window._doneLoading ? 'true' : 'false');
+        }
+      }
     }
 
     async function loadFlowMetrics(lineName) {
@@ -3475,6 +3628,9 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       window._detailShellLine = null;
       window._kanbanPrev = null;
       window._kanbanPrevLine = null;
+      window._doneExtraCards = [];
+      window._doneOffset = 10;
+      window._doneLoading = false;
       history.pushState({ view: 'detail', line: name }, '', '/lines/' + encodeURIComponent(name));
       refresh();
       loadHistory();
@@ -3490,6 +3646,9 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       window._detailShellLine = null;
       window._kanbanPrev = null;
       window._kanbanPrevLine = null;
+      window._doneExtraCards = [];
+      window._doneOffset = 10;
+      window._doneLoading = false;
       history.pushState({ view: 'overview' }, '', '/');
       refresh();
       startRefresh(3000);
