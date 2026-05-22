@@ -1326,6 +1326,33 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
     .kanban-card.state-done .copy-id-btn.copied {
       color: var(--status-ok);
     }
+    /* Failed Done cards: red accent, labels, error summary */
+    .kanban-card.outcome-failed {
+      border-left: 3px solid var(--color-error);
+    }
+    .kanban-card.outcome-failed .card-state {
+      color: var(--color-error);
+    }
+    .kanban-card.outcome-failed .card-failed-label {
+      color: var(--color-error);
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-left: 4px;
+    }
+    .kanban-card.outcome-failed .card-error-summary {
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+    .kanban-card.outcome-failed .card-head-done .card-title-primary {
+      color: var(--text-muted);
+    }
     .kanban-card.entering { opacity: 0; transform: translateY(-4px); }
     .kanban-card.leaving { opacity: 0; transform: translateY(4px); }
     .kanban-empty {
@@ -1712,6 +1739,32 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       font-family: var(--font-mono);
       color: var(--text-primary);
     }
+
+    /* Outcome banner */
+    .drawer-outcome-banner {
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      margin-bottom: var(--space-md);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+    .drawer-outcome-banner.failed {
+      background: var(--color-error-dim);
+      color: var(--color-error);
+      border-left: 3px solid var(--color-error);
+    }
+    .drawer-outcome-banner.success {
+      background: var(--color-success-dim);
+      color: var(--color-success);
+      border-left: 3px solid var(--color-success);
+    }
+    .drawer-outcome-icon { font-size: 16px; }
+    .drawer-outcome-label { font-weight: 600; }
+    .drawer-outcome-detail { color: var(--text-muted); }
+    .drawer-outcome-summary { width: 100%; color: var(--text-muted); font-size: 12px; margin-top: 4px; }
 
     /* Task content */
     .drawer-task {
@@ -2160,6 +2213,22 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       font-size: 11px;
       color: var(--color-error);
       min-width: 80px;
+    }
+    .wp-list-item .wp-failed-badge {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--color-error);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-left: 6px;
+    }
+    .wp-list-item .wp-failed-info {
+      font-size: 11px;
+      color: var(--text-muted);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .wp-section-empty {
       padding: var(--space-md) var(--space-lg);
@@ -2647,6 +2716,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         if (card.retry.exhausted) cls += ' card-exhausted';
         else if (card.retry.in_backoff) cls += ' card-backoff';
       }
+      if (card.outcome === 'failed') cls += ' outcome-failed';
 
       var html = '<div class="' + cls + '" tabindex="0" role="button" data-key="' + escapeJs(card.fileName) + '" data-file="' + escapeJs(card.fileName) + '" data-column="' + escapeJs(card.column) + '"';
       html += ' title="' + esc(card.id) + '\\u2014' + esc(card.title) + '"';
@@ -2657,16 +2727,27 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       // Done-card variant: title-first layout
       if (card.column === 'done') {
         // Primary line: outcome icon + title
+        var outcomeIcon = (card.outcome === 'failed') ? '\\u2717' : stateIcon(card.state);
         html += '<div class="card-head-done">';
-        html += '<span class="card-state" aria-label="' + esc(card.state) + '">' + stateIcon(card.state) + '</span>';
+        html += '<span class="card-state" aria-label="' + esc(card.state) + '">' + outcomeIcon + '</span>';
+        if (card.outcome === 'failed') {
+          html += '<span class="card-failed-label" aria-label="Failed">Failed</span>';
+        }
         html += '<span class="card-title-primary">' + esc(card.title || card.id) + '</span>';
         html += '</div>';
+        // Error summary (if failed)
+        if (card.outcome === 'failed' && card.errorSummary) {
+          html += '<div class="card-error-summary">' + esc(card.errorSummary) + '</div>';
+        }
         // Preview line (if present)
         if (card.preview) {
           html += '<div class="card-preview">' + esc(card.preview) + '</div>';
         }
         // Meta line: relative time, duration, cost
         var metaParts = [];
+        if (card.outcome === 'failed' && card.failedStation) {
+          metaParts.push('<span style="color:var(--color-error)">\\u2717 ' + esc(card.failedStation) + '</span>');
+        }
         if (card.finished_at) {
           metaParts.push('<span title="' + esc(card.finished_at) + '">\\u23f1 ' + formatElapsedShort(card.finished_at) + ' ago</span>');
         } else if (card.enteredColumnAt) {
@@ -3642,6 +3723,35 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         html += '<div class="drawer-meta-item"><div class="drawer-meta-label">Total Cost</div><div class="drawer-meta-value">$' + wp.totals.cost_usd.toFixed(4) + '</div></div>';
       }
       html += '</div>';
+
+      // Outcome banner
+      var wpOutcome = 'success';
+      var wpFailedStation = '';
+      var wpErrorSummary = '';
+      if (wp._source === 'error') wpOutcome = 'failed';
+      if (wp.stations) {
+        for (var sk2 in wp.stations) {
+          if (wp.stations[sk2] && wp.stations[sk2].status === 'failed') {
+            wpOutcome = 'failed';
+            wpFailedStation = sk2;
+            wpErrorSummary = (wp.stations[sk2].summary || '').slice(0, 80);
+            break;
+          }
+        }
+      }
+      if (wpOutcome === 'failed') {
+        html += '<div class="drawer-outcome-banner failed">';
+        html += '<span class="drawer-outcome-icon">\\u2717</span>';
+        html += '<span class="drawer-outcome-label">Failed</span>';
+        if (wpFailedStation) html += '<span class="drawer-outcome-detail"> at ' + esc(wpFailedStation) + '</span>';
+        if (wpErrorSummary) html += '<div class="drawer-outcome-summary">' + esc(wpErrorSummary) + '</div>';
+        html += '</div>';
+      } else {
+        html += '<div class="drawer-outcome-banner success">';
+        html += '<span class="drawer-outcome-icon">\\u2713</span>';
+        html += '<span class="drawer-outcome-label">Completed</span>';
+        html += '</div>';
+      }
 
       // Action bar — only for errored workpieces
       var isErrored = wp._source === 'error';

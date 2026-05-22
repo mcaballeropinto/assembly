@@ -468,21 +468,38 @@
     }
     html += '</div></div>';
 
-    // Collapsible Completed section
+    // Collapsible Completed section (merge errors into completed)
+    var mergedCompleted = [];
+    // Prepend active errors (most recent failures first, max 5)
+    if (state.errors && state.errors.length > 0) {
+      for (var me = 0; me < Math.min(state.errors.length, 5); me++) {
+        mergedCompleted.push(Object.assign({}, state.errors[me], { _outcome: 'failed' }));
+      }
+    }
+    // Append completed items
+    if (state.completed) {
+      for (var mc = 0; mc < state.completed.length; mc++) {
+        mergedCompleted.push(Object.assign({}, state.completed[mc], { _outcome: 'success' }));
+      }
+    }
     var completedExpanded = isSectionExpanded('completed');
     html += '<div class="wp-section">';
     html += '<div class="wp-section-header" onclick="toggleSection(\'completed\')">';
     html += '<span class="wp-section-toggle' + (completedExpanded ? ' expanded' : '') + '" id="section-toggle-completed">\u25b6</span>';
-    html += '<h2>Recently Completed (' + (state.completed ? state.completed.length : 0) + ')</h2>';
+    html += '<h2>Recently Completed (' + mergedCompleted.length + ')</h2>';
     html += '</div>';
     html += '<div class="wp-section-body' + (completedExpanded ? ' expanded' : '') + '" id="section-body-completed">';
-    if (state.completed && state.completed.length > 0) {
+    if (mergedCompleted.length > 0) {
       html += '<div class="wp-list">';
-      for (var c = 0; c < state.completed.length; c++) {
-        var cw = state.completed[c];
+      for (var c = 0; c < mergedCompleted.length; c++) {
+        var cw = mergedCompleted[c];
         var cFile = cw.fileName || (cw.id + '.json');
-        html += '<div class="wp-list-item" data-key="completed-' + esc(cw.id) + '" onclick="openDrawer(\'' + escapeJs(selectedLine) + '\', \'' + escapeJs(cFile) + '\')">';
-        html += '<span class="wp-id">' + esc(cw.id) + '</span>';
+        var isFailed = cw._outcome === 'failed';
+        html += '<div class="wp-list-item' + (isFailed ? ' wp-list-item-failed' : '') + '" data-key="completed-' + esc(cw.id) + '" onclick="openDrawer(\'' + escapeJs(selectedLine) + '\', \'' + escapeJs(cFile) + '\')"' + (isFailed ? ' style="border-left: 3px solid var(--color-error)"' : '') + '>';
+        html += '<span class="wp-id"' + (isFailed ? ' style="color:var(--color-error)"' : '') + '>' + esc(cw.id) + '</span>';
+        if (isFailed) {
+          html += '<span class="wp-failed-badge">\u2717 Failed</span>';
+        }
         if (cw.stations) {
           html += '<span class="wp-status-dots">';
           var stKeys = Object.keys(cw.stations);
@@ -492,6 +509,10 @@
             html += '<div style="width:6px;height:6px;border-radius:50%;background:' + dotColor + '" title="' + esc(stKeys[si]) + ': ' + sStatus + '"></div>';
           }
           html += '</span>';
+        }
+        // For failed items, show failed station and error summary
+        if (isFailed && cw.failed && cw.failed.length > 0) {
+          html += '<span class="wp-failed-info">' + esc(cw.failed[0].station) + ' &mdash; ' + esc((cw.failed[0].error || '').slice(0, 80)) + '</span>';
         }
         html += '<span class="wp-duration">' + (cw.duration_ms != null ? formatDuration(cw.duration_ms) : '') + '</span>';
         html += '<span class="wp-time">' + formatRelativeTime(cw.finished_at) + '</span>';
