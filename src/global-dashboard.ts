@@ -109,7 +109,7 @@ async function buildGlobalState(lines: DiscoveredLine[]): Promise<GlobalState> {
     }
   }
 
-  return { lines: lineStates, totals, timestamp: new Date().toISOString() };
+  return { lines: lineStates, totals, timestamp: new Date().toISOString(), version: "2026.05.24" };
 }
 
 // ─── Dashboard Server ──────────────────────────────────────────────
