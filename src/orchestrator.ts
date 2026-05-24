@@ -1,5 +1,5 @@
 import { resolve, basename } from "path";
-import { mkdirSync, existsSync, appendFileSync, unlinkSync, readdirSync, readFileSync, statSync, writeFileSync, renameSync } from "fs";
+import { mkdirSync, existsSync, appendFileSync, unlinkSync, readdirSync, readFileSync, statSync, writeFileSync, renameSync, openSync, closeSync, readSync } from "fs";
 import { loadLine } from "./line";
 import { createWorkpiece } from "./workpiece";
 import { loadEnvFiles } from "./paths";
@@ -313,6 +313,91 @@ export async function startOrchestrator(
     );
   }
 
+  /**
+   * Tail the activity log for station_heartbeat events matching a specific
+   * station and workpiece. When a heartbeat with child_live: true arrives,
+   * calls the onHeartbeat callback to update the idle watchdog's lastActivityMs.
+   *
+   * Starts from the current EOF (ignores old heartbeats from prior runs).
+   * Polls at 5s intervals (heartbeats fire every 30s; 5s poll ensures we catch
+   * them well before the watchdog tick).
+   *
+   * Returns a stop function that clears the interval and closes the file descriptor.
+   */
+  function tailActivityLog(
+    stationName: string,
+    workpieceName: string,
+    onHeartbeat: () => void
+  ): () => void {
+    // Start from current end of file — old heartbeats from prior runs don't count
+    let offset = 0;
+    try {
+      offset = statSync(logPath).size;
+    } catch {}
+
+    let fd: number | null = null;
+    let stopped = false;
+    let lineBuf = "";
+
+    const openFd = () => {
+      if (fd !== null) return;
+      try {
+        fd = openSync(logPath, "r");
+      } catch {
+        fd = null;
+      }
+    };
+
+    const drain = () => {
+      if (stopped) return;
+      if (fd === null) openFd();
+      if (fd === null) return;
+      try {
+        const stat = statSync(logPath);
+        if (stat.size <= offset) return;
+        const buf = Buffer.alloc(stat.size - offset);
+        const bytes = readSync(fd, buf, 0, buf.length, offset);
+        if (bytes > 0) {
+          offset += bytes;
+          lineBuf += buf.slice(0, bytes).toString("utf-8");
+          // Process complete lines
+          const lines = lineBuf.split("\n");
+          lineBuf = lines.pop() ?? ""; // keep incomplete last line
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const entry = JSON.parse(line);
+              if (
+                entry.event === "station_heartbeat" &&
+                entry.station === stationName &&
+                entry.workpiece === workpieceName &&
+                entry.child_live === true
+              ) {
+                onHeartbeat();
+              }
+            } catch {
+              // Malformed line — skip
+            }
+          }
+        }
+      } catch {
+        try { if (fd !== null) closeSync(fd); } catch {}
+        fd = null;
+      }
+    };
+
+    const timer = setInterval(drain, 5_000);
+    if (timer.unref) timer.unref();
+
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      drain(); // final pass
+      try { if (fd !== null) closeSync(fd); } catch {}
+      fd = null;
+    };
+  }
+
   // ─── Orphan station detection ─────────────────────────────────────
   //
   // After a `daemon reload` with a line.yaml change that removed (or renamed)
@@ -381,6 +466,8 @@ export async function startOrchestrator(
     adopted?: boolean;
     /** Stop-tail handle for the stderr sidecar (so we drain on exit). */
     stopStderrTail?: () => void;
+    /** Stop-tail handle for the activity log heartbeat watcher. */
+    stopActivityTail?: () => void;
   }
   const activeWorkerHandles = new Map<string, ActiveWorkerHandle>();
 
@@ -1251,6 +1338,17 @@ export async function startOrchestrator(
       })();
     }
 
+    // Tail activity.jsonl for station_heartbeat events from this worker.
+    // When the section-worker reports child_live: true, refresh the idle
+    // watchdog — this is the primary liveness signal for long-running
+    // stations that produce no stdout.
+    const stopActivityTail = tailActivityLog(
+      section.name,
+      basename(workpiecePath),
+      () => { lastActivityMs = Date.now(); }
+    );
+    workerHandle.stopActivityTail = stopActivityTail;
+
     let idleWatchdog: ReturnType<typeof setInterval> | undefined;
     let maxWallClockTimer: ReturnType<typeof setTimeout> | undefined;
     let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1336,6 +1434,11 @@ export async function startOrchestrator(
       // Stop stderr tail and capture any final bytes (tail does a final drain).
       if (stopStderrTail) {
         try { stopStderrTail(); } catch {}
+      }
+
+      // Stop activity log tail
+      if (stopActivityTail) {
+        try { stopActivityTail(); } catch {}
       }
 
       const stderr = stderrChunks.join('');
@@ -1617,6 +1720,9 @@ export async function startOrchestrator(
     for (const h of activeWorkerHandles.values()) {
       if (h.stopStderrTail) {
         try { h.stopStderrTail(); } catch {}
+      }
+      if (h.stopActivityTail) {
+        try { h.stopActivityTail(); } catch {}
       }
     }
 
