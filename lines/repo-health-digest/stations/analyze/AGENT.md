@@ -1,5 +1,6 @@
 ---
 reads: [discover, fetch]
+description: "Analyzes repository health metrics, activity patterns, and code quality indicators."
 provider: claude-code
 model: sonnet
 tools: []

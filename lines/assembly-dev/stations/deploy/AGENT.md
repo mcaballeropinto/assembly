@@ -1,5 +1,6 @@
 ---
 reads: [task, plan.data, develop.data]
+description: "Merges the develop branch, restarts services, and verifies the deployment."
 provider: script
 script: deploy.ts
 guardrails:

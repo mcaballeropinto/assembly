@@ -1,5 +1,6 @@
 ---
 reads: [task, input]
+description: "Discovers repositories to analyze from GitHub organization or user account."
 provider: script
 script: discover.ts
 guardrails:

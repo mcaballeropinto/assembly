@@ -33,6 +33,7 @@ export async function loadStation(
     name,
     dir: stationDir,
     memoryDir,
+    description: frontmatter.description ?? undefined,
     reads: frontmatter.reads ?? undefined,
     provider: frontmatter.provider ?? undefined,
     model: frontmatter.model ?? undefined,

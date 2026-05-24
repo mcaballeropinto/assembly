@@ -1,5 +1,6 @@
 ---
 reads: [discover, fetch, analyze, score]
+description: "Generates a comprehensive health digest report in markdown format."
 provider: script
 script: report.ts
 guardrails:

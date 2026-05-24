@@ -1009,6 +1009,13 @@ export interface StationStatus {
 
 export const STATION_BLOCKED_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes — same as card-level stuck
 
+export interface StationTooltipMeta {
+  description?: string;
+  provider?: string;
+  model?: string;
+  timeout?: number;
+}
+
 export interface KanbanState {
   line: string;
   sequence: string[];
@@ -1017,6 +1024,7 @@ export interface KanbanState {
   lastUpdated: string;
   stationFreshness?: Record<string, StationFreshness>;
   stationStatuses?: Record<string, StationStatus>;
+  stationMeta?: Record<string, StationTooltipMeta>;
 }
 
 function readWorkpieceSafe(path: string): Workpiece | null {
@@ -1385,9 +1393,11 @@ export async function getKanbanState(
   linePath: string,
 ): Promise<KanbanState | { error: string }> {
   let config;
+  let stations: Map<string, import('./types').StationConfig> | undefined;
   try {
     const loaded = await loadLine(linePath);
     config = loaded.config;
+    stations = loaded.stations;
   } catch {
     return { error: "Failed to load line" };
   }
@@ -1567,6 +1577,33 @@ export async function getKanbanState(
   const errorCols = columns.filter(c => c.key === 'error');
   const stationStatuses = computeStationStatuses(columns, sequence, errorCols, linePath);
 
+  // Build per-station metadata for tooltips
+  const stationMeta: Record<string, StationTooltipMeta> = {};
+  if (stations) {
+    // Build a map of per-station timeout overrides from sequence steps
+    const stationTimeouts: Record<string, number> = {};
+    for (const step of config.sequence) {
+      if (typeof step === 'object' && 'station' in step) {
+        const s = (step as { station: { name: string; timeout?: number } }).station;
+        if (s.timeout !== undefined) stationTimeouts[s.name] = s.timeout;
+      }
+    }
+    for (const name of sequence) {
+      const sc = stations.get(name);
+      if (!sc) continue;
+      const meta: StationTooltipMeta = {};
+      if (sc.description) meta.description = sc.description;
+      const provider = sc.provider || config.defaults?.provider;
+      if (provider) meta.provider = provider;
+      const model = sc.model || config.defaults?.model;
+      if (model) meta.model = model;
+      const timeout = stationTimeouts[name] ?? config.timeout;
+      if (timeout !== undefined) meta.timeout = timeout;
+      // Only include if there's at least a description
+      if (Object.keys(meta).length > 0) stationMeta[name] = meta;
+    }
+  }
+
   return {
     line: config.name,
     sequence,
@@ -1575,6 +1612,7 @@ export async function getKanbanState(
     lastUpdated: new Date().toISOString(),
     stationFreshness,
     stationStatuses,
+    stationMeta,
   };
 }
 
