@@ -1,5 +1,6 @@
 ---
 reads: [task, input, plan]
+description: "Implements the plan in a git worktree. Runs tests, typechecks, and linting. Produces a commit ready for merge."
 provider: script
 script: develop.ts
 guardrails:

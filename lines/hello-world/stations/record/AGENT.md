@@ -1,5 +1,6 @@
 ---
 reads: [task, greet]
+description: "Appends the greeting to a markdown log file."
 provider: script
 script: record.ts
 guardrails:

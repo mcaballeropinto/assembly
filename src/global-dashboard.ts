@@ -1170,6 +1170,52 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
     .station-freshness.completed .station-freshness-dot { background: var(--text-dim); opacity: 0.5; }
     .station-freshness.completed .station-freshness-icon { color: var(--text-dim); }
 
+    /* Station description tooltip */
+    .kanban-station-header { position: relative; }
+    .station-desc-trigger { cursor: help; }
+    .station-desc-tooltip {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      z-index: 50;
+      padding: 8px 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-sm);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--text-secondary);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 150ms ease 400ms, visibility 0ms linear 550ms;
+      pointer-events: none;
+    }
+    .kanban-station-header:hover .station-desc-tooltip,
+    .kanban-station-header:focus-within .station-desc-tooltip {
+      opacity: 1;
+      visibility: visible;
+      transition-delay: 400ms, 0ms;
+      pointer-events: auto;
+    }
+    .station-desc-tooltip .desc-text {
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+    .station-desc-tooltip .desc-meta {
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+    .station-desc-tooltip .desc-meta span + span::before {
+      content: ' · ';
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .station-desc-tooltip { transition: opacity 0ms, visibility 0ms; }
+      .kanban-station-header:hover .station-desc-tooltip,
+      .kanban-station-header:focus-within .station-desc-tooltip { transition-delay: 0ms; }
+    }
+
     .kanban-lanes {
       display: flex;
       flex-direction: column;
@@ -2937,7 +2983,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       return html;
     }
 
-    function renderKanbanStationGroup(stationName, lanes, freshness, stationStatuses) {
+    function renderKanbanStationGroup(stationName, lanes, freshness, stationStatuses, stationMeta) {
       var total = 0;
       var stationRetrying = 0;
       var stationExhausted = 0;
@@ -2977,7 +3023,25 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         freshnessHtml += '</span>';
       }
 
-      html += '<div class="kanban-station-header">' + statusDot + '<span class="station-name">' + esc(stationName) + '</span>' + freshnessHtml + '<span class="station-count">' + total + '</span>' + stationChips + '</div>';
+      // Build station description tooltip HTML
+      var descTooltipHtml = '';
+      var meta = stationMeta && stationMeta[stationName];
+      if (meta && meta.description) {
+        var descText = meta.description.length > 300 ? meta.description.slice(0, 300) + '…' : meta.description;
+        descTooltipHtml = '<div class="station-desc-tooltip" role="tooltip">';
+        descTooltipHtml += '<div class="desc-text">' + esc(descText) + '</div>';
+        var metaParts = [];
+        if (meta.provider) metaParts.push('<span>Provider: ' + esc(meta.provider) + '</span>');
+        if (meta.model) metaParts.push('<span>Model: ' + esc(meta.model) + '</span>');
+        if (meta.timeout) metaParts.push('<span>Timeout: ' + meta.timeout + 's</span>');
+        if (metaParts.length > 0) {
+          descTooltipHtml += '<div class="desc-meta">' + metaParts.join('') + '</div>';
+        }
+        descTooltipHtml += '</div>';
+      }
+
+      var nameAttrs = descTooltipHtml ? ' tabindex="0" class="station-name station-desc-trigger"' : ' class="station-name"';
+      html += '<div class="kanban-station-header">' + statusDot + '<span' + nameAttrs + '>' + esc(stationName) + '</span>' + freshnessHtml + '<span class="station-count">' + total + '</span>' + stationChips + descTooltipHtml + '</div>';
       html += '<div class="kanban-lanes">';
       for (var j = 0; j < lanes.length; j++) {
         var lane = lanes[j];
@@ -3016,7 +3080,7 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         if (g.type === 'col') parts.push(renderKanbanColumn(g.col));
         else {
           var freshness = kb.stationFreshness ? kb.stationFreshness[g.station] : null;
-          parts.push(renderKanbanStationGroup(g.station, lanesByStation[g.station], freshness, kb.stationStatuses));
+          parts.push(renderKanbanStationGroup(g.station, lanesByStation[g.station], freshness, kb.stationStatuses, kb.stationMeta));
         }
       }
       return parts.join('');
@@ -4134,10 +4198,14 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       return String(n);
     }
 
-    // Keyboard: Escape to close drawer
+    // Keyboard: Escape to close drawer or dismiss station tooltip
     document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && drawerOpen) {
-        closeDrawer();
+      if (e.key === 'Escape') {
+        if (drawerOpen) {
+          closeDrawer();
+        } else if (document.activeElement && document.activeElement.classList.contains('station-desc-trigger')) {
+          document.activeElement.blur();
+        }
       }
     });
 

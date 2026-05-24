@@ -1,5 +1,6 @@
 ---
 reads: [discover]
+description: "Fetches repository metadata, issues, PRs, and commits from GitHub API."
 provider: script
 script: fetch.ts
 guardrails:

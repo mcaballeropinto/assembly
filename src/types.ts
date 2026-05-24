@@ -156,6 +156,7 @@ export type Provider = "api" | "claude-code" | "claude-code-cached" | "pi" | "sc
 export interface StationConfig {
   name: string; // derived from folder name
   dir: string; // station directory path
+  description?: string; // station description from AGENT.md frontmatter
   reads?: string[]; // what this station needs
   provider?: Provider; // "api" | "claude-code" | "pi"
   model?: string; // override model
