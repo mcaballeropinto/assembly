@@ -2,6 +2,7 @@ import { resolve, basename } from "path";
 import { mkdirSync, renameSync, readdirSync, readFileSync, watch, existsSync } from "fs";
 import type { Workpiece } from "./types";
 import { readDismissed } from "./error-dismiss";
+import { validateWorkpieceVersion } from './schemas/workpiece';
 
 /**
  * Queue folder structure for a section or line.
@@ -226,7 +227,9 @@ export async function writeToQueue(
  */
 export async function readFromQueue(filePath: string): Promise<Workpiece> {
   const file = Bun.file(filePath);
-  return JSON.parse(await file.text()) as Workpiece;
+  const raw = JSON.parse(await file.text()) as Record<string, unknown>;
+  validateWorkpieceVersion(raw);
+  return raw as unknown as Workpiece;
 }
 
 /**

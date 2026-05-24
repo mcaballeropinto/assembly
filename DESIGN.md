@@ -739,3 +739,28 @@ Relevant upstream issues:
 - [#38437](https://github.com/anthropics/claude-code/issues/38437) — MCP proxy silent hang
 - [#25629](https://github.com/anthropics/claude-code/issues/25629) — stream-json post-result hang
 - [#43791](https://github.com/anthropics/claude-code/issues/43791) — MCP timeout field ignored
+
+---
+
+## Workpiece & Payload Versioning
+
+Every workpiece and inbox-payload JSON file carries a `schema_version: number` field. This field is:
+- Written by every producer (createWorkpiece, triggerDownstream, CLI enqueue)
+- Validated at every parse boundary (readFromQueue, loadWorkpiece, line-inbox watcher)
+- Defaulted to `1` when missing (back-compat for pre-versioning files)
+- Rejected when unrecognized — routed to `queues/error/` with reason `unsupported_schema_version`
+
+### Version constants
+
+- `src/schemas/workpiece.ts` — `CURRENT_WORKPIECE_VERSION`, `SUPPORTED_WORKPIECE_VERSIONS`
+- `src/schemas/inbox-payload.ts` — `CURRENT_INBOX_PAYLOAD_VERSION`, `SUPPORTED_INBOX_PAYLOAD_VERSIONS`
+
+### Bumping a version
+
+1. Increment `CURRENT_*_VERSION` (e.g. 1 → 2)
+2. Add the new version to `SUPPORTED_*_VERSIONS` (e.g. `[1, 2]`)
+3. Add a `migrateV1ToV2(raw)` function in the schema file that transforms old-shape → new-shape
+4. Call the migration from `validate*Version()` when `raw.schema_version === 1`
+5. Update tests to cover the migration path
+
+Old files (version 1) continue to parse — the validator calls the migration on read. Once rewritten by the orchestrator, they carry the new version permanently (one-way ratchet).

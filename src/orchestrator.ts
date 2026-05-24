@@ -25,6 +25,12 @@ import { recordEmit, isEmitted, quarantineUnverified, bootstrapManifest } from "
 import type { HandoffWorker, HandoffLineSnapshot, HandoffState } from "./handoff";
 import { isPidAlive } from "./handoff";
 import { tailStderrSink, appendStderrMarker } from "./stderr-log";
+import {
+  CURRENT_INBOX_PAYLOAD_VERSION,
+  validateWorkpieceVersion,
+  validateInboxPayloadVersion,
+  UnsupportedSchemaVersionError,
+} from './schemas';
 
 // ─── Process-group helpers ────────────────────────────────────────
 
@@ -759,6 +765,22 @@ export async function startOrchestrator(
 
       const raw = JSON.parse(await Bun.file(filePath).text());
 
+      try {
+        validateInboxPayloadVersion(raw as Record<string, unknown>);
+      } catch (err) {
+        if (err instanceof UnsupportedSchemaVersionError) {
+          moveFile(filePath, lineQueue.error);
+          log('unsupported_schema_version', {
+            file: basename(filePath),
+            got: err.got,
+            supported: err.supported,
+            queue: 'line_inbox',
+          });
+          return;
+        }
+        throw err;
+      }
+
       if (!raw.id) {
         // Raw task — enrich into a full workpiece in place. Atomic via
         // tmp + rename so a concurrent firing either sees the raw shape
@@ -1199,6 +1221,19 @@ export async function startOrchestrator(
             }
           }
         } catch (err) {
+          if (err instanceof UnsupportedSchemaVersionError) {
+            try {
+              const fileName = basename(filePath);
+              moveFile(filePath, lineQueue.error);
+              log('unsupported_schema_version', {
+                file: fileName,
+                got: err.got,
+                supported: err.supported,
+                queue: `${section.name}_output`,
+              });
+            } catch {}
+            return;
+          }
           const code = (err as NodeJS.ErrnoException).code;
           if (code === "ENOENT") return;
           log("error", {
@@ -1491,6 +1526,7 @@ export async function startOrchestrator(
 
         try {
           const raw = JSON.parse(await Bun.file(processingPath).text()) as Workpiece;
+          validateWorkpieceVersion(raw as Record<string, unknown>);
           const errorMsg = stderr.trim().slice(0, 200) || `Worker exited with code ${exitCode}`;
 
           // Write failure status to workpiece. Non-zero exit / signal death =
@@ -1526,6 +1562,16 @@ export async function startOrchestrator(
             try { require("fs").renameSync(sessionSrc, outputPath + ".session.jsonl"); } catch {}
           }
         } catch (recoveryErr) {
+          if (recoveryErr instanceof UnsupportedSchemaVersionError) {
+            log('unsupported_schema_version', {
+              file: basename(processingPath),
+              got: recoveryErr.got,
+              supported: recoveryErr.supported,
+              queue: `${section.name}_processing`,
+            });
+            try { moveFile(processingPath, lineQueue.error); } catch {}
+            return;
+          }
           log("recovery_failed", {
             station: section.name,
             error: (recoveryErr as Error).message,
@@ -1791,6 +1837,7 @@ export async function startOrchestrator(
       for (const filePath of remaining) {
         try {
           const wp = JSON.parse(await Bun.file(filePath).text()) as Workpiece;
+          validateWorkpieceVersion(wp as Record<string, unknown>);
           const sr = wp.stations[section.name];
           // Worker may have already written a result (done or failed) before
           // dying on SIGKILL — don't overwrite, just leave it for the post-
@@ -1836,6 +1883,18 @@ export async function startOrchestrator(
             reason: "daemon_shutdown",
           });
         } catch (err) {
+          if (err instanceof UnsupportedSchemaVersionError) {
+            log('unsupported_schema_version', {
+              file: basename(filePath),
+              got: err.got,
+              supported: err.supported,
+              queue: `${section.name}_processing`,
+            });
+            try {
+              moveFile(filePath, lineQueue.error);
+            } catch {}
+            continue;
+          }
           log("station_aborted_error", {
             station: section.name,
             file: basename(filePath),
@@ -1928,6 +1987,7 @@ export async function recoverStaleProcessing(
         const workpiece = JSON.parse(
           await Bun.file(filePath).text()
         ) as Workpiece;
+        validateWorkpieceVersion(workpiece as Record<string, unknown>);
         const stationResult = workpiece.stations[section.name];
         const progressSidecar = filePath + ".progress.jsonl";
 
@@ -2001,6 +2061,19 @@ export async function recoverStaleProcessing(
         }
         recovered++;
       } catch (err) {
+        if (err instanceof UnsupportedSchemaVersionError) {
+          log('unsupported_schema_version', {
+            file: basename(filePath),
+            got: err.got,
+            supported: err.supported,
+            queue: `${section.name}_processing`,
+          });
+          try {
+            moveFile(filePath, lineErrorDir);
+          } catch {}
+          errors++;
+          continue;
+        }
         log("stale_recovery_error", {
           station: section.name,
           file: basename(filePath),
@@ -2164,6 +2237,7 @@ export async function triggerDownstream(
           resolve(targetInbox, taskFileName),
           JSON.stringify(
             {
+              schema_version: CURRENT_INBOX_PAYLOAD_VERSION,
               task: `Triggered by ${config.name} (${workpiece.id}) — fanout ${i + 1}/${sourceArr.length}`,
               input,
             },
@@ -2191,6 +2265,7 @@ export async function triggerDownstream(
       taskFilePath,
       JSON.stringify(
         {
+          schema_version: CURRENT_INBOX_PAYLOAD_VERSION,
           task: `Triggered by ${config.name} (${workpiece.id})`,
           input: sharedInput,
         },
