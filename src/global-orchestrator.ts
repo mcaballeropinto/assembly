@@ -115,6 +115,7 @@ export interface GlobalState {
     totalThroughput24h: number;
   };
   timestamp: string;
+  version: string;
 }
 
 // ─── Discovery ─────────────────────────────────────────────────────
