@@ -111,6 +111,7 @@ export interface StationResult extends StationEnvelope {
 
 export interface Workpiece {
   id: string;
+  schema_version?: number;
   line: string;
   task: string;
   input: Record<string, unknown>;

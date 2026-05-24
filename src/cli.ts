@@ -10,6 +10,7 @@ import { startGlobalOrchestrator } from "./global-orchestrator";
 import { startGlobalDashboard } from "./global-dashboard";
 import { listHeld, releaseHeldTasks, InvalidTaskFileError } from "./held";
 import { recordEmit } from "./emit-manifest";
+import { CURRENT_INBOX_PAYLOAD_VERSION } from './schemas/inbox-payload';
 import {
   resolveLinePath,
   loadEnvFiles,
@@ -426,7 +427,7 @@ async function handleEnqueue(args: string[]) {
   // quarantines it. Pattern: write to `.tmp`, append manifest, then
   // atomic rename. The rename is the moment the watcher fires, and at
   // that point the manifest already contains the final filename.
-  const taskData: Record<string, unknown> = { task, input };
+  const taskData: Record<string, unknown> = { schema_version: CURRENT_INBOX_PAYLOAD_VERSION, task, input };
   if (taskKey) taskData.taskKey = taskKey;
   if (dependsOn && dependsOn.length > 0) taskData.dependsOn = dependsOn;
   const fileName = `${taskKey ?? `task-${Date.now()}`}.json`;

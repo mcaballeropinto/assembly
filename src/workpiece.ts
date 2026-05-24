@@ -1,5 +1,6 @@
 import { resolve } from "path";
 import type { Workpiece, StationResult, StationEnvelope, TokenUsage, FailureClass } from "./types";
+import { CURRENT_WORKPIECE_VERSION, validateWorkpieceVersion } from './schemas/workpiece';
 
 // Process-local counter so a fanout batch hitting createWorkpiece in the same
 // millisecond still gets distinct ids. ISO-millisecond alone collides whenever
@@ -20,6 +21,7 @@ export function createWorkpiece(
 
   return {
     id,
+    schema_version: CURRENT_WORKPIECE_VERSION,
     line: lineName,
     task,
     input,
@@ -186,7 +188,9 @@ export async function loadWorkpiece(path: string): Promise<Workpiece> {
   if (!(await file.exists())) {
     throw new Error(`Workpiece not found at ${path}`);
   }
-  return JSON.parse(await file.text()) as Workpiece;
+  const raw = JSON.parse(await file.text()) as Record<string, unknown>;
+  validateWorkpieceVersion(raw);
+  return raw as unknown as Workpiece;
 }
 
 /**
