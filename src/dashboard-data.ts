@@ -1,5 +1,5 @@
 import { resolve, basename } from "path";
-import { readdirSync, existsSync, readFileSync } from "fs";
+import { readdirSync, existsSync, readFileSync, statSync } from "fs";
 import { loadLine } from "./line";
 import {
   listQueue,
@@ -624,7 +624,7 @@ export async function getFullState(linePath: string) {
  * Get timing data for each station from the most relevant workpiece.
  * Priority: processing/ (running) > output/ (just completed) > done/ (recent completed)
  */
-function getStationTimings(
+export function getStationTimings(
   linePath: string,
   sequence: string[]
 ): Record<string, { started_at: string; finished_at?: string; duration_ms?: number; running?: boolean; latestProgress?: { detail?: string; tool?: string; elapsed_s?: number; turns?: number } }> {
@@ -641,28 +641,30 @@ function getStationTimings(
         const latestProcessingFile = processingFiles[processingFiles.length - 1];
         const wp = JSON.parse(readFileSync(latestProcessingFile, "utf-8")) as Workpiece;
         const sr = wp.stations[name];
-        if (sr?.started_at) {
-          const timing: typeof timings[string] = { started_at: sr.started_at, running: true };
-          // Check for progress file
-          try {
-            const progressFile = latestProcessingFile + ".progress.jsonl";
-            if (existsSync(progressFile)) {
-              const progressContent = readFileSync(progressFile, "utf-8").trim();
-              const progressLines = progressContent.split("\n").filter(Boolean);
-              if (progressLines.length > 0) {
-                const lastEvent = JSON.parse(progressLines[progressLines.length - 1]);
-                timing.latestProgress = {
-                  detail: lastEvent.detail,
-                  tool: lastEvent.tool,
-                  elapsed_s: lastEvent.elapsed_s,
-                  turns: lastEvent.turns,
-                };
-              }
+        // Always return running:true when a processing file exists, even if started_at
+        // hasn't been written yet (brief window between file-move and first envelope update).
+        // Use the file's mtime as a stand-in for started_at when missing.
+        const startedAt = sr?.started_at ?? new Date(statSync(latestProcessingFile).mtimeMs).toISOString();
+        const timing: typeof timings[string] = { started_at: startedAt, running: true };
+        // Check for progress file
+        try {
+          const progressFile = latestProcessingFile + ".progress.jsonl";
+          if (existsSync(progressFile)) {
+            const progressContent = readFileSync(progressFile, "utf-8").trim();
+            const progressLines = progressContent.split("\n").filter(Boolean);
+            if (progressLines.length > 0) {
+              const lastEvent = JSON.parse(progressLines[progressLines.length - 1]);
+              timing.latestProgress = {
+                detail: lastEvent.detail,
+                tool: lastEvent.tool,
+                elapsed_s: lastEvent.elapsed_s,
+                turns: lastEvent.turns,
+              };
             }
-          } catch {}
-          timings[name] = timing;
-          continue;
-        }
+          }
+        } catch {}
+        timings[name] = timing;
+        continue;
       } catch {}
     }
 
