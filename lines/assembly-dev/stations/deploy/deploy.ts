@@ -8,10 +8,11 @@
  *
  * Fails (exit 1) if:
  *   - any test in the worktree fails
- *   - the branch is missing or not ahead of main
+ *   - the branch is missing or not ahead of BASE (ASSEMBLY_DEPLOY_BRANCH)
  *   - the merge produces conflicts or errors
  *   - the merge commit is not a real merge commit
  *   - the push to origin fails or remote SHA != local SHA
+ *   - the live worktree (REPO) can't be fast-forwarded to origin/BASE
  *
  * Best-effort (logs a warning, doesn't fail):
  *   - worktree cleanup
@@ -26,6 +27,13 @@ if (!REPO) {
   process.stderr.write("[deploy] ASSEMBLY_REPO_ROOT must point at the cloned assembly repo root\n");
   process.exit(2);
 }
+
+// Branch deploy merges into and pushes. REPO is the LIVE worktree on this
+// branch (services restart from here). Default keeps the pre-2026-05-26
+// single-clone behavior; assembly's setup overrides with ASSEMBLY_DEPLOY_BRANCH
+// (e.g. "production") when the canonical edit checkout lives on a different
+// branch and the deploy worktree is split out.
+const BASE = process.env.ASSEMBLY_DEPLOY_BRANCH ?? "main";
 
 function log(msg: string) {
   process.stderr.write(`[deploy] ${new Date().toISOString()} ${msg}\n`);
@@ -132,9 +140,9 @@ if (spawnSync("git", ["-C", REPO, "rev-parse", "--verify", branch]).status !== 0
   fatal(`branch ${branch} does not exist in ${REPO}`);
 }
 
-const aheadR = spawnSync("git", ["-C", REPO, "log", `main..${branch}`, "--oneline"], { encoding: "utf-8" });
+const aheadR = spawnSync("git", ["-C", REPO, "log", `${BASE}..${branch}`, "--oneline"], { encoding: "utf-8" });
 if (!(aheadR.stdout ?? "").trim()) {
-  fatal(`branch ${branch} has no commits ahead of main`);
+  fatal(`branch ${branch} has no commits ahead of ${BASE}`);
 }
 
 if (spawnSync("git", ["-C", REPO, "merge-base", "--is-ancestor", commitSha, branch]).status !== 0) {
@@ -145,17 +153,17 @@ if (spawnSync("git", ["-C", REPO, "merge-base", "--is-ancestor", commitSha, bran
 //
 // develop ran the gates before commit, but we re-check at the deploy
 // boundary so a develop bypass / future-disabled gate / direct deploy
-// invocation still can't push violations to origin/main.
+// invocation still can't push violations to origin/${BASE}.
 //
-// We scan the COMMIT RANGE main..<branch> (just the new work) rather than
-// the entire branch, so noise from older history isn't flagged.
+// We scan the COMMIT RANGE ${BASE}..<branch> (just the new work) rather
+// than the entire branch, so noise from older history isn't flagged.
 
 log("safety re-check on branch commits");
 
-// Files changed by the branch (relative to main).
+// Files changed by the branch (relative to BASE).
 const branchFilesR = spawnSync(
   "git",
-  ["-C", REPO, "diff", "--name-only", `main..${branch}`],
+  ["-C", REPO, "diff", "--name-only", `${BASE}..${branch}`],
   { encoding: "utf-8" }
 );
 const branchFiles = ((branchFilesR.stdout ?? "").trim().split("\n")).filter((s) => s.length > 0);
@@ -163,7 +171,7 @@ const branchFiles = ((branchFilesR.stdout ?? "").trim().split("\n")).filter((s) 
 // Full diff content for regex scanning.
 const branchDiffR = spawnSync(
   "git",
-  ["-C", REPO, "diff", "--no-color", `main..${branch}`],
+  ["-C", REPO, "diff", "--no-color", `${BASE}..${branch}`],
   { encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 }
 );
 const branchDiff = branchDiffR.stdout ?? "";
@@ -245,10 +253,10 @@ if (gitleaksProbe.status !== 0) {
       `so the deploy safety re-check can run.`
   );
 }
-log(`gitleaks detect --log-opts main..${branch}`);
+log(`gitleaks detect --log-opts ${BASE}..${branch}`);
 const glR = spawnSync(
   "gitleaks",
-  ["detect", "--no-banner", "--redact", "--exit-code", "1", "--log-opts", `main..${branch}`],
+  ["detect", "--no-banner", "--redact", "--exit-code", "1", "--log-opts", `${BASE}..${branch}`],
   { cwd: REPO, encoding: "utf-8" }
 );
 if (glR.status !== 0) {
@@ -261,12 +269,38 @@ if (glR.status !== 0) {
 
 log("safety re-check passed");
 
-// ─── 3. Merge to main ─────────────────────────────────────────────────
+// ─── 3. Merge in a throwaway worktree ────────────────────────────────
+//
+// Pre-2026-05-26 deploy did `git checkout BASE; git merge; git push`
+// directly inside REPO. That coupled REPO's working tree to the merge
+// operation — anyone editing REPO saw their files change underneath them,
+// and uncommitted edits could block deploy. Now:
+//   1. Spawn a throwaway worktree at /tmp/assembly-deploy/<wpId>, detached
+//      at BASE's tip. REPO already has BASE checked out as a branch;
+//      `--detach` avoids the per-branch worktree lock.
+//   2. Merge the dev branch into the detached HEAD there.
+//   3. `git push origin HEAD:BASE` — origin/BASE advances; the push
+//      side-effect also updates our local refs/remotes/origin/BASE.
+//   4. Fast-forward REPO's local BASE to origin/BASE — REPO IS the live
+//      checkout the dashboard restarts from, so this is what makes the
+//      merged code reachable.
+//   5. Tear down the throwaway worktree.
 
-log("checkout main");
-const coR = spawnSync("git", ["-C", REPO, "checkout", "main"], { encoding: "utf-8" });
-if (coR.status !== 0) {
-  fatal("git checkout main failed", (coR.stdout ?? "") + "\n" + (coR.stderr ?? ""));
+const deployWtRoot = `/tmp/assembly-deploy/${wp.id}`;
+
+if (existsSync(deployWtRoot)) {
+  log(`removing leftover deploy worktree ${deployWtRoot}`);
+  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+}
+
+log(`creating throwaway worktree ${deployWtRoot} detached at ${BASE}`);
+const wtAddR = spawnSync(
+  "git",
+  ["-C", REPO, "worktree", "add", "--detach", deployWtRoot, BASE],
+  { encoding: "utf-8" }
+);
+if (wtAddR.status !== 0) {
+  fatal("git worktree add for deploy throwaway failed", (wtAddR.stdout ?? "") + "\n" + (wtAddR.stderr ?? ""));
 }
 
 const problemStatement = (
@@ -288,30 +322,39 @@ const commitMsg = [
   `Files changed: ${JSON.stringify(filesChanged)}`,
 ].join("\n");
 
-log(`merge ${branch} --no-ff`);
+log(`merge ${branch} --no-ff in throwaway worktree`);
 const mergeR = spawnSync(
   "git",
-  ["-C", REPO, "merge", branch, "--no-ff", "-m", commitMsg],
+  [
+    "-C", deployWtRoot,
+    "-c", "user.name=assembly-deploy",
+    "-c", "user.email=assembly-deploy@local",
+    "merge", branch, "--no-ff", "-m", commitMsg,
+  ],
   { encoding: "utf-8" }
 );
 if (mergeR.status !== 0) {
-  spawnSync("git", ["-C", REPO, "merge", "--abort"]);
+  spawnSync("git", ["-C", deployWtRoot, "merge", "--abort"], { encoding: "utf-8" });
+  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
   fatal("git merge failed", (mergeR.stdout ?? "") + "\n" + (mergeR.stderr ?? ""));
 }
 
-const parentsR = spawnSync("git", ["-C", REPO, "rev-list", "--parents", "-n", "1", "HEAD"], { encoding: "utf-8" });
+const parentsR = spawnSync("git", ["-C", deployWtRoot, "rev-list", "--parents", "-n", "1", "HEAD"], { encoding: "utf-8" });
 const parentsCount = (parentsR.stdout ?? "").trim().split(/\s+/).length - 1;
 if (parentsCount !== 2) {
+  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
   fatal(`HEAD is not a merge commit (parents=${parentsCount})`);
 }
 
-const shaR = spawnSync("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf-8" });
+const shaR = spawnSync("git", ["-C", deployWtRoot, "rev-parse", "HEAD"], { encoding: "utf-8" });
 const mergeSha = (shaR.stdout ?? "").trim();
 if (mergeSha.length !== 40) {
+  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
   fatal(`unable to capture merge SHA (got "${mergeSha}")`);
 }
 
-if (spawnSync("git", ["-C", REPO, "merge-base", "--is-ancestor", commitSha, "HEAD"]).status !== 0) {
+if (spawnSync("git", ["-C", deployWtRoot, "merge-base", "--is-ancestor", commitSha, "HEAD"]).status !== 0) {
+  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
   fatal(`develop commit ${commitSha} not in merge history of ${mergeSha}`);
 }
 
@@ -319,26 +362,67 @@ log(`merge_commit=${mergeSha}`);
 
 // ─── 4. Push to origin ────────────────────────────────────────────────
 
-log("pushing to origin");
-const pushR = spawnSync("git", ["-C", REPO, "push", "origin", "main"], { encoding: "utf-8" });
+log(`pushing HEAD to origin/${BASE}`);
+const pushR = spawnSync(
+  "git",
+  ["-C", deployWtRoot, "push", "origin", `HEAD:refs/heads/${BASE}`],
+  { encoding: "utf-8" }
+);
 if (pushR.status !== 0) {
-  fatal("git push origin main failed", (pushR.stdout ?? "") + "\n" + (pushR.stderr ?? ""));
+  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+  fatal(`git push origin HEAD:${BASE} failed`, (pushR.stdout ?? "") + "\n" + (pushR.stderr ?? ""));
 }
 
-const lsR = spawnSync("git", ["-C", REPO, "ls-remote", "origin", "refs/heads/main"], { encoding: "utf-8" });
+const lsR = spawnSync("git", ["-C", REPO, "ls-remote", "origin", `refs/heads/${BASE}`], { encoding: "utf-8" });
 const remoteSha = ((lsR.stdout ?? "").split(/\s+/)[0] ?? "").trim();
 if (remoteSha !== mergeSha) {
-  fatal(`remote main (${remoteSha}) does not match local merge (${mergeSha})`);
+  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+  fatal(`remote ${BASE} (${remoteSha}) does not match local merge (${mergeSha})`);
 }
 
 log(`pushed, remote_sha=${remoteSha}`);
 
-// ─── 5. Clean up worktree + branch (best-effort) ──────────────────────
+// ─── 4b. Fast-forward the live worktree (REPO) ───────────────────────
+//
+// REPO is the live worktree services run from. It's on BASE but stale
+// relative to origin/BASE (we just pushed). The push side-effect already
+// advanced our local refs/remotes/origin/BASE — now FF the local BASE
+// branch and update REPO's working tree atomically so the dashboard
+// restart below picks up the new code.
+
+log(`fast-forwarding REPO=${REPO} to origin/${BASE}`);
+const ffR = spawnSync(
+  "git",
+  ["-C", REPO, "merge", "--ff-only", `origin/${BASE}`],
+  { encoding: "utf-8" }
+);
+if (ffR.status !== 0) {
+  // The merge is already on origin — we can't roll it back. REPO has
+  // diverged from origin/BASE (uncommitted edits, manual commits, etc.).
+  // Fail loudly; operator must reconcile REPO before next deploy.
+  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+  fatal(
+    `fast-forward of live worktree REPO=${REPO} to origin/${BASE} failed — origin has merge ${mergeSha} but REPO diverged`,
+    (ffR.stdout ?? "") + "\n" + (ffR.stderr ?? "")
+  );
+}
+
+const repoHeadR = spawnSync("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf-8" });
+if ((repoHeadR.stdout ?? "").trim() !== mergeSha) {
+  log(`warning: REPO HEAD ${(repoHeadR.stdout ?? "").trim()} != merge ${mergeSha} after FF (non-fatal)`);
+}
+
+// ─── 5. Clean up worktrees + branch (best-effort) ─────────────────────
 
 let worktreeCleaned = true;
-const wtRmR = spawnSync("git", ["-C", REPO, "worktree", "remove", worktreePath, "--force"], { encoding: "utf-8" });
-if (wtRmR.status !== 0) {
-  log(`worktree remove failed (non-fatal): ${wtRmR.stderr ?? ""}`);
+const devWtRmR = spawnSync("git", ["-C", REPO, "worktree", "remove", worktreePath, "--force"], { encoding: "utf-8" });
+if (devWtRmR.status !== 0) {
+  log(`dev worktree remove failed (non-fatal): ${devWtRmR.stderr ?? ""}`);
+  worktreeCleaned = false;
+}
+const dpWtRmR = spawnSync("git", ["-C", REPO, "worktree", "remove", deployWtRoot, "--force"], { encoding: "utf-8" });
+if (dpWtRmR.status !== 0) {
+  log(`deploy worktree remove failed (non-fatal): ${dpWtRmR.stderr ?? ""}`);
   worktreeCleaned = false;
 }
 const brDelR = spawnSync("git", ["-C", REPO, "branch", "-d", branch], { encoding: "utf-8" });
@@ -385,9 +469,9 @@ const daemonReloaded = false;
 // ─── 7. Emit envelope ─────────────────────────────────────────────────
 
 emit({
-  summary: `Merged ${branch} to main at ${mergeSha.slice(0, 8)}`,
+  summary: `Merged ${branch} to ${BASE} at ${mergeSha.slice(0, 8)}`,
   content: [
-    `Merged ${branch} to main at ${mergeSha}.`,
+    `Merged ${branch} to ${BASE} at ${mergeSha}.`,
     `Pushed to origin; remote_sha=${remoteSha}.`,
     `worktree_cleaned=${worktreeCleaned}`,
     `dashboard_restarted=${dashboardRestarted}`,

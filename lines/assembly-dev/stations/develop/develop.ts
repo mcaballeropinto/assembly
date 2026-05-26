@@ -25,6 +25,12 @@ if (!REPO) {
 }
 const MODEL = process.env.ASSEMBLY_DEV_MODEL ?? "sonnet";
 
+// Base branch new feature branches fork from + that deploy merges into.
+// Default "main" preserves the pre-2026-05-26 single-clone behavior; assembly's
+// setup overrides with ASSEMBLY_DEPLOY_BRANCH=production once REPO is split
+// from the user's personal /root/assembly checkout.
+const BASE = process.env.ASSEMBLY_DEPLOY_BRANCH ?? "main";
+
 function log(msg: string) {
   process.stderr.write(`[develop] ${new Date().toISOString()} ${msg}\n`);
 }
@@ -138,9 +144,9 @@ log(`worktree=${wtRoot} branch=${branch}`);
 // tasks — try to claim a branch already checked out in a leftover
 // worktree from a prior failed run. `git worktree add` refuses with
 // "branch X is already used by worktree at Y". We auto-remove any such
-// orphan if its branch has NO commits ahead of main (i.e. the agent's
+// orphan if its branch has NO commits ahead of BASE (i.e. the agent's
 // session produced no committed work — just transient edits that
-// already cost us a failed run). Worktrees with real ahead-of-main
+// already cost us a failed run). Worktrees with real ahead-of-BASE
 // commits are preserved and we hardFail so the operator can inspect.
 function findWorktreeForBranch(targetBranch: string): string | null {
   const r = spawnSync("git", ["-C", REPO, "worktree", "list", "--porcelain"], { encoding: "utf-8" });
@@ -161,21 +167,21 @@ function findWorktreeForBranch(targetBranch: string): string | null {
 
 const stalePath = findWorktreeForBranch(branch);
 if (stalePath) {
-  const aheadR = spawnSync("git", ["-C", REPO, "log", `main..${branch}`, "--oneline"], { encoding: "utf-8" });
-  const aheadOfMain = (aheadR.stdout ?? "").trim();
-  if (!aheadOfMain) {
-    log(`stale worktree at ${stalePath} holds branch ${branch} with no commits ahead of main — removing`);
+  const aheadR = spawnSync("git", ["-C", REPO, "log", `${BASE}..${branch}`, "--oneline"], { encoding: "utf-8" });
+  const aheadOfBase = (aheadR.stdout ?? "").trim();
+  if (!aheadOfBase) {
+    log(`stale worktree at ${stalePath} holds branch ${branch} with no commits ahead of ${BASE} — removing`);
     spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", stalePath], { encoding: "utf-8" });
     spawnSync("git", ["-C", REPO, "branch", "-D", branch], { encoding: "utf-8" });
   } else {
     hardFail(
       "branch already checked out in another worktree with unmerged commits",
       `branch=${branch} stale_worktree=${stalePath}\n` +
-        `That worktree has commits ahead of main — refusing to auto-remove.\n` +
+        `That worktree has commits ahead of ${BASE} — refusing to auto-remove.\n` +
         `Inspect the commits there and either merge them, abandon the branch ` +
         `(git -C ${REPO} worktree remove --force ${stalePath} && git -C ${REPO} branch -D ${branch}), ` +
         `or pick a different branch name in the plan.\n` +
-        `Commits ahead of main:\n${aheadOfMain}`
+        `Commits ahead of ${BASE}:\n${aheadOfBase}`
     );
   }
 }
@@ -184,7 +190,7 @@ if (!existsSync(wtRoot)) {
   const branchExists = spawnSync("git", ["-C", REPO, "rev-parse", "--verify", branch]).status === 0;
   const args = branchExists
     ? ["-C", REPO, "worktree", "add", wtRoot, branch]
-    : ["-C", REPO, "worktree", "add", wtRoot, "-b", branch, "main"];
+    : ["-C", REPO, "worktree", "add", wtRoot, "-b", branch, BASE];
   const r = spawnSync("git", args, { encoding: "utf-8" });
   if (r.status !== 0) {
     hardFail("git worktree add failed", `branch=${branch}\n${r.stderr}`);
@@ -396,7 +402,7 @@ function synthesizeFromGit(reason: string): {
   const statusR = spawnSync("git", ["-C", wtRoot, "status", "--porcelain"], { encoding: "utf-8" });
   const branchDiffR = spawnSync(
     "git",
-    ["-C", wtRoot, "diff", "--name-status", "main...HEAD"],
+    ["-C", wtRoot, "diff", "--name-status", `${BASE}...HEAD`],
     { encoding: "utf-8" }
   );
   const fileKind = new Map<string, "changed" | "created">();
@@ -409,7 +415,7 @@ function synthesizeFromGit(reason: string): {
     if (code.includes("?") || code.includes("A")) fileKind.set(name, "created");
     else fileKind.set(name, "changed");
   }
-  // Branch commits ahead of main — diff --name-status: "A\tname" / "M\tname" / "D\tname"
+  // Branch commits ahead of BASE — diff --name-status: "A\tname" / "M\tname" / "D\tname"
   for (const line of (branchDiffR.stdout ?? "").split("\n")) {
     if (!line.trim()) continue;
     const [status, ...rest] = line.split("\t");
@@ -511,10 +517,10 @@ const agentData = agentEnv.data as Record<string, unknown>;
 
 const statusR = spawnSync("git", ["-C", wtRoot, "status", "--porcelain"], { encoding: "utf-8" });
 const porcelain = (statusR.stdout ?? "").trim();
-const logR = spawnSync("git", ["-C", wtRoot, "log", "main..HEAD", "--oneline"], { encoding: "utf-8" });
-const aheadOfMain = (logR.stdout ?? "").trim();
+const logR = spawnSync("git", ["-C", wtRoot, "log", `${BASE}..HEAD`, "--oneline"], { encoding: "utf-8" });
+const aheadOfBase = (logR.stdout ?? "").trim();
 
-if (!porcelain && !aheadOfMain) {
+if (!porcelain && !aheadOfBase) {
   hardFail(
     "no changes in worktree",
     `agent produced no file changes and no new commits. cwd=${wt} branch=${branch}\nagent_summary=${agentSummary}`
@@ -524,7 +530,7 @@ if (!porcelain && !aheadOfMain) {
 // ─── Safety gates ─────────────────────────────────────────────────────
 //
 // Run BEFORE tests/commit. Each gate hardFails on violation so the agent's
-// changes never reach `main`. Cheap gates run first.
+// changes never reach BASE. Cheap gates run first.
 //
 // 1. Path blocklist  — diff must not touch secrets/SSH/runtime state
 // 2. Secret scan     — diff content must not contain credential-shaped strings
@@ -879,40 +885,40 @@ if (hasUncommitted) {
 const shaR = spawnSync("git", ["-C", wtRoot, "rev-parse", "HEAD"], { encoding: "utf-8" });
 commitSha = (shaR.stdout ?? "").trim();
 
-// Sanity: HEAD must be ahead of main now
-const aheadR = spawnSync("git", ["-C", wtRoot, "log", "main..HEAD", "--oneline"], { encoding: "utf-8" });
+// Sanity: HEAD must be ahead of BASE now
+const aheadR = spawnSync("git", ["-C", wtRoot, "log", `${BASE}..HEAD`, "--oneline"], { encoding: "utf-8" });
 if (!(aheadR.stdout ?? "").trim()) {
   hardFail(
-    "no commits ahead of main after commit",
+    `no commits ahead of ${BASE} after commit`,
     `HEAD=${commitSha} branch=${branch} worktree=${wtRoot} tests_passed=${testsPassed}\n${testOut}`
   );
 }
 
-// ─── Pre-merge with main: surface conflicts here, not in deploy ──────
+// ─── Pre-merge with BASE: surface conflicts here, not in deploy ──────
 //
-// deploy.ts does `git merge <branch> --no-ff` on main and hardFails on
+// deploy.ts does `git merge <branch> --no-ff` on BASE and hardFails on
 // conflicts — and the orchestrator just retries deploy, which hits the
 // same conflict every time. We pre-resolve here, where the agent
 // context is still fresh and where retry-with-feedback already works:
 //
-//   1. `git merge main --no-edit --no-ff` inside the worktree.
+//   1. `git merge ${BASE} --no-edit --no-ff` inside the worktree.
 //   2. Clean / fast-forward / already-up-to-date → continue.
 //   3. Conflicts → spawn a focused resolution agent, verify markers
 //      gone, stage + commit the merge. Re-run tests on the merged tree.
 //
 // After this step, `commit_sha` points at the post-merge HEAD; deploy's
-// later `git merge <branch> --no-ff` on main becomes a clean fast-
-// forward-able merge (no conflicts since main is already in the branch).
+// later `git merge <branch> --no-ff` on BASE becomes a clean fast-
+// forward-able merge (no conflicts since BASE is already in the branch).
 
-log(`pre-merge: bringing main into branch ${branch}`);
-const preMergeCommitMsg = `Merge main into ${branch} to pre-resolve before deploy`;
+log(`pre-merge: bringing ${BASE} into branch ${branch}`);
+const preMergeCommitMsg = `Merge ${BASE} into ${branch} to pre-resolve before deploy`;
 const preMergeR = spawnSync(
   "git",
   [
     "-C", wtRoot,
     "-c", "user.name=assembly-dev",
     "-c", "user.email=assembly-dev@local",
-    "merge", "main", "--no-edit", "--no-ff", "-m", preMergeCommitMsg,
+    "merge", BASE, "--no-edit", "--no-ff", "-m", preMergeCommitMsg,
   ],
   { encoding: "utf-8" }
 );
@@ -940,13 +946,13 @@ if (preMergeR.status !== 0) {
 
 ## Your cwd IS the worktree
 - You are running at: ${wt}
-- The worktree just attempted \`git merge main --no-edit --no-ff\` and hit content conflicts.
+- The worktree just attempted \`git merge ${BASE} --no-edit --no-ff\` and hit content conflicts.
 - The conflicted files have \`<<<<<<<\` / \`=======\` / \`>>>>>>>\` markers.
 - Do NOT edit anything under ${REPO} — that is a DIFFERENT checkout.
 - Do NOT run git commands. The script around you will stage and commit after you finish. NO \`git add\`, \`git commit\`, \`git merge\`, \`git reset\`, etc.
 
 ## Your job
-For each conflicted file: read it, understand BOTH sides, write a merged version with no markers that preserves the intent of both. The branch's new work and main's drift both matter — don't drop either. If two sides edit the same logical block, integrate them.
+For each conflicted file: read it, understand BOTH sides, write a merged version with no markers that preserves the intent of both. The branch's new work and ${BASE}'s drift both matter — don't drop either. If two sides edit the same logical block, integrate them.
 
 ## Conflicted files
 ${conflictedFiles.map((f) => `- ${f}`).join("\n")}
@@ -959,7 +965,7 @@ Only edit the conflicted files listed above. Auto-merged files are already stage
   const resolveUserMsg = [
     `# Merge-conflict resolution`,
     ``,
-    `\`git merge main --no-edit --no-ff\` produced content conflicts in:`,
+    `\`git merge ${BASE} --no-edit --no-ff\` produced content conflicts in:`,
     ...conflictedFiles.map((f) => `- ${f}`),
     ``,
     `Resolve each by editing out the markers while preserving both sides' intent. Refer to the original task and plan below for context on what the branch was trying to accomplish.`,
@@ -1100,14 +1106,14 @@ Only edit the conflicted files listed above. Auto-merged files are already stage
 const postMergeShaR = spawnSync("git", ["-C", wtRoot, "rev-parse", "HEAD"], { encoding: "utf-8" });
 commitSha = (postMergeShaR.stdout ?? "").trim();
 
-// Re-run tests after merging main in — automerged code or our resolution
+// Re-run tests after merging BASE in — automerged code or our resolution
 // may have introduced semantic breakage even if markers are gone.
 if (preMergeResolved || preMergeR.status === 0) {
-  // Only re-run if main actually contributed something. "Already up to
+  // Only re-run if BASE actually contributed something. "Already up to
   // date" leaves HEAD unchanged, so the earlier run is still valid.
-  const ahead2R = spawnSync("git", ["-C", wtRoot, "log", "main..HEAD", "--oneline"], { encoding: "utf-8" });
+  const ahead2R = spawnSync("git", ["-C", wtRoot, "log", `${BASE}..HEAD`, "--oneline"], { encoding: "utf-8" });
   const aheadCount = (ahead2R.stdout ?? "").trim().split("\n").filter(Boolean).length;
-  // After a real merge, branch has at least 2 commits ahead of main (the
+  // After a real merge, branch has at least 2 commits ahead of BASE (the
   // agent's commit + the merge commit). After "Already up to date", it
   // has the original single commit and re-testing is wasteful.
   if (preMergeResolved || aheadCount > 1) {
