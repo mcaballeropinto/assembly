@@ -76,8 +76,25 @@ if (dev.lint_passed === false) {
   feedbackParts.push(`## Lint failed (after auto-fix)\n\nThe \`bun run lint:fix\` step before this gate auto-fixes anything ESLint marks as fixable. The errors below remain after auto-fix — they need manual attention.\n\n${out}`);
 }
 
+// ── Check for safety gate failures from develop ────────────────────
+if (dev.gate_failure && typeof dev.gate_failure === 'object') {
+  const gf = dev.gate_failure as { gate?: string; details?: string };
+  const gate = typeof gf.gate === 'string' ? gf.gate : 'unknown';
+  const details = typeof gf.details === 'string' ? gf.details : '(no details captured)';
+  feedbackParts.push(
+    `## Safety gate failed: ${gate}\n\n` +
+    `Previous attempt was rejected by safety gate '${gate}'.\n\n` +
+    `Details:\n${details}\n\n` +
+    `Fix the issue and retry. Do NOT touch the files/lines that caused the gate to fire. ` +
+    `Restrict your changes to ONLY the files listed in the plan's files_to_change and files_to_create.`
+  );
+}
+
 // ── Re-run tests in the worktree (belt-and-suspenders + catches order-
 //    sensitivity regressions that develop's own run didn't hit). ────
+// Skip test re-run when a gate failure occurred — no commit was made,
+// worktree state is from the rejected attempt.
+if (!dev.gate_failure) {
 process.stderr.write(`[develop-eval] running bun test in ${worktreePath}\n`);
 const testR = spawnSync("bun", ["test"], {
   cwd: worktreePath,
@@ -101,6 +118,7 @@ if (!testsOk) {
       `Test output (last 6k chars):\n\n${testOut}\n\n` +
       `Fix the failing tests — read the output above, identify each failing assertion, and correct either the test or the implementation. Do not skip or delete failing tests unless the plan explicitly calls for it.`
   );
+}
 }
 
 if (feedbackParts.length === 0) {

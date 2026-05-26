@@ -513,6 +513,19 @@ const agentSummary: string = agentEnv.summary;
 const agentContent: string = agentEnv.content;
 const agentData = agentEnv.data as Record<string, unknown>;
 
+// ─── Soft gate failure helper ─────────────────────────────────────────
+// Captures a gate failure in the envelope so eval.ts can format retry-with-
+// feedback, which develop.ts threads into the agent's prompt on the next run.
+// This mirrors the typecheck/lint soft-failure pattern (line 799 onwards).
+let gateFailed = false;
+function softGateFail(gate: string, details: string): void {
+  log(`gate '${gate}' failed (soft) — deferring to eval for retry-with-feedback`);
+  if (!agentEnv.data) agentEnv.data = {};
+  agentEnv.data.gate_failure = { gate, details: details.slice(0, 3000) };
+  agentEnv.data.tests_passed = false;
+  gateFailed = true;
+}
+
 // ─── Verify there are actual changes in the worktree ──────────────────
 
 const statusR = spawnSync("git", ["-C", wtRoot, "status", "--porcelain"], { encoding: "utf-8" });
@@ -579,17 +592,14 @@ log(`safety gates: ${changedFiles.length} changed files, ${diffText.length} byte
   const claimedAll = new Set<string>([...claimedChanged, ...claimedCreated]);
 
   if (changedFiles.length > 0 && claimedAll.size === 0) {
-    hardFail(
-      "agent envelope claims no files changed but worktree has real diff",
-      [
-        `agent_summary=${agentSummary}`,
-        `envelope.files_changed=${JSON.stringify(claimedChanged)}`,
-        `envelope.files_created=${JSON.stringify(claimedCreated)}`,
-        `actual changed files (${changedFiles.length}):`,
-        ...changedFiles.slice(0, 30).map((f) => `  ${f}`),
-        changedFiles.length > 30 ? `  ... and ${changedFiles.length - 30} more` : "",
-      ].filter(Boolean).join("\n")
-    );
+    softGateFail("envelope-scope", [
+      `agent_summary=${agentSummary}`,
+      `envelope.files_changed=${JSON.stringify(claimedChanged)}`,
+      `envelope.files_created=${JSON.stringify(claimedCreated)}`,
+      `actual changed files (${changedFiles.length}):`,
+      ...changedFiles.slice(0, 30).map((f) => `  ${f}`),
+      changedFiles.length > 30 ? `  ... and ${changedFiles.length - 30} more` : "",
+    ].filter(Boolean).join("\n"));
   }
 
   // Belt-and-suspenders: at least one claimed path must exist in the actual
@@ -600,19 +610,22 @@ log(`safety gates: ${changedFiles.length} changed files, ${diffText.length} byte
     const claimedBasenames = [...claimedAll].map((f) => f.split("/").pop()!);
     const overlap = claimedBasenames.some((b) => actualBasenames.has(b));
     if (!overlap) {
-      hardFail(
-        "agent envelope file list does not overlap with actual diff",
-        [
-          `envelope.files_changed+files_created=${JSON.stringify([...claimedAll])}`,
-          `actual changed files (${changedFiles.length}):`,
-          ...changedFiles.slice(0, 30).map((f) => `  ${f}`),
-        ].join("\n")
-      );
+      softGateFail("envelope-scope", [
+        `envelope.files_changed+files_created=${JSON.stringify([...claimedAll])}`,
+        `actual changed files (${changedFiles.length}):`,
+        ...changedFiles.slice(0, 30).map((f) => `  ${f}`),
+      ].join("\n"));
     }
   }
 }
 
+// Skip remaining gates after a soft failure — the agent can only fix one feedback loop at a time.
+if (gateFailed) {
+  log(`skipping remaining safety gates — soft gate failure already recorded`);
+}
+
 // ── Gate 1: Path blocklist ───────────────────────────────────────────
+if (!gateFailed) {
 const BLOCKED_PATH_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /(^|\/)\.env(\.|$)/, reason: ".env files (secrets)" },
   { re: /(^|\/)\.secrets(\.|$)/, reason: ".secrets files" },
@@ -645,8 +658,10 @@ if (blockedHits.length > 0) {
       `These paths must never be committed. The agent must not edit them.`
   );
 }
+}
 
 // ── Gate 2: Secret scan ──────────────────────────────────────────────
+if (!gateFailed) {
 // High-confidence patterns only — false positives here halt the pipeline.
 const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "Anthropic API key", re: /\bsk-ant-api03-[A-Za-z0-9_\-]{50,}/ },
@@ -713,8 +728,10 @@ if (glR.status !== 0) {
     ((glR.stdout ?? "") + "\n" + (glR.stderr ?? "")).slice(-3000)
   );
 }
+}
 
 // ── Gate 3: Plan/diff alignment ──────────────────────────────────────
+if (!gateFailed) {
 // `plan.files_to_change` and `plan.files_to_create` are the agent's contract.
 // Files the agent touches must be within the allowed set, with a small
 // allowance for adjacent test files. We do NOT enforce alignment when the
@@ -769,14 +786,29 @@ if (planSet.size > 0) {
   if (offPlan.length > 0) {
     const planned = [...planSet].map((p) => `  - ${p}`).join("\n");
     const off = offPlan.map((p) => `  - ${p}`).join("\n");
-    hardFail(
-      "off-plan files in diff",
+    softGateFail("plan-alignment",
       `Changed files extend beyond plan.files_to_change ∪ plan.files_to_create.\n` +
         `Planned:\n${planned}\nOff-plan:\n${off}\n` +
-        `If the additional files are legitimate, update the plan or relax the gate in develop.ts.`
-    );
+        `Do NOT touch these off-plan files on the next attempt. Restrict edits to the files listed in the plan.`);
   }
 }
+}
+
+// ── Skip build/test/commit after soft gate failure ───────────────────
+// When a soft gate has fired, skip downstream work and emit the envelope
+// with the gate_failure captured. The agent can only fix one feedback loop
+// at a time — no point building/testing code that violates the gate.
+
+// Declare variables used in emit() that are conditionally initialized below.
+let typecheckPassed: boolean | undefined = undefined;
+let typecheckOutput: string | undefined = undefined;
+let lintPassed: boolean | undefined = undefined;
+let lintOutput: string | undefined = undefined;
+let testsPassed = false;
+let testOut = "(skipped — gate failure)";
+let commitSha = "";
+
+if (!gateFailed) {
 
 // ── Ensure dev deps exist in the worktree for typecheck/lint ─────────
 // The worktree shares .git with the main checkout but starts with no
@@ -811,8 +843,8 @@ const tscR = spawnSync("bun", ["run", "typecheck"], {
   encoding: "utf-8",
   timeout: 120_000,
 });
-const typecheckPassed = tscR.status === 0;
-const typecheckOutput = typecheckPassed
+typecheckPassed = tscR.status === 0;
+typecheckOutput = typecheckPassed
   ? ""
   : ((tscR.stdout ?? "") + "\n" + (tscR.stderr ?? "")).slice(-3000);
 if (!typecheckPassed) {
@@ -836,8 +868,8 @@ const lintR = spawnSync("bun", ["run", "lint"], {
   encoding: "utf-8",
   timeout: 120_000,
 });
-const lintPassed = lintR.status === 0;
-const lintOutput = lintPassed
+lintPassed = lintR.status === 0;
+lintOutput = lintPassed
   ? ""
   : ((lintR.stdout ?? "") + "\n" + (lintR.stderr ?? "")).slice(-3000);
 if (!lintPassed) {
@@ -848,8 +880,8 @@ if (!lintPassed) {
 
 log(`running bun test`);
 const testR = spawnSync("bun", ["test"], { cwd: wt, encoding: "utf-8", timeout: 180_000 });
-let testOut = ((testR.stdout ?? "") + "\n" + (testR.stderr ?? "")).slice(-4000);
-let testsPassed = testR.status === 0;
+testOut = ((testR.stdout ?? "") + "\n" + (testR.stderr ?? "")).slice(-4000);
+testsPassed = testR.status === 0;
 if (!testsPassed) {
   log(`tests failed (exit ${testR.status})`);
 }
@@ -860,7 +892,6 @@ if (!testsPassed) {
 const porcelainAfterFix = (spawnSync("git", ["-C", wtRoot, "status", "--porcelain"], { encoding: "utf-8" }).stdout ?? "").trim();
 const hasUncommitted = !!porcelainAfterFix;
 
-let commitSha = "";
 if (hasUncommitted) {
   log(`committing staged changes (already staged by safety gates)`);
   const msg = `feat(assembly): ${agentSummary.slice(0, 100)}\n\nAutomated commit by develop station for workpiece ${wpId}.`;
@@ -1108,10 +1139,10 @@ Only edit the conflicted files listed above. Auto-merged files are already stage
 
 if (preRebaseR.status !== 0) {
   spawnSync("git", ["-C", wtRoot, "rebase", "--abort"], { encoding: "utf-8" });
-  hardFail(
-    `pre-rebase exhausted ${MAX_REBASE_RESOLUTIONS} resolutions without completing`,
-    `${preRebaseR.stdout ?? ""}\n${preRebaseR.stderr ?? ""}`
-  );
+  softGateFail("rebase-conflict",
+    `pre-rebase exhausted ${MAX_REBASE_RESOLUTIONS} resolution attempts without completing.\n` +
+    `${((preRebaseR.stdout ?? "") + "\n" + (preRebaseR.stderr ?? "")).slice(-2000)}\n` +
+    `Re-implement the changes to avoid conflicting with the current state of origin/${BASE}.`);
 }
 
 if (preRebaseResolved) {
@@ -1161,6 +1192,10 @@ if (!testsPassed) {
   log(`tests failed — deferring to eval for retry-with-feedback`);
 }
 
+} else {
+  log(`skipping build/test/commit/rebase — soft gate failure recorded; deferring to eval`);
+}
+
 // ─── Emit envelope ────────────────────────────────────────────────────
 
 const filesChanged = Array.isArray(agentData.files_changed) ? agentData.files_changed : [];
@@ -1174,13 +1209,15 @@ emit({
     worktree_path: wtRoot,
     files_changed: filesChanged,
     files_created: filesCreated,
-    tests_passed: testsPassed,
-    test_output: testOut,
-    commit_sha: commitSha,
+    tests_passed: gateFailed ? false : testsPassed,
+    test_output: gateFailed ? "(skipped — gate failure)" : testOut,
+    commit_sha: gateFailed ? "" : commitSha,
     // Quality-gate results — surfaced for eval.ts to decide retry vs pass.
-    typecheck_passed: typecheckPassed,
-    typecheck_output: typecheckOutput,
-    lint_passed: lintPassed,
-    lint_output: lintOutput,
+    typecheck_passed: gateFailed ? undefined : typecheckPassed,
+    typecheck_output: gateFailed ? undefined : typecheckOutput,
+    lint_passed: gateFailed ? undefined : lintPassed,
+    lint_output: gateFailed ? undefined : lintOutput,
+    gates_passed: !gateFailed,
+    ...(agentEnv.data?.gate_failure ? { gate_failure: agentEnv.data.gate_failure } : {}),
   },
 });

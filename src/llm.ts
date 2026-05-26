@@ -158,13 +158,15 @@ export async function callScript(
   const exitCode = await proc.exited;
 
   if (exitCode !== 0) {
-    // Script's FATAL line (from hardFail()) lands near the END of stderr,
-    // after many minutes of [develop] log() output. substring(0, 500) showed
-    // only the worktree-create + spawn-claude prefix — the actual failure
-    // was invisible. Take the tail so the cause is on screen.
+    // Extract the last [develop] FATAL: line from stderr and prepend it
+    // so the orchestrator's error message leads with the actual cause,
+    // not buried under minutes of tool_use log noise.
+    const fatalMatch = stderr.match(/\[develop\] FATAL: .*/g);
+    const fatalLine = fatalMatch ? fatalMatch[fatalMatch.length - 1] : null;
     const tail = stderr.length > 2000 ? "…" + stderr.slice(-2000) : stderr;
+    const prefix = fatalLine ? fatalLine + "\n" : "";
     throw new Error(
-      `Script ${scriptPath} exited with code ${exitCode}: ${tail}`
+      `Script ${scriptPath} exited with code ${exitCode}: ${prefix}${tail}`
     );
   }
 
