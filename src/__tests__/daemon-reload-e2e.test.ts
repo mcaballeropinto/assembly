@@ -294,4 +294,59 @@ describe("daemon reload end-to-end", () => {
     try { process.kill(originalPid, 0); } catch { alive = false; }
     expect(alive).toBe(true);
   }, 60_000);
+
+  test("reload detects systemd context via INVOCATION_ID and attempts systemd-run or falls back", async () => {
+    // Spawn daemon with INVOCATION_ID set to simulate systemd context.
+    // The daemon should detect systemd context and:
+    // - If systemd-run is available: use it to spawn successor
+    // - If systemd-run is NOT available: fall back to detached with a warning
+    // Either way, the reload should complete successfully.
+    daemonProc = Bun.spawn(["bun", "run", CLI, "daemon", "start"], {
+      env: { ...sandboxedEnv(), INVOCATION_ID: "test-fake-invocation-id" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const pidFile = resolve(assemblyHome, "orchestrator.pid");
+    expect(await waitFor(() => existsSync(pidFile), 10_000)).toBe(true);
+
+    const originalPidData = JSON.parse(readFileSync(pidFile, "utf-8"));
+    const originalDaemonPid = originalPidData.pid;
+
+    // Enqueue a workpiece so we can verify the reload works.
+    const enq = await runCli(["enqueue", "reload-line", "--task", "systemd test task"], { timeout: 10_000 });
+    expect(enq.exitCode).toBe(0);
+
+    // Wait for the worker to start.
+    const procDir = resolve(linePath, "stations", "slow", "queue", "processing");
+    const workerStarted = await waitFor(() => {
+      if (!existsSync(procDir)) return false;
+      return readdirSync(procDir).filter((f) => f.endsWith(".json")).length > 0;
+    }, 15_000);
+    expect(workerStarted).toBe(true);
+
+    // Trigger reload with INVOCATION_ID set. The daemon will detect systemd
+    // context and try systemd-run or fall back.
+    const reload = await runCli(["daemon", "reload", "--timeout", "30"], { timeout: 40_000 });
+
+    if (reload.exitCode !== 0) {
+      console.error(`[systemd-reload-test] reload stdout:\n${reload.stdout}`);
+      console.error(`[systemd-reload-test] reload stderr:\n${reload.stderr}`);
+    }
+
+    // The reload should succeed either way (systemd-run or fallback).
+    expect(reload.exitCode).toBe(0);
+
+    // PID file should point at a new daemon.
+    const newPidData = JSON.parse(readFileSync(pidFile, "utf-8"));
+    expect(newPidData.pid).not.toBe(originalDaemonPid);
+
+    // Original daemon should have exited.
+    let oldAlive = true;
+    try { process.kill(originalDaemonPid, 0); } catch { oldAlive = false; }
+    expect(oldAlive).toBe(false);
+
+    // Clean up successor.
+    try { process.kill(newPidData.pid, "SIGTERM"); } catch {}
+    await new Promise((r) => setTimeout(r, 500));
+  }, 90_000);
 });

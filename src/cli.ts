@@ -642,6 +642,30 @@ async function handleDaemonStart(_args: string[]) {
 }
 
 /**
+ * Cache for systemd-run availability check.
+ */
+let _systemdRunAvailable: boolean | null = null;
+
+/**
+ * Check if systemd-run is available on this system.
+ */
+async function isSystemdRunAvailable(): Promise<boolean> {
+  if (_systemdRunAvailable !== null) return _systemdRunAvailable;
+  try {
+    const proc = Bun.spawn(["which", "systemd-run"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    const exitCode = await proc.exited;
+    _systemdRunAvailable = exitCode === 0;
+    return _systemdRunAvailable;
+  } catch {
+    _systemdRunAvailable = false;
+    return false;
+  }
+}
+
+/**
  * The handoff sequence run inside the old daemon when SIGHUP fires.
  * Returns when it's safe to exit; throws if the new daemon didn't come up
  * (caller keeps the old daemon running rather than orphaning workers).
@@ -655,8 +679,8 @@ async function performHandoffReload(
   const handoffPath = handle.writeHandoff();
   console.log(`  [reload] handoff written: ${handoffPath}`);
 
-  // Spawn successor daemon detached. It will pick up ASSEMBLY_RELOAD_FROM_PID
-  // and skip the live-PID-file refusal in global-orchestrator.
+  // Spawn successor daemon. When under systemd, use systemd-run --scope to
+  // escape the parent service's cgroup. Otherwise use detached spawn.
   //
   // Run from the same entry point as the current process — process.argv[1]
   // is the script `bun` is executing. In production that's dist/cli.js (the
@@ -664,17 +688,74 @@ async function performHandoffReload(
   // means whatever code we were running, the successor runs the latest
   // version of the same file. (For a true "swap in new code" reload, the
   // operator rebuilds dist/ before invoking `assembly daemon reload`.)
-  const env = { ...process.env, ASSEMBLY_RELOAD_FROM_PID: String(process.pid) };
   const entry = process.argv[1];
   if (!entry) {
     throw new Error("Cannot determine current CLI entry point (process.argv[1] empty)");
   }
-  const child = Bun.spawn(["bun", "run", entry, "daemon", "_resume"], {
-    env,
-    stdout: "inherit",
-    stderr: "inherit",
-    detached: true,
-  });
+
+  // Detect systemd context via INVOCATION_ID env var.
+  const underSystemd = !!process.env.INVOCATION_ID;
+  const systemdRunAvailable = underSystemd ? await isSystemdRunAvailable() : false;
+
+  let child: any;
+
+  if (underSystemd && systemdRunAvailable) {
+    // Systemd context: spawn via systemd-run --scope to escape the parent
+    // service's cgroup. The successor will run in a transient scope unit.
+    console.log(`  [reload] spawning successor via systemd-run (systemd context detected)`);
+    child = Bun.spawn([
+      "systemd-run",
+      "--scope",
+      "--collect",
+      "--quiet",
+      "--unit=assembly-reload-" + Date.now(),
+      "--setenv=ASSEMBLY_RELOAD_FROM_PID=" + process.pid,
+      "bun",
+      "run",
+      entry,
+      "daemon",
+      "_resume",
+    ], {
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+  } else if (underSystemd && !systemdRunAvailable) {
+    // Systemd detected but systemd-run not available: fall back with warning.
+    console.warn(`  [reload] WARNING: running under systemd but systemd-run not found — successor may be killed by cgroup cleanup`);
+    const env = { ...process.env, ASSEMBLY_RELOAD_FROM_PID: String(process.pid) };
+    child = Bun.spawn(["bun", "run", entry, "daemon", "_resume"], {
+      env,
+      stdout: "inherit",
+      stderr: "inherit",
+      detached: true,
+    });
+  } else {
+    // Non-systemd context: use detached spawn (dev/test path).
+    console.log(`  [reload] spawning successor (detached, non-systemd context)`);
+    const env = { ...process.env, ASSEMBLY_RELOAD_FROM_PID: String(process.pid) };
+    child = Bun.spawn(["bun", "run", entry, "daemon", "_resume"], {
+      env,
+      stdout: "inherit",
+      stderr: "inherit",
+      detached: true,
+    });
+  }
+
+  // Give systemd-run a moment to fail if it's going to (e.g., D-Bus down).
+  if (underSystemd && systemdRunAvailable) {
+    await new Promise((r) => setTimeout(r, 300));
+    if (child.exitCode !== null && child.exitCode !== 0) {
+      console.warn(`  [reload] systemd-run failed (exit ${child.exitCode}), falling back to detached spawn`);
+      const env = { ...process.env, ASSEMBLY_RELOAD_FROM_PID: String(process.pid) };
+      child = Bun.spawn(["bun", "run", entry, "daemon", "_resume"], {
+        env,
+        stdout: "inherit",
+        stderr: "inherit",
+        detached: true,
+      });
+    }
+  }
+
   const newPid = child.pid!;
   console.log(`  [reload] successor spawned: pid=${newPid}`);
 
@@ -751,8 +832,32 @@ async function handleDaemonReload(args: string[]) {
     } catch {}
     await new Promise((r) => setTimeout(r, 200));
   }
-  console.error(`  Reload did not complete within ${timeoutS}s.`);
-  console.error(`  Check the daemon's log; in-flight workers were not signaled.`);
+
+  // Distinguish: did the successor come up and die, or never come up?
+  let successorDied = false;
+  let successorPid: number | null = null;
+  try {
+    if (existsSync(ORCHESTRATOR_PID_FILE)) {
+      const cur = JSON.parse(readFileSync(ORCHESTRATOR_PID_FILE, "utf-8"));
+      if (cur.pid !== pid) {
+        successorPid = cur.pid;
+        try {
+          process.kill(cur.pid, 0);
+        } catch {
+          successorDied = true;
+        }
+      }
+    }
+  } catch {}
+
+  if (successorDied) {
+    console.error(`  Reload handed off to successor (pid=${successorPid}) but it died shortly after.`);
+    console.error(`  This typically happens when systemd's cgroup cleanup kills the successor.`);
+    console.error(`  Restart manually: systemctl restart assembly`);
+  } else {
+    console.error(`  Reload did not complete within ${timeoutS}s.`);
+    console.error(`  The successor may have failed to start. Check daemon logs.`);
+  }
   process.exit(1);
 }
 

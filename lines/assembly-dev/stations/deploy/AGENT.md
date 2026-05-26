@@ -106,13 +106,13 @@ sleep 1
 systemctl is-active assembly-dashboard || echo "assembly-dashboard not active"
 ```
 
-**Daemon (intentionally not reloaded):** `assembly daemon reload` is incompatible
-with the production `assembly.service` unit (`Type=simple`, `Restart=on-failure`)
-— the old daemon exits cleanly mid-handoff, systemd marks the unit deactivated,
-and the detached successor isn't tracked as MainPID. For changes to daemon code
-itself (orchestrator, runner, queue, etc.), require a manual `systemctl restart
-assembly`. Station scripts are read off disk per invocation, so AGENT.md /
-station code changes land immediately on the next task without any reload.
+**Daemon reload:** `assembly daemon reload` now works under systemd — the
+successor is spawned via `systemd-run --scope` into a transient scope outside
+the parent service's cgroup. After reload, the successor runs independently;
+run `systemctl restart assembly` to bring the daemon back under the service
+unit for future `systemctl stop` commands. For deploy, prefer `systemctl
+restart assembly` over `daemon reload` — it's simpler and puts the new daemon
+under the service unit immediately.
 
 ### 6. Final Verification
 
