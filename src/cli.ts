@@ -702,14 +702,27 @@ async function performHandoffReload(
   if (underSystemd && systemdRunAvailable) {
     // Systemd context: spawn via systemd-run --scope to escape the parent
     // service's cgroup. The successor will run in a transient scope unit.
+    // Build --setenv args for critical env vars that must be propagated.
     console.log(`  [reload] spawning successor via systemd-run (systemd context detected)`);
+    const criticalEnvVars = [
+      "ASSEMBLY_RELOAD_FROM_PID=" + process.pid,
+      "HOME=" + process.env.HOME,
+      "PATH=" + process.env.PATH,
+    ];
+    // Add any ASSEMBLY_* vars that exist in the current environment.
+    for (const [key, value] of Object.entries(process.env)) {
+      if (key.startsWith("ASSEMBLY_") && key !== "ASSEMBLY_RELOAD_FROM_PID" && value !== undefined) {
+        criticalEnvVars.push(`${key}=${value}`);
+      }
+    }
+    const setenvArgs = criticalEnvVars.flatMap((v) => ["--setenv", v]);
     child = Bun.spawn([
       "systemd-run",
       "--scope",
       "--collect",
       "--quiet",
       "--unit=assembly-reload-" + Date.now(),
-      "--setenv=ASSEMBLY_RELOAD_FROM_PID=" + process.pid,
+      ...setenvArgs,
       "bun",
       "run",
       entry,

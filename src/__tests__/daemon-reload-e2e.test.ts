@@ -122,6 +122,10 @@ function sandboxedEnv(): NodeJS.ProcessEnv {
   // this test set up. Clear it so the daemon falls back to homedir()/.assembly,
   // which under HOME=testHome resolves to testHome/.assembly.
   delete env.ASSEMBLY_HOME;
+  // Clear INVOCATION_ID to prevent tests from detecting systemd context when
+  // the test runner itself is running under systemd. Tests that want to test
+  // systemd behavior should explicitly set this.
+  delete env.INVOCATION_ID;
   return env;
 }
 
