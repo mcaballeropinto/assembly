@@ -91,7 +91,7 @@ describe("callScript()", () => {
     const result = await callScript(script, wpPath);
     const envelope = JSON.parse(result.content);
     expect(envelope.summary).toBe("check argv");
-    expect(envelope.data.id).toBe("test-run");
+    expect(envelope.data.id as string).toBe("test-run");
   });
 
   test("includes stderr in error message on failure", async () => {

@@ -1,6 +1,7 @@
 import { resolve } from "path";
 import matter from "gray-matter";
 import type { StationConfig, EvalConfig } from "./types";
+import { StationName } from "./ids";
 import { loadMemory } from "./memory";
 
 /**
@@ -10,7 +11,7 @@ import { loadMemory } from "./memory";
  */
 export async function loadStation(
   stationDir: string,
-  name: string
+  name: StationName
 ): Promise<StationConfig> {
   const agentPath = resolve(stationDir, "AGENT.md");
   const file = Bun.file(agentPath);

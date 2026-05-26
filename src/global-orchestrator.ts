@@ -14,6 +14,7 @@ import { startOrchestrator } from "./orchestrator";
 import { getFullState } from "./dashboard-data";
 import { startOrphanReaper } from "./reaper";
 import type { LineConfig } from "./types";
+import type { LineName } from "./ids";
 import {
   findLatestHandoff,
   writeHandoffState,
@@ -28,7 +29,7 @@ import {
 
 export interface ManagedLine {
   linePath: string;
-  lineName: string;
+  lineName: LineName;
   lineConfig: LineConfig;
   stop: (opts?: { handoff?: boolean }) => void | Promise<void>;
   startedAt: string;
@@ -406,10 +407,11 @@ async function startManagedLine(
       getKnownWorkerPids: handle.getKnownWorkerPids,
     });
   } catch (err) {
+    const fallbackName = basename(linePath) as LineName;
     managedLines.set(linePath, {
       linePath,
-      lineName: basename(linePath),
-      lineConfig: { name: basename(linePath), sequence: [] } as LineConfig,
+      lineName: fallbackName,
+      lineConfig: { name: fallbackName, sequence: [] } as unknown as LineConfig,
       stop: () => {},
       startedAt: new Date().toISOString(),
       status: "error",
@@ -518,5 +520,6 @@ export async function getGlobalState(
     lines,
     totals,
     timestamp: new Date().toISOString(),
+    version: String(HANDOFF_VERSION),
   };
 }

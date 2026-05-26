@@ -6,6 +6,7 @@ import { startOrchestrator } from "../orchestrator";
 import { createWorkpiece, failStation } from "../workpiece";
 import type { FailureClass, Workpiece } from "../types";
 import { __resetUsageGateStateForTest } from "../usage";
+import { LineName, StationName } from '../ids';
 
 function createRetryTestLine(linePath: string, stationName: string): void {
   mkdirSync(resolve(linePath, "queues", "inbox"), { recursive: true });
@@ -35,10 +36,10 @@ function buildFailedWorkpiece(
   stationName: string,
   failureClass: FailureClass
 ): Workpiece {
-  const wp = createWorkpiece("sweep-test", "sweep-task");
+  const wp = createWorkpiece(LineName("sweep-test"), "sweep-task");
   return failStation(
     wp,
-    stationName,
+    StationName(stationName),
     `seeded ${failureClass} failure`,
     {
       model: "test:test",

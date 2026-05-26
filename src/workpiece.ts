@@ -1,5 +1,6 @@
 import { resolve } from "path";
 import type { Workpiece, StationResult, StationEnvelope, TokenUsage, FailureClass } from "./types";
+import { WorkpieceId, LineName, StationName, asWorkpiece } from './ids';
 import { CURRENT_WORKPIECE_VERSION, validateWorkpieceVersion } from './schemas/workpiece';
 
 // Process-local counter so a fanout batch hitting createWorkpiece in the same
@@ -11,13 +12,13 @@ let _wpSeq = 0;
  * Create a fresh workpiece for a new run.
  */
 export function createWorkpiece(
-  lineName: string,
+  lineName: LineName,
   task: string,
   input: Record<string, unknown> = {}
 ): Workpiece {
   const now = new Date();
   const seq = (_wpSeq++ & 0xfff).toString(16).padStart(3, "0");
-  const id = `run_${now.toISOString().replace(/[:.]/g, "-")}_${seq}`;
+  const id = WorkpieceId(`run_${now.toISOString().replace(/[:.]/g, "-")}_${seq}`);
 
   return {
     id,
@@ -35,7 +36,7 @@ export function createWorkpiece(
  */
 export function writeStation(
   workpiece: Workpiece,
-  stationName: string,
+  stationName: StationName,
   envelope: StationEnvelope,
   meta: {
     model: string;
@@ -87,7 +88,7 @@ export function writeStation(
  */
 export function failStation(
   workpiece: Workpiece,
-  stationName: string,
+  stationName: StationName,
   error: string,
   meta: {
     model: string;
@@ -139,7 +140,7 @@ export function failStation(
  */
 export function escalateStation(
   workpiece: Workpiece,
-  stationName: string,
+  stationName: StationName,
   feedback: string,
   meta: {
     model: string;
@@ -190,7 +191,7 @@ export async function loadWorkpiece(path: string): Promise<Workpiece> {
   }
   const raw = JSON.parse(await file.text()) as Record<string, unknown>;
   validateWorkpieceVersion(raw);
-  return raw as unknown as Workpiece;
+  return asWorkpiece<Workpiece>(raw);
 }
 
 /**

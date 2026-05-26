@@ -174,10 +174,10 @@ describe("Eval feedback formatting", () => {
   });
 
   test("eval handles missing gate_failure gracefully", () => {
-    const dev = {};
+    const dev: Record<string, unknown> = {};
     const feedbackParts: string[] = [];
 
-    if (dev.gate_failure && typeof dev.gate_failure === "object") {
+    if ("gate_failure" in dev && dev.gate_failure && typeof dev.gate_failure === "object") {
       feedbackParts.push("should not reach here");
     }
 
@@ -185,14 +185,14 @@ describe("Eval feedback formatting", () => {
   });
 
   test("eval handles malformed gate_failure gracefully", () => {
-    const dev = {
+    const dev: Record<string, unknown> = {
       gate_failure: { gate: 123, details: null },
     };
 
     const feedbackParts: string[] = [];
 
-    if (dev.gate_failure && typeof dev.gate_failure === "object") {
-      const gf = dev.gate_failure as { gate?: string; details?: string };
+    if ("gate_failure" in dev && dev.gate_failure && typeof dev.gate_failure === "object") {
+      const gf = dev.gate_failure as { gate?: unknown; details?: unknown };
       const gate = typeof gf.gate === "string" ? gf.gate : "unknown";
       const details = typeof gf.details === "string" ? gf.details : "(no details captured)";
       feedbackParts.push(

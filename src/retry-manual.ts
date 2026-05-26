@@ -2,6 +2,8 @@ import { basename, resolve } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dismissFilenames } from "./error-dismiss";
 import { recordEmit } from "./emit-manifest";
+import { WorkpieceId, LineName, StationName } from "./ids";
+import type { StationResult } from "./types";
 
 export class InvalidRetryFileNameError extends Error {
   constructor(fileName: string) {
@@ -59,11 +61,11 @@ export function retryErroredWorkpiece(
   const newFileName = `${newId}.json`;
 
   const copy = {
-    id: newId,
-    line: raw.line,
+    id: WorkpieceId(newId),
+    line: LineName(raw.line as string),
     task: raw.task ?? "",
     input: raw.input ?? {},
-    stations: {},
+    stations: {} as Record<StationName, StationResult>,
     parent_run_id: raw.id ?? null,
   };
 

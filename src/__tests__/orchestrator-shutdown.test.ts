@@ -13,6 +13,7 @@ import { startOrchestrator } from "../orchestrator";
 import { createWorkpiece } from "../workpiece";
 import { __resetUsageGateStateForTest } from "../usage";
 import { recordEmit } from "../emit-manifest";
+import { LineName } from '../ids';
 
 /**
  * Build a minimal line with one `script` station whose script sleeps long
@@ -139,7 +140,7 @@ describe("orchestrator graceful shutdown", () => {
       // Drop a workpiece into the station inbox directly so the worker spawns
       // without waiting for the line-inbox → claim step. recordEmit is the
       // producer-allowlist contract for authorized inbox writes.
-      const wp = createWorkpiece("shutdown-test", "abort me");
+      const wp = createWorkpiece(LineName("shutdown-test"), "abort me");
       const stationInboxDir = resolve(
         linePath,
         "stations",
@@ -253,7 +254,7 @@ describe("orchestrator graceful shutdown", () => {
 
       // Seed a workpiece directly in processing/ to simulate a worker that
       // died without flushing (e.g. SIGKILLed before its handler ran).
-      const wp = createWorkpiece("sweep-test", "stranded");
+      const wp = createWorkpiece(LineName("sweep-test"), "stranded");
       const processingDir = resolve(
         linePath,
         "stations",
@@ -335,8 +336,8 @@ describe("orchestrator graceful shutdown", () => {
 
       // Seed a workpiece in processing/ that is already marked as done
       // (worker wrote the result but died before renaming to output).
-      const wp = createWorkpiece("done-test", "finished");
-      wp.stations[stationName] = {
+      const wp = createWorkpiece(LineName("done-test"), "finished");
+      wp.stations[stationName as any] = {
         status: "done",
         summary: "already finished",
         started_at: "2026-01-01T00:00:00Z",
@@ -421,7 +422,7 @@ describe("orchestrator graceful shutdown", () => {
       // Seed a workpiece in processing/ — pretend it's owned by some OTHER
       // daemon's worker on the same line (a test daemon spawned with
       // production ASSEMBLY_LINE_DIRS leaked into env).
-      const wp = createWorkpiece("skip-test", "do not abort me");
+      const wp = createWorkpiece(LineName("skip-test"), "do not abort me");
       const processingDir = resolve(
         linePath,
         "stations",

@@ -1,3 +1,5 @@
+import type { WorkpieceId, LineName, StationName } from './ids';
+
 // === The Standard Envelope ===
 // Every station returns this. No exceptions.
 
@@ -21,7 +23,7 @@ export interface EvalResult {
 // Defines downstream line triggers when a line's workpiece completes.
 
 export interface OnCompleteTarget {
-  target?: string;                     // target line name (directory name under lines/)
+  target?: LineName;                   // target line name (directory name under lines/)
   /**
    * Dot-notation workpiece path that resolves to the target line name at
    * trigger time (e.g. "input.target_line"). Wins over `target` when set.
@@ -110,9 +112,9 @@ export interface StationResult extends StationEnvelope {
 }
 
 export interface Workpiece {
-  id: string;
+  id: WorkpieceId;
   schema_version?: number;
-  line: string;
+  line: LineName;
   task: string;
   input: Record<string, unknown>;
   /**
@@ -128,13 +130,13 @@ export interface Workpiece {
    * workpiece is eligible to be claimed from a station inbox.
    */
   dependsOn?: string[];
-  stations: Record<string, StationResult>;
+  stations: Record<StationName, StationResult>;
   totals?: {
     tokens: TokenUsage;
     cost_usd: number;
   };
   /** Orchestrator scratch: accumulated prior attempts awaiting consumption by writeStation. */
-  _retry_history?: Record<string, Omit<StationResult, "previous_attempts">[]>;
+  _retry_history?: Record<StationName, Omit<StationResult, "previous_attempts">[]>;
   /**
    * Runner scratch: eval feedback from the prior attempt of a script station,
    * written into the temp workpiece the next attempt reads. Scripts use this
@@ -142,7 +144,7 @@ export interface Workpiece {
    * Cleared once the station emits its final envelope.
    */
   _pending_eval_feedback?: {
-    station: string;
+    station: StationName;
     feedback: string;
     attempt: number;
   };
@@ -155,7 +157,7 @@ export type Provider = "api" | "claude-code" | "claude-code-cached" | "pi" | "sc
 // === Station Config (from AGENT.md frontmatter) ===
 
 export interface StationConfig {
-  name: string; // derived from folder name
+  name: StationName; // derived from folder name
   dir: string; // station directory path
   description?: string; // station description from AGENT.md frontmatter
   reads?: string[]; // what this station needs
@@ -246,7 +248,7 @@ export interface RepairConfig {
 }
 
 export interface LineConfig {
-  name: string;
+  name: LineName;
   description?: string;
   sequence: SequenceStep[];
   concurrency?: number; // max workers per station (default: unlimited)
@@ -363,3 +365,6 @@ export type LogEvent =
       reason: string;
       ts: string;
     };
+
+// Re-export branded types for convenience
+export type { WorkpieceId, LineName, StationName, TaskFileName } from './ids';

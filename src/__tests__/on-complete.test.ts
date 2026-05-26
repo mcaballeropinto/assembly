@@ -13,6 +13,7 @@ import { createWorkpiece, writeStation } from "../workpiece";
 import { validateLine } from "../line";
 import { loadLine } from "../line";
 import type { LineConfig, Workpiece } from "../types";
+import { LineName, StationName } from '../ids';
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-on-complete-${Date.now()}`);
 
@@ -53,15 +54,15 @@ function createLineDir(name: string, config: Record<string, unknown>, parentDir?
 
 /** Create a workpiece with station results for testing */
 function createTestWorkpiece(): Workpiece {
-  let wp = createWorkpiece("line-a", "Test task");
-  wp = writeStation(wp, "recommend", { summary: "Recommended", data: { top_picks: ["AAPL", "GOOG"], has_actions: true } }, {
+  let wp = createWorkpiece(LineName("line-a"), "Test task");
+  wp = writeStation(wp, StationName("recommend"), { summary: "Recommended", data: { top_picks: ["AAPL", "GOOG"], has_actions: true } }, {
     model: "test-model",
     tokens: { in: 100, out: 50 },
     cost_usd: 0.01,
     started_at: "2026-01-01T00:00:00Z",
     finished_at: "2026-01-01T00:01:00Z",
   });
-  wp = writeStation(wp, "fetch-market-data", { summary: "Market data fetched", data: { market: { spy: 500 } } }, {
+  wp = writeStation(wp, StationName("fetch-market-data"), { summary: "Market data fetched", data: { market: { spy: 500 } } }, {
     model: "test-model",
     tokens: { in: 200, out: 100 },
     cost_usd: 0.02,
@@ -143,11 +144,11 @@ describe("triggerDownstream()", () => {
     const wp = createTestWorkpiece();
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["recommend"],
+      name: LineName("line-a"),
+      sequence: [StationName("recommend")],
       on_complete: [
         {
-          target: "line-b",
+          target: LineName("line-b"),
           pass: {
             signals: "recommend.data.top_picks",
             market: "fetch-market-data.data.market",
@@ -194,11 +195,11 @@ describe("triggerDownstream()", () => {
     const wp = createTestWorkpiece();
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["recommend"],
+      name: LineName("line-a"),
+      sequence: [StationName("recommend")],
       on_complete: [
         {
-          target: "line-b",
+          target: LineName("line-b"),
           condition: "recommend.data.has_actions",
           pass: {
             picks: "recommend.data.top_picks",
@@ -229,11 +230,11 @@ describe("triggerDownstream()", () => {
     const wp = createTestWorkpiece();
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["recommend"],
+      name: LineName("line-a"),
+      sequence: [StationName("recommend")],
       on_complete: [
         {
-          target: "line-b",
+          target: LineName("line-b"),
           condition: "recommend.data.nonexistent_field",
           pass: {
             picks: "recommend.data.top_picks",
@@ -269,11 +270,11 @@ describe("triggerDownstream()", () => {
     const wp = createTestWorkpiece();
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["recommend"],
+      name: LineName("line-a"),
+      sequence: [StationName("recommend")],
       on_complete: [
         {
-          target: "line-b",
+          target: LineName("line-b"),
           pass: {
             valid_field: "recommend.data.top_picks",
             missing_field: "nonexistent.data.something",
@@ -309,15 +310,15 @@ describe("triggerDownstream()", () => {
     const wp = createTestWorkpiece();
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["recommend"],
+      name: LineName("line-a"),
+      sequence: [StationName("recommend")],
       on_complete: [
         {
-          target: "line-b",
+          target: LineName("line-b"),
           pass: { signals: "recommend.data.top_picks" },
         },
         {
-          target: "line-c",
+          target: LineName("line-c"),
           pass: { market: "fetch-market-data.data.market" },
         },
       ],
@@ -344,8 +345,8 @@ describe("triggerDownstream()", () => {
     const wp = createTestWorkpiece();
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["recommend"],
+      name: LineName("line-a"),
+      sequence: [StationName("recommend")],
     };
 
     await triggerDownstream(wp, config, "/tmp/nonexistent", log);
@@ -358,8 +359,8 @@ describe("triggerDownstream()", () => {
     const wp = createTestWorkpiece();
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["recommend"],
+      name: LineName("line-a"),
+      sequence: [StationName("recommend")],
       on_complete: [],
     };
 
@@ -380,11 +381,11 @@ describe("triggerDownstream()", () => {
     const wp = createTestWorkpiece();
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["recommend"],
+      name: LineName("line-a"),
+      sequence: [StationName("recommend")],
       on_complete: [
         {
-          target: "line-b",
+          target: LineName("line-b"),
           pass: { signals: "recommend.data.top_picks" },
         },
       ],
@@ -416,7 +417,7 @@ describe("triggerDownstream() — fanout", () => {
     let wp = createTestWorkpiece();
     wp = writeStation(
       wp,
-      "validate",
+      StationName("validate"),
       {
         summary: "ok",
         data: {
@@ -438,11 +439,11 @@ describe("triggerDownstream() — fanout", () => {
     );
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["validate"],
+      name: LineName("line-a"),
+      sequence: [StationName("validate")],
       on_complete: [
         {
-          target: "line-b",
+          target: LineName("line-b"),
           fanout: { over: "validate.data.qualifying_items", as: "seed_items" },
           condition: "validate.data.qualifying_count",
         },
@@ -493,17 +494,17 @@ describe("triggerDownstream() — fanout", () => {
     let wp = createTestWorkpiece();
     wp = writeStation(
       wp,
-      "validate",
+      StationName("validate"),
       { summary: "none", data: { qualifying_items: [], qualifying_count: 0 } },
       { model: "t", tokens: { in: 1, out: 1 }, cost_usd: 0,
         started_at: "2026-01-01T00:02:00Z", finished_at: "2026-01-01T00:03:00Z" }
     );
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["validate"],
+      name: LineName("line-a"),
+      sequence: [StationName("validate")],
       on_complete: [
-        { target: "line-b", fanout: { over: "validate.data.qualifying_items", as: "seed_items" } },
+        { target: LineName("line-b"), fanout: { over: "validate.data.qualifying_items", as: "seed_items" } },
       ],
     };
 
@@ -530,18 +531,18 @@ describe("triggerDownstream() — fanout", () => {
     let wp = createTestWorkpiece();
     wp = writeStation(
       wp,
-      "validate",
+      StationName("validate"),
       { summary: "ok", data: { qualifying_items: [{ name: "X" }, { name: "Y" }], shared_run: "run-123" } },
       { model: "t", tokens: { in: 1, out: 1 }, cost_usd: 0,
         started_at: "2026-01-01T00:02:00Z", finished_at: "2026-01-01T00:03:00Z" }
     );
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["validate"],
+      name: LineName("line-a"),
+      sequence: [StationName("validate")],
       on_complete: [
         {
-          target: "line-b",
+          target: LineName("line-b"),
           fanout: { over: "validate.data.qualifying_items", as: "seed_items" },
           pass: { run_id: "validate.data.shared_run" },
         },
@@ -581,7 +582,7 @@ describe("triggerDownstream() — target_path", () => {
     wp.input = { target_line: "target-line" };
     wp = writeStation(
       wp,
-      "validate",
+      StationName("validate"),
       {
         summary: "ok",
         data: {
@@ -594,8 +595,8 @@ describe("triggerDownstream() — target_path", () => {
     );
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["validate"],
+      name: LineName("line-a"),
+      sequence: [StationName("validate")],
       on_complete: [
         {
           target_path: "input.target_line",
@@ -632,8 +633,8 @@ describe("triggerDownstream() — target_path", () => {
     // No input.target_line on the workpiece.
 
     const config: LineConfig = {
-      name: "line-a",
-      sequence: ["recommend"],
+      name: LineName("line-a"),
+      sequence: [StationName("recommend")],
       on_complete: [
         { target_path: "input.target_line", pass: { picks: "recommend.data.top_picks" } },
       ],
@@ -654,15 +655,15 @@ describe("validateLine() with on_complete", () => {
 
     // Create line-a with on_complete targeting line-b
     createLineDir("line-a", {
-      name: "line-a",
-      sequence: ["dummy-station"],
-      on_complete: [{ target: "line-b", pass: { data: "dummy-station.data.result" } }],
+      name: LineName("line-a"),
+      sequence: [StationName("dummy-station")],
+      on_complete: [{ target: LineName("line-b"), pass: { data: "dummy-station.data.result" } }],
     }, linesDir);
 
     // Create line-b as target
     createLineDir("line-b", {
-      name: "line-b",
-      sequence: ["dummy-station"],
+      name: LineName("line-b"),
+      sequence: [StationName("dummy-station")],
     }, linesDir);
 
     const errors = await validateLine(resolve(linesDir, "line-a"));
@@ -677,8 +678,8 @@ describe("validateLine() with on_complete", () => {
     const linesDir = resolve(TEMP_DIR, testId);
 
     createLineDir("line-a", {
-      name: "line-a",
-      sequence: ["dummy-station"],
+      name: LineName("line-a"),
+      sequence: [StationName("dummy-station")],
       on_complete: [{ target: "nonexistent-line", pass: { data: "dummy-station.data.result" } }],
     }, linesDir);
 
@@ -693,8 +694,8 @@ describe("validateLine() with on_complete", () => {
     const linesDir = resolve(TEMP_DIR, testId);
 
     createLineDir("line-a", {
-      name: "line-a",
-      sequence: ["dummy-station"],
+      name: LineName("line-a"),
+      sequence: [StationName("dummy-station")],
       on_complete: [{ target: "no-yaml-line" }],
     }, linesDir);
 
@@ -712,8 +713,8 @@ describe("validateLine() with on_complete", () => {
     const linesDir = resolve(TEMP_DIR, testId);
 
     createLineDir("line-a", {
-      name: "line-a",
-      sequence: ["dummy-station"],
+      name: LineName("line-a"),
+      sequence: [StationName("dummy-station")],
       on_complete: [
         { target_path: "input.target_line", pass: { x: "dummy-station.data.x" } },
       ],
@@ -730,8 +731,8 @@ describe("validateLine() with on_complete", () => {
     const linesDir = resolve(TEMP_DIR, testId);
 
     createLineDir("line-a", {
-      name: "line-a",
-      sequence: ["dummy-station"],
+      name: LineName("line-a"),
+      sequence: [StationName("dummy-station")],
       on_complete: [{ pass: { x: "dummy-station.data.x" } } as unknown as Record<string, unknown>],
     }, linesDir);
 
@@ -744,14 +745,14 @@ describe("validateLine() with on_complete", () => {
     const linesDir = resolve(TEMP_DIR, testId);
 
     createLineDir("line-a", {
-      name: "line-a",
-      sequence: ["dummy-station"],
+      name: LineName("line-a"),
+      sequence: [StationName("dummy-station")],
       on_complete: [{ target: "line-b" }],
     }, linesDir);
 
     createLineDir("line-b", {
-      name: "line-b",
-      sequence: ["dummy-station"],
+      name: LineName("line-b"),
+      sequence: [StationName("dummy-station")],
       on_complete: [{ target: "line-a" }],
     }, linesDir);
 
@@ -771,11 +772,11 @@ describe("backward compatibility", () => {
 
     const lineDir = createLineDir("plain-line", {
       name: "plain-line",
-      sequence: ["dummy-station"],
+      sequence: [StationName("dummy-station")],
     }, linesDir);
 
     const { config } = await loadLine(lineDir);
-    expect(config.name).toBe("plain-line");
+    expect(config.name as string).toBe("plain-line");
     expect(config.on_complete).toBeUndefined();
   });
 
@@ -785,7 +786,7 @@ describe("backward compatibility", () => {
 
     const lineDir = createLineDir("valid-line", {
       name: "valid-line",
-      sequence: ["dummy-station"],
+      sequence: [StationName("dummy-station")],
     }, linesDir);
 
     const errors = await validateLine(lineDir);

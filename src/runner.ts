@@ -26,6 +26,7 @@ import { writeEvalToMemory } from "./memory";
 import { calculateCostWithCache, formatCost } from "./pricing";
 import { writeProgress, classifyError } from "./section-worker";
 import { sessionLogPathFor } from "./session-log";
+import { StationName } from './ids';
 import type {
   Workpiece,
   StationConfig,
@@ -42,8 +43,8 @@ export interface RunOptions {
   task: string;
   input?: Record<string, unknown>;
   resumeFrom?: string; // workpiece.json path
-  fromStation?: string; // resume from this station
-  onlyStation?: string; // re-run only this station
+  fromStation?: StationName; // resume from this station
+  onlyStation?: StationName; // re-run only this station
   dryRun?: boolean;
 }
 
@@ -650,24 +651,26 @@ export async function run(options: RunOptions): Promise<Workpiece> {
 function flattenSequence(
   sequence: SequenceStep[],
   _workpiece: Workpiece
-): string[] {
-  const result: string[] = [];
+): StationName[] {
+  const result: StationName[] = [];
 
   for (const step of sequence) {
     if (typeof step === "string") {
-      result.push(step);
+      result.push(StationName(step));
     } else if ("parallel" in step) {
       // TODO: actual parallel execution
       // For now, run sequentially
-      result.push(...step.parallel);
+      result.push(...step.parallel.map(s => StationName(s)));
     } else if ("gate" in step) {
       // Gates are evaluated at runtime during execution
       // For flattening, include both paths (actual selection happens in execute)
       // For now, we'll add a placeholder — real gate logic in v2
-      result.push(step.gate.if_true);
+      result.push(StationName(step.gate.if_true));
     } else if ("loop" in step) {
       // Loops expand at runtime — for now, add stations once
-      result.push(...step.loop.stations);
+      result.push(...step.loop.stations.map(s => StationName(s)));
+    } else if ("station" in step) {
+      result.push(StationName(step.station.name));
     }
   }
 

@@ -5,6 +5,7 @@ import { parseEvalResponse } from "../envelope";
 import { escalateStation, createWorkpiece, writeStation } from "../workpiece";
 import { initLineQueue, getLineQueueState } from "../queue";
 import type { StationResult } from "../types";
+import { LineName, StationName } from '../ids';
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-escalation-${Date.now()}`);
 
@@ -93,9 +94,9 @@ describe("parseEvalResponse() action field", () => {
 
 describe("escalateStation()", () => {
   test("creates workpiece with status 'escalated'", () => {
-    const wp = createWorkpiece("test-line", "test task");
+    const wp = createWorkpiece(LineName("test-line"), "test task");
     const feedback = "All results are hallucinated";
-    const result = escalateStation(wp, "discover", feedback, {
+    const result = escalateStation(wp, StationName("discover"), feedback, {
       model: "claude-sonnet-4-20250514",
       tokens: { in: 1000, out: 500 },
       cost_usd: 0.015,
@@ -103,7 +104,7 @@ describe("escalateStation()", () => {
       finished_at: "2026-01-01T00:01:00Z",
     });
 
-    const station = result.stations["discover"];
+    const station = result.stations[StationName("discover") as keyof typeof result.stations];
     expect(station).toBeDefined();
     expect(station.status).toBe("escalated");
     expect(station.summary).toStartWith("Escalated:");
@@ -116,10 +117,10 @@ describe("escalateStation()", () => {
   });
 
   test("preserves existing station results", () => {
-    let wp = createWorkpiece("test-line", "test task");
+    let wp = createWorkpiece(LineName("test-line"), "test task");
 
     // First station completed successfully
-    wp = writeStation(wp, "discover", { summary: "Found 5 companies" }, {
+    wp = writeStation(wp, StationName("discover"), { summary: "Found 5 companies" }, {
       model: "claude-sonnet-4-20250514",
       tokens: { in: 500, out: 200 },
       cost_usd: 0.008,
@@ -128,7 +129,7 @@ describe("escalateStation()", () => {
     });
 
     // Second station escalated
-    wp = escalateStation(wp, "score", "Scoring is fundamentally broken", {
+    wp = escalateStation(wp, StationName("score"), "Scoring is fundamentally broken", {
       model: "claude-sonnet-4-20250514",
       tokens: { in: 800, out: 300 },
       cost_usd: 0.012,
@@ -137,19 +138,19 @@ describe("escalateStation()", () => {
     });
 
     // Original station still intact
-    expect(wp.stations["discover"]).toBeDefined();
-    expect(wp.stations["discover"].status).toBe("done");
-    expect(wp.stations["discover"].summary).toBe("Found 5 companies");
+    expect(wp.stations[StationName("discover") as keyof typeof wp.stations]).toBeDefined();
+    expect(wp.stations[StationName("discover") as keyof typeof wp.stations].status).toBe("done");
+    expect(wp.stations[StationName("discover") as keyof typeof wp.stations].summary).toBe("Found 5 companies");
 
     // Escalated station
-    expect(wp.stations["score"]).toBeDefined();
-    expect(wp.stations["score"].status).toBe("escalated");
+    expect(wp.stations[StationName("score") as keyof typeof wp.stations]).toBeDefined();
+    expect(wp.stations[StationName("score") as keyof typeof wp.stations].status).toBe("escalated");
   });
 
   test("truncates long feedback in summary to 200 chars", () => {
-    const wp = createWorkpiece("test-line", "test task");
+    const wp = createWorkpiece(LineName("test-line"), "test task");
     const longFeedback = "x".repeat(300);
-    const result = escalateStation(wp, "discover", longFeedback, {
+    const result = escalateStation(wp, StationName("discover"), longFeedback, {
       model: "script",
       tokens: { in: 0, out: 0 },
       cost_usd: 0,
@@ -158,9 +159,9 @@ describe("escalateStation()", () => {
     });
 
     // Summary should be truncated (11 chars for "Escalated: " + 200 chars)
-    expect(result.stations["discover"].summary.length).toBeLessThanOrEqual(211);
+    expect(result.stations[StationName("discover") as keyof typeof result.stations].summary.length).toBeLessThanOrEqual(211);
     // But full feedback should be in data
-    expect((result.stations["discover"].data?.escalation_reason as string).length).toBe(300);
+    expect((result.stations[StationName("discover") as keyof typeof result.stations].data?.escalation_reason as string).length).toBe(300);
   });
 });
 

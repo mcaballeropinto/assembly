@@ -3,6 +3,7 @@ import { resolve } from "path";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { initSectionQueue, initLineQueue } from "../queue";
 import { appendTaskEvent, initTaskEventDir, updateTaskEventIndex } from "../task-events";
+import { WorkpieceId, StationName } from "../ids";
 
 /**
  * Integration tests for the workpiece detail drawer API.
@@ -211,7 +212,7 @@ describe("Drawer prior attempts rendering", () => {
     expect(res.status).toBe(200);
 
     const data = await res.json();
-    expect(data.id).toBe("drawer-wp-retries");
+    expect(data.id as string).toBe("drawer-wp-retries");
     expect(data.stations.plan.previous_attempts).toBeDefined();
     expect(data.stations.plan.previous_attempts.length).toBe(2);
     expect(data.stations.plan.previous_attempts[0].failure_class).toBe("timeout");
@@ -246,7 +247,7 @@ describe("Workpiece API with _activity", () => {
     expect(res.status).toBe(200);
 
     const data = await res.json();
-    expect(data.id).toBe("drawer-wp-1");
+    expect(data.id as string).toBe("drawer-wp-1");
     expect(data.task).toBe("Test drawer workpiece");
     expect(data.stations).toBeDefined();
     expect(data.stations.plan).toBeDefined();
@@ -300,7 +301,7 @@ describe("Workpiece API with _activity", () => {
     expect(res.status).toBe(200);
 
     const data = await res.json();
-    expect(data.id).toBe("drawer-wp-retries");
+    expect(data.id as string).toBe("drawer-wp-retries");
     expect(data.stations.plan.previous_attempts).toBeDefined();
     expect(data.stations.plan.previous_attempts).toHaveLength(2);
     expect(data.stations.plan.previous_attempts[0].failure_class).toBe("timeout");
@@ -322,14 +323,14 @@ describe("Workpiece API with _activity", () => {
 describe("Task events API", () => {
   beforeAll(() => {
     // Seed task-events for drawer-wp-1
-    const wpId = "drawer-wp-1";
+    const wpId = WorkpieceId("drawer-wp-1");
     initTaskEventDir(LINE_DIR, wpId);
     const startedAt = "2026-04-01T10:00:00Z";
-    appendTaskEvent(LINE_DIR, wpId, "plan", { kind: "lifecycle", summary: "Started", detail: { subtype: "started" } });
-    appendTaskEvent(LINE_DIR, wpId, "plan", { kind: "heartbeat", summary: "tick 1 · elapsed 5s · silent 2s" });
-    appendTaskEvent(LINE_DIR, wpId, "plan", { kind: "tool_call", summary: "Read /foo/bar.ts", detail: { tool_name: "Read", input_preview: '{"file_path":"/foo/bar.ts"}' } });
-    appendTaskEvent(LINE_DIR, wpId, "plan", { kind: "lifecycle", summary: "Finished", detail: { subtype: "finished" } });
-    updateTaskEventIndex(LINE_DIR, wpId, "plan", "ok", startedAt, "2026-04-01T10:01:00Z");
+    appendTaskEvent(LINE_DIR, wpId, StationName("plan"), { kind: "lifecycle", summary: "Started", detail: { subtype: "started" } });
+    appendTaskEvent(LINE_DIR, wpId, StationName("plan"), { kind: "heartbeat", summary: "tick 1 · elapsed 5s · silent 2s" });
+    appendTaskEvent(LINE_DIR, wpId, StationName("plan"), { kind: "tool_call", summary: "Read /foo/bar.ts", detail: { tool_name: "Read", input_preview: '{"file_path":"/foo/bar.ts"}' } });
+    appendTaskEvent(LINE_DIR, wpId, StationName("plan"), { kind: "lifecycle", summary: "Finished", detail: { subtype: "finished" } });
+    updateTaskEventIndex(LINE_DIR, wpId, StationName("plan"), "ok", startedAt, "2026-04-01T10:01:00Z");
   });
 
   test("/api/task-events/:line/:wpId returns station list", async () => {

@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from "fs";
 import { resolve } from "path";
+import type { WorkpieceId, StationName } from "./ids";
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -53,21 +54,21 @@ const seqCounters = new Map<string, number>();
 
 // ─── Path helpers ───────────────────────────────────────────────────
 
-function eventsDir(linePath: string, wpId: string): string {
+function eventsDir(linePath: string, wpId: WorkpieceId): string {
   return resolve(linePath, "queues", "task-events", wpId);
 }
 
-function eventsFile(linePath: string, wpId: string, stationName: string): string {
+function eventsFile(linePath: string, wpId: WorkpieceId, stationName: StationName): string {
   return resolve(eventsDir(linePath, wpId), `${stationName}.events.jsonl`);
 }
 
-function indexFile(linePath: string, wpId: string): string {
+function indexFile(linePath: string, wpId: WorkpieceId): string {
   return resolve(eventsDir(linePath, wpId), "index.json");
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-function nextSeq(linePath: string, wpId: string, stationName: string): number {
+function nextSeq(linePath: string, wpId: WorkpieceId, stationName: StationName): number {
   const key = `${linePath}|${wpId}|${stationName}`;
   const n = (seqCounters.get(key) ?? 0) + 1;
   seqCounters.set(key, n);
@@ -88,7 +89,7 @@ function capSummary(s: string): string {
 // ─── Public API ─────────────────────────────────────────────────────
 
 /** Create the task-events directory for a workpiece. Best-effort; never throws. */
-export function initTaskEventDir(linePath: string, wpId: string): void {
+export function initTaskEventDir(linePath: string, wpId: WorkpieceId): void {
   try {
     mkdirSync(eventsDir(linePath, wpId), { recursive: true });
   } catch {
@@ -99,8 +100,8 @@ export function initTaskEventDir(linePath: string, wpId: string): void {
 /** Append a single event to the station's .events.jsonl file. Best-effort; never throws. */
 export function appendTaskEvent(
   linePath: string,
-  wpId: string,
-  stationName: string,
+  wpId: WorkpieceId,
+  stationName: StationName,
   partial: Omit<TaskEvent, "ts" | "seq" | "station">
 ): void {
   try {
@@ -128,8 +129,8 @@ export function appendTaskEvent(
  */
 export function updateTaskEventIndex(
   linePath: string,
-  wpId: string,
-  stationName: string,
+  wpId: WorkpieceId,
+  stationName: StationName,
   status: StationMeta["status"],
   startedAt: string,
   finishedAt?: string
@@ -189,8 +190,8 @@ export function updateTaskEventIndex(
 /** Read events from a station file, with optional cursor-based pagination. */
 export function readTaskEvents(
   linePath: string,
-  wpId: string,
-  stationName: string,
+  wpId: WorkpieceId,
+  stationName: StationName,
   opts: { after?: number; before?: number; limit?: number } = {}
 ): TaskEventsPage {
   const limit = opts.limit ?? 100;
@@ -238,7 +239,7 @@ export function readTaskEvents(
 /** Read per-station metadata from index.json. Returns [] if file missing or corrupt. */
 export function listTaskEventStations(
   linePath: string,
-  wpId: string
+  wpId: WorkpieceId
 ): StationMeta[] {
   try {
     const idxPath = indexFile(linePath, wpId);

@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { resolve } from "path";
 import { reconstructMessages, buildNudgePrompt, nudgeForEnvelope } from "../envelope-nudge";
 import type { StationConfig } from "../types";
+import { StationName } from "../ids";
 
 const fixtureSessionLog = resolve(__dirname, "fixtures/sample-session.jsonl");
 
@@ -53,7 +54,7 @@ describe("reconstructMessages", () => {
 
 describe("buildNudgePrompt", () => {
   const stationWithGuardrails: StationConfig = {
-    name: "plan",
+    name: StationName("plan"),
     dir: "/tmp/plan",
     prompt: "Plan station prompt",
     memoryDir: "/tmp/plan/memory",
@@ -92,7 +93,7 @@ describe("buildNudgePrompt", () => {
 
   it("handles station with no guardrails gracefully", () => {
     const bare: StationConfig = {
-      name: "bare",
+      name: StationName("bare"),
       dir: "/tmp/bare",
       prompt: "Bare prompt",
       memoryDir: "/tmp/bare/memory",
@@ -115,7 +116,7 @@ describe("buildNudgePrompt", () => {
 
 describe("nudgeForEnvelope", () => {
   const station: StationConfig = {
-    name: "plan",
+    name: StationName("plan"),
     dir: "/tmp/plan",
     prompt: "Plan station prompt",
     memoryDir: "/tmp/plan/memory",

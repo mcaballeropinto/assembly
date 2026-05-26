@@ -13,6 +13,7 @@ import { startOrchestrator } from "../orchestrator";
 import { createWorkpiece, failStation } from "../workpiece";
 import type { FailureClass, Workpiece } from "../types";
 import { __resetUsageGateStateForTest } from "../usage";
+import { LineName, StationName } from '../ids';
 
 /**
  * Build a minimal line with a `script` station that succeeds trivially. The
@@ -47,10 +48,10 @@ function buildFailedWorkpiece(
   stationName: string,
   failureClass: FailureClass
 ): Workpiece {
-  const wp = createWorkpiece("idempotent-test", "boom");
+  const wp = createWorkpiece(LineName("idempotent-test"), "boom");
   return failStation(
     wp,
-    stationName,
+    StationName(stationName),
     `seeded ${failureClass} failure`,
     {
       model: "test:test",

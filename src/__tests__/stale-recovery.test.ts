@@ -15,6 +15,7 @@ import {
   failStation,
   escalateStation,
 } from "../workpiece";
+import { LineName, StationName } from "../ids";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-stale-recovery-${Date.now()}`);
 
@@ -61,8 +62,8 @@ describe("recoverStaleProcessing()", () => {
     mkdirSync(errorDir, { recursive: true });
 
     // Create a workpiece with a completed station result
-    let wp = createWorkpiece("test-line", "test task");
-    wp = writeStation(wp, "station-a", { summary: "All done" }, {
+    let wp = createWorkpiece(LineName("test-line"), "test task");
+    wp = writeStation(wp, StationName("station-a"), { summary: "All done" }, {
       model: "test-model",
       tokens: { in: 100, out: 50 },
       cost_usd: 0.01,
@@ -98,7 +99,7 @@ describe("recoverStaleProcessing()", () => {
     mkdirSync(errorDir, { recursive: true });
 
     // Create a workpiece with no station result
-    const wp = createWorkpiece("test-line", "test task");
+    const wp = createWorkpiece(LineName("test-line"), "test task");
 
     // Place it in processing/
     const filePath = resolve(section.queue.processing, `${wp.id}.json`);
@@ -130,8 +131,8 @@ describe("recoverStaleProcessing()", () => {
     mkdirSync(errorDir, { recursive: true });
 
     // Create a workpiece with a failed station result
-    let wp = createWorkpiece("test-line", "test task");
-    wp = failStation(wp, "station-c", "Something went wrong", {
+    let wp = createWorkpiece(LineName("test-line"), "test task");
+    wp = failStation(wp, StationName("station-c"), "Something went wrong", {
       model: "test-model",
       tokens: { in: 50, out: 20 },
       started_at: "2026-01-01T00:00:00Z",
@@ -194,8 +195,8 @@ describe("recoverStaleProcessing()", () => {
     mkdirSync(errorDir, { recursive: true });
 
     // Station-1: completed workpiece
-    let wp1 = createWorkpiece("test-line", "task 1");
-    wp1 = writeStation(wp1, "station-1", { summary: "Done" }, {
+    let wp1 = createWorkpiece(LineName("test-line"), "task 1");
+    wp1 = writeStation(wp1, StationName("station-1"), { summary: "Done" }, {
       model: "test-model",
       tokens: { in: 100, out: 50 },
       cost_usd: 0.01,
@@ -208,7 +209,7 @@ describe("recoverStaleProcessing()", () => {
     );
 
     // Station-2: incomplete workpiece
-    const wp2 = createWorkpiece("test-line", "task 2");
+    const wp2 = createWorkpiece(LineName("test-line"), "task 2");
     writeFileSync(
       resolve(section2.queue.processing, `${wp2.id}.json`),
       JSON.stringify(wp2, null, 2)
@@ -237,8 +238,8 @@ describe("recoverStaleProcessing()", () => {
 
     // Done workpiece WITHOUT rounds — simulates a worker that crashed
     // after writing the result but before attachRounds() ran.
-    let wp = createWorkpiece("test-line", "rounds task");
-    wp = writeStation(wp, "station-rounds", { summary: "Done" }, {
+    let wp = createWorkpiece(LineName("test-line"), "rounds task");
+    wp = writeStation(wp, StationName("station-rounds"), { summary: "Done" }, {
       model: "test-model",
       tokens: { in: 100, out: 50 },
       cost_usd: 0.01,
@@ -294,8 +295,8 @@ describe("recoverStaleProcessing()", () => {
     mkdirSync(errorDir, { recursive: true });
 
     // Create a workpiece with an escalated station result
-    let wp = createWorkpiece("test-line", "test task");
-    wp = escalateStation(wp, "station-esc", "Needs human review", {
+    let wp = createWorkpiece(LineName("test-line"), "test task");
+    wp = escalateStation(wp, StationName("station-esc"), "Needs human review", {
       model: "test-model",
       tokens: { in: 200, out: 100 },
       cost_usd: 0.02,
@@ -330,8 +331,8 @@ describe("recoverStaleProcessing()", () => {
     mkdirSync(errorDir, { recursive: true });
 
     // Create a workpiece that completed station-1 and is now in station-2's processing
-    let wp = createWorkpiece("test-line", "test task");
-    wp = writeStation(wp, "station-1", { summary: "Station 1 done" }, {
+    let wp = createWorkpiece(LineName("test-line"), "test task");
+    wp = writeStation(wp, StationName("station-1"), { summary: "Station 1 done" }, {
       model: "test-model",
       tokens: { in: 100, out: 50 },
       cost_usd: 0.01,

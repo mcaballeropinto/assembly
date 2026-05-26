@@ -5,14 +5,18 @@ import {
   readdirSync,
   readFileSync,
 } from "fs";
-import { resolve, basename } from "path";
+import { resolve } from "path";
 import { recordEmit } from "./emit-manifest";
+import { InvalidTaskFileError, TaskFileName } from './ids';
+
+// Re-export InvalidTaskFileError for backward compatibility
+export { InvalidTaskFileError };
 
 // ─── Types ─────────────────────────────────────────────────────────
 
 export interface HeldTask {
   /** Basename, e.g. "task-1776568940274.json" */
-  fileName: string;
+  fileName: TaskFileName;
   /** Filename without .json extension, used for aria-label */
   id: string;
   /** Raw task text from JSON, truncated to 200 chars */
@@ -27,13 +31,6 @@ export interface ReleaseResult {
   errors: { file: string; message: string }[];
 }
 
-export class InvalidTaskFileError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "InvalidTaskFileError";
-  }
-}
-
 // ─── Helpers ───────────────────────────────────────────────────────
 
 function heldDir(linePath: string): string {
@@ -42,21 +39,6 @@ function heldDir(linePath: string): string {
 
 function inboxDir(linePath: string): string {
   return resolve(linePath, "queues", "inbox");
-}
-
-function validateTaskFile(file: string): void {
-  const base = basename(file);
-  if (
-    base !== file ||
-    !file.endsWith(".json") ||
-    file.includes("..") ||
-    file.includes("/") ||
-    file.includes("\\")
-  ) {
-    throw new InvalidTaskFileError(
-      "Invalid taskFile: must be a basename ending in .json"
-    );
-  }
 }
 
 // ─── listHeld ──────────────────────────────────────────────────────
@@ -91,7 +73,7 @@ export function listHeld(linePath: string): HeldTask[] {
     const enqueued_at = mtime ? new Date(mtime).toISOString() : null;
 
     tasks.push({
-      fileName,
+      fileName: TaskFileName(fileName), // Re-validate for defense-in-depth
       id: fileName.replace(/\.json$/, ""),
       task: String(taskText).slice(0, 200),
       enqueued_at,
@@ -131,8 +113,8 @@ export function releaseHeldTasks(
   mkdirSync(inbox, { recursive: true });
 
   if (opts.file) {
-    validateTaskFile(opts.file);
-    _releaseOne(held, inbox, opts.file, result);
+    const validated = TaskFileName(opts.file); // Validate and brand
+    _releaseOne(held, inbox, validated, result);
   } else if (opts.all) {
     let files: string[] = [];
     if (existsSync(held)) {

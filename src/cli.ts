@@ -11,6 +11,7 @@ import { startGlobalDashboard } from "./global-dashboard";
 import { listHeld, releaseHeldTasks, InvalidTaskFileError } from "./held";
 import { recordEmit } from "./emit-manifest";
 import { CURRENT_INBOX_PAYLOAD_VERSION } from './schemas/inbox-payload';
+import { StationName } from './ids';
 import {
   resolveLinePath,
   loadEnvFiles,
@@ -167,8 +168,8 @@ async function handleRun(args: string[]) {
     task,
     input,
     resumeFrom: resumeFrom ? resolve(resumeFrom) : undefined,
-    fromStation: fromStation ?? undefined,
-    onlyStation: onlyStation ?? undefined,
+    fromStation: fromStation ? StationName(fromStation) : undefined,
+    onlyStation: onlyStation ? StationName(onlyStation) : undefined,
   });
 }
 
@@ -199,7 +200,7 @@ async function handleInspect(args: string[]) {
   const stationFilter = getFlag(args, "--station");
 
   if (stationFilter) {
-    const station = workpiece.stations[stationFilter];
+    const station = workpiece.stations[stationFilter as StationName];
     if (!station) {
       console.error(`Station "${stationFilter}" not found in workpiece`);
       console.log(

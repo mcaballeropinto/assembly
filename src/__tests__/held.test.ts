@@ -3,6 +3,7 @@ import { resolve } from "path";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
 import { initLineQueue } from "../queue";
 import { listHeld, releaseHeldTasks, InvalidTaskFileError } from "../held";
+import { TaskFileName } from "../ids";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-held-${Date.now()}`);
 const LINE_DIR = resolve(TEMP_DIR, "test-line");
@@ -50,11 +51,11 @@ describe("listHeld", () => {
     writeHeldFile("task-001.json", "Do something");
     const result = listHeld(LINE_DIR);
     expect(result.length).toBeGreaterThanOrEqual(1);
-    const task = result.find((t) => t.fileName === "task-001.json");
+    const task = result.find((t) => t.fileName === TaskFileName("task-001.json"));
     expect(task).toBeDefined();
-    expect(task!.id).toBe("task-001");
+    expect(task!.id as string).toBe("task-001");
     expect(task!.task).toBe("Do something");
-    expect(task!.fileName).toBe("task-001.json");
+    expect(task!.fileName as string).toBe("task-001.json");
   });
 
   test("truncates task to 200 chars", () => {
@@ -74,15 +75,15 @@ describe("listHeld", () => {
     const result = listHeld(LINE_DIR);
     // Just verify ordering is consistent - older files come first
     const names = result.map((t) => t.fileName);
-    expect(names.indexOf("task-a1.json")).toBeLessThan(names.indexOf("task-a2.json"));
+    expect(names.indexOf(TaskFileName("task-a1.json"))).toBeLessThan(names.indexOf(TaskFileName("task-a2.json")));
   });
 });
 
 describe("releaseHeldTasks", () => {
   test("moves a specific file from held/ to inbox/", () => {
     writeHeldFile("task-release-1.json", "Release me");
-    const result = releaseHeldTasks(LINE_DIR, { file: "task-release-1.json" });
-    expect(result.released).toContain("task-release-1.json");
+    const result = releaseHeldTasks(LINE_DIR, { file: TaskFileName("task-release-1.json") });
+    expect(result.released.map(f => f as string)).toContain("task-release-1.json");
     expect(result.skipped).toHaveLength(0);
     expect(result.errors).toHaveLength(0);
     // File should be in inbox, not held
@@ -91,9 +92,9 @@ describe("releaseHeldTasks", () => {
   });
 
   test("returns skipped for a missing file (no throw)", () => {
-    const result = releaseHeldTasks(LINE_DIR, { file: "missing.json" });
+    const result = releaseHeldTasks(LINE_DIR, { file: TaskFileName("missing.json") });
     expect(result.released).toHaveLength(0);
-    expect(result.skipped).toContain("missing.json");
+    expect(result.skipped.map(f => f as string)).toContain("missing.json");
     expect(result.errors).toHaveLength(0);
   });
 

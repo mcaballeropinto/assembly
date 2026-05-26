@@ -13,6 +13,7 @@ import { EnvelopeError, GuardrailError } from "../envelope";
 import { createWorkpiece, failStation } from "../workpiece";
 import type { FailureClass, RetryPolicyMap, Workpiece } from "../types";
 import { __resetUsageGateStateForTest } from "../usage";
+import { LineName, StationName } from '../ids';
 
 // ─── Pure-function tests ────────────────────────────────────────────
 
@@ -174,10 +175,10 @@ function buildFailedWorkpiece(
   stationName: string,
   failureClass: FailureClass | undefined
 ): Workpiece {
-  const wp = createWorkpiece("retry-policy-test", "retry-policy-task");
+  const wp = createWorkpiece(LineName("retry-policy-test"), "retry-policy-task");
   const withFailure = failStation(
     wp,
-    stationName,
+    StationName(stationName),
     `seeded ${failureClass ?? "legacy"} failure`,
     {
       model: "test:test",

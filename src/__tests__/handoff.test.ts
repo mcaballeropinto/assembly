@@ -164,9 +164,10 @@ describe("orchestrator stop({ handoff: true })", () => {
         const { startOrchestrator } = await import("../orchestrator");
         const { createWorkpiece } = await import("../workpiece");
         const { recordEmit } = await import("../emit-manifest");
+        const { LineName } = await import("../ids");
 
         const orch = await startOrchestrator({ linePath });
-        const wp = createWorkpiece("handoff-stop-test", "long-running");
+        const wp = createWorkpiece(LineName("handoff-stop-test"), "long-running");
         const stationInbox = resolve(stationDir, "queue", "inbox");
         recordEmit(stationInbox, `${wp.id}.json`, "recovery");
         writeFileSync(resolve(stationInbox, `${wp.id}.json`), JSON.stringify(wp));

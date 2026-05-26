@@ -9,6 +9,7 @@ import {
 } from "./retry-manual";
 import { loadLine } from "./line";
 import { basename, resolve } from "path";
+import { LineName } from "./ids";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "fs";
 import { readUsageSnapshot } from "./usage-snapshot";
 import { createRequire } from "module";
@@ -37,7 +38,7 @@ async function discoverAndMapLines(): Promise<DiscoveredLine[]> {
       const { config } = await loadLine(linePath);
       lines.push({ linePath, lineName: config.name });
     } catch {
-      lines.push({ linePath, lineName: basename(linePath) });
+      lines.push({ linePath, lineName: LineName(basename(linePath)) });
     }
   }
   return lines;

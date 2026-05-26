@@ -171,7 +171,7 @@ describe("section-worker task-events integration (script provider)", () => {
       ref,
       { interval_ms: 100 },
       (tick, elapsedS, silentS) => {
-        appendTaskEvent(lineDir, "wp-hb", "s1", {
+        appendTaskEvent(LINE_PATH, WorkpieceId("wp-hb"), "s1", {
           kind: "heartbeat",
           summary: `tick ${tick} · elapsed ${elapsedS}s · silent ${silentS}s`,
         });
@@ -181,7 +181,7 @@ describe("section-worker task-events integration (script provider)", () => {
     await new Promise((r) => setTimeout(r, 350));
     stop();
 
-    const page = readTaskEvents(lineDir, "wp-hb", "s1");
+    const page = readTaskEvents(lineDir, WorkpieceId("wp-hb"), "s1");
     expect(page.events.length).toBeGreaterThanOrEqual(2);
     expect(page.events[0].kind).toBe("heartbeat");
     expect(page.events[0].summary).toMatch(/tick \d+/);

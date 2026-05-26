@@ -640,7 +640,7 @@ export function getStationTimings(
       try {
         const latestProcessingFile = processingFiles[processingFiles.length - 1];
         const wp = JSON.parse(readFileSync(latestProcessingFile, "utf-8")) as Workpiece;
-        const sr = wp.stations[name];
+        const sr = wp.stations[name as any];
         // Always return running:true when a processing file exists, even if started_at
         // hasn't been written yet (brief window between file-move and first envelope update).
         // Use the file's mtime as a stand-in for started_at when missing.
@@ -674,7 +674,7 @@ export function getStationTimings(
     if (outputFiles.length > 0) {
       try {
         const wp = JSON.parse(readFileSync(outputFiles[outputFiles.length - 1], "utf-8")) as Workpiece;
-        const sr = wp.stations[name];
+        const sr = wp.stations[name as any];
         if (sr?.started_at && sr?.finished_at) {
           const durationMs = new Date(sr.finished_at).getTime() - new Date(sr.started_at).getTime();
           timings[name] = { started_at: sr.started_at, finished_at: sr.finished_at, duration_ms: durationMs };
@@ -690,7 +690,7 @@ export function getStationTimings(
       for (const f of doneFiles) {
         try {
           const wp = JSON.parse(readFileSync(f, "utf-8")) as Workpiece;
-          const sr = wp.stations[name];
+          const sr = wp.stations[name as any];
           if (sr?.started_at && sr?.finished_at) {
             const durationMs = new Date(sr.finished_at).getTime() - new Date(sr.started_at).getTime();
             timings[name] = { started_at: sr.started_at, finished_at: sr.finished_at, duration_ms: durationMs };
@@ -795,7 +795,7 @@ export async function getHistory(
       const wp = JSON.parse(readFileSync(c.path, "utf-8")) as Workpiece;
       const stationsOut: Record<string, HistoryStationCell> = {};
       for (const name of sequence) {
-        const sr = wp.stations?.[name];
+        const sr = wp.stations?.[name as any];
         if (!sr) {
           stationsOut[name] = { started_at: null, finished_at: null, duration_ms: null, status: null };
           continue;
@@ -1094,7 +1094,7 @@ function deriveCardState(
   if (lane === "output") return "routed";
   if (lane === "processing") {
     if (stationName && wp) {
-      const sr = wp.stations?.[stationName];
+      const sr = wp.stations?.[stationName as any];
       if (sr?.eval && !sr.finished_at) return "evaluating";
     }
     if (retries > 0) return "retrying";
@@ -1135,7 +1135,7 @@ function buildKanbanCard(
     const cost = sumStationCost(wp);
     if (cost > 0) card.costUsd = Math.round(cost * 1_000_000) / 1_000_000;
     if (station) {
-      const sr = wp.stations?.[station];
+      const sr = wp.stations?.[station as any];
       if (sr?.eval?.score != null) card.evalScore = sr.eval.score;
     }
     // For error cards, record which station failed
@@ -1160,7 +1160,7 @@ function buildKanbanCard(
     }
     // Lifecycle timestamps for duration labels
     if (station) {
-      const sr = wp.stations?.[station];
+      const sr = wp.stations?.[station as any];
       if (sr?.started_at) {
         card.stationStartedAt = sr.started_at;
       }
@@ -1953,7 +1953,7 @@ export async function findWorkpiece(
 // ─── Task Events ────────────────────────────────────────────────────
 
 export function getTaskEventStations(linePath: string, wpId: string) {
-  return listTaskEventStations(linePath, wpId);
+  return listTaskEventStations(linePath, wpId as any);
 }
 
 export function getTaskEvents(
@@ -1962,5 +1962,5 @@ export function getTaskEvents(
   stationName: string,
   opts: { after?: number; before?: number; limit?: number } = {}
 ) {
-  return readTaskEvents(linePath, wpId, stationName, opts);
+  return readTaskEvents(linePath, wpId as any, stationName as any, opts);
 }

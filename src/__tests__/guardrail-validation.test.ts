@@ -2,10 +2,11 @@ import { describe, it, expect } from "bun:test";
 import { validateGuardrails, buildGuardrailRepairPrompt, GuardrailError } from "../envelope";
 import { buildGuardrailRepairPlan } from "../section-worker";
 import type { StationConfig, StationEnvelope, LLMMessage } from "../types";
+import { StationName } from "../ids";
 
 function station(guardrails: StationConfig["guardrails"]): StationConfig {
   return {
-    name: "test",
+    name: StationName("test"),
     dir: "/tmp/test",
     memoryDir: "/tmp/test/memory",
     prompt: "",

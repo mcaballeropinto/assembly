@@ -1,4 +1,5 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
+import { StationName } from "../ids";
 import { resolve } from "path";
 import { mkdirSync, rmSync, writeFileSync, existsSync, utimesSync, readFileSync, renameSync } from "fs";
 import { getFullState, findWorkpiece, getWorkpieceActivity, computeHealth, computeErrorSeverity, BANNER_ERROR_MAX_AGE_MS, computeThroughput, connectionHealth, CONNECTION_LIVE_THRESHOLD_MS, CONNECTION_STALE_THRESHOLD_MS, getHistory, HISTORY_DEFAULT_LIMIT, HISTORY_MAX_LIMIT, getKanbanState, type KanbanState, computeFlowMetrics } from "../dashboard-data";
@@ -12,6 +13,7 @@ import {
   flowFilePath,
   type FlowSnapshot,
 } from "../flow-snapshot";
+import { StationName } from "../ids";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-dashboard-data-${Date.now()}`);
 const LINE_DIR = resolve(TEMP_DIR, "test-line");
@@ -330,15 +332,15 @@ describe("findWorkpiece", () => {
     const wp = await findWorkpiece(LINE_DIR, "wp-done-1.json");
 
     expect(wp).not.toBeNull();
-    expect(wp!.id).toBe("wp-done-1");
-    expect(wp!.line).toBe("test-line");
+    expect(wp!.id as string).toBe("wp-done-1");
+    expect(wp!.line as string).toBe("test-line");
   });
 
   test("finds workpiece in error queue", async () => {
     const wp = await findWorkpiece(LINE_DIR, "wp-error-1.json");
 
     expect(wp).not.toBeNull();
-    expect(wp!.id).toBe("wp-error-1");
+    expect(wp!.id as string).toBe("wp-error-1");
   });
 
   test("returns null for nonexistent workpiece", async () => {
@@ -351,7 +353,7 @@ describe("findWorkpiece", () => {
     const wp = await findWorkpiece(LINE_DIR, "wp-in-flight.json");
 
     expect(wp).not.toBeNull();
-    expect(wp!.id).toBe("wp-in-flight");
+    expect(wp!.id as string).toBe("wp-in-flight");
     expect(wp!.task).toBe("in-flight task");
   });
 });
@@ -449,7 +451,7 @@ describe("getFullState - error dismissal", () => {
     expect(state.errors.length).toBe(0);
     // Dismissed should contain the error
     expect(state.errorsDismissed.length).toBe(1);
-    expect(state.errorsDismissed[0].id).toBe("wp-error-1");
+    expect(state.errorsDismissed[0].id as string).toBe("wp-error-1");
     expect(state.errorsDismissed[0]).toHaveProperty("dismissed_at");
     expect(state.errorsDismissed[0].fileName).toBe("wp-error-1.json");
 
@@ -882,7 +884,7 @@ describe("banner_errors and severity", () => {
     expect(state.errors.length).toBe(2);
     // banner_errors should only have the fresh one
     expect(state.banner_errors.length).toBe(1);
-    expect(state.banner_errors[0].id).toBe("wp-fresh");
+    expect(state.banner_errors[0].id as string).toBe("wp-fresh");
     expect(state.banner_errors[0].severity).toBe("critical");
   });
 
@@ -1182,9 +1184,9 @@ describe("getHistory", () => {
 
     expect(result.runs).toHaveLength(3);
     // Newest first
-    expect(result.runs[0].id).toBe("wp-3");
-    expect(result.runs[1].id).toBe("wp-2");
-    expect(result.runs[2].id).toBe("wp-1");
+    expect(result.runs[0].id as string).toBe("wp-3");
+    expect(result.runs[1].id as string).toBe("wp-2");
+    expect(result.runs[2].id as string).toBe("wp-1");
 
     // Per-cell durations
     expect(result.runs[0].stations.sa.duration_ms).toBe(200_000);
@@ -1202,8 +1204,8 @@ describe("getHistory", () => {
     const dir = resolve(TEMP_DIR, "getHistory-3runs"); // reuse from test 2
     const result = await getHistory(dir, { limit: 2 }) as any;
     expect(result.runs).toHaveLength(2);
-    expect(result.runs[0].id).toBe("wp-3");
-    expect(result.runs[1].id).toBe("wp-2");
+    expect(result.runs[0].id as string).toBe("wp-3");
+    expect(result.runs[1].id as string).toBe("wp-2");
     expect(result.limit).toBe(2);
   });
 
@@ -1239,7 +1241,7 @@ describe("getHistory", () => {
     // With error included
     const resultWithError = await getHistory(dir, { include: ["done", "error"] }) as any;
     expect(resultWithError.runs).toHaveLength(4);
-    expect(resultWithError.runs[0].id).toBe("wp-err");
+    expect(resultWithError.runs[0].id as string).toBe("wp-err");
     expect(resultWithError.runs[0].source).toBe("error");
 
     // Default done-only
@@ -1328,7 +1330,7 @@ describe("getHistory", () => {
 
 describe("flow-snapshot", () => {
   test("takeSnapshot captures line + per-station queue counts", () => {
-    const snap = takeSnapshot(LINE_DIR, ["station-a", "station-b"]);
+    const snap = takeSnapshot(LINE_DIR, [StationName("station-a"), StationName("station-b")]);
     expect(snap.ts).toBeDefined();
     expect(new Date(snap.ts).toString()).not.toBe("Invalid Date");
     expect(snap.line.done).toBeGreaterThanOrEqual(2);   // fixture wrote 2 done wps
@@ -1415,7 +1417,7 @@ describe("flow-snapshot", () => {
     writeFileSync(resolve(tmp, "line.yaml"), "name: writer-line\nsequence:\n  - s\n");
     initSectionQueue(resolve(tmp, "stations", "s"));
     initLineQueue(tmp);
-    const handle = startFlowSnapshotWriter(tmp, ["s"], { intervalMs: 50 });
+    const handle = startFlowSnapshotWriter(tmp, [StationName("s")], { intervalMs: 50 });
     await new Promise((r) => setTimeout(r, 180));
     handle.stop();
     const content = readFileSync(flowFilePath(tmp), "utf-8").trim().split("\n");
@@ -1467,7 +1469,7 @@ describe("getKanbanState", () => {
     const dir = setupKanbanLine("kanban-shape", { concurrency: 3 });
     const out = (await getKanbanState(dir)) as KanbanState;
     expect(out).not.toHaveProperty("error");
-    expect(out.line).toBe("kanban-shape");
+    expect(out.line as string).toBe("kanban-shape");
     expect(out.sequence).toEqual(["station-a", "station-b"]);
     expect(out.concurrency).toBe(3);
 
@@ -1872,7 +1874,7 @@ describe("getKanbanState", () => {
       .cards.find((x) => x.id === "wp-compat")!;
 
     // All existing fields should be present
-    expect(card.id).toBe("wp-compat");
+    expect(card.id as string).toBe("wp-compat");
     expect(card.state).toBe("running");
     expect(card.station).toBe("station-a");
     expect(card.lane).toBe("processing");

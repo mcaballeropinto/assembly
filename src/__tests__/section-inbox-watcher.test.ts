@@ -6,6 +6,7 @@ import { startOrchestrator } from "../orchestrator";
 import { createWorkpiece } from "../workpiece";
 import { __resetUsageGateStateForTest } from "../usage";
 import { recordEmit } from "../emit-manifest";
+import { LineName } from "../ids";
 
 /**
  * Create a minimal line with `provider: script` stations that immediately
@@ -126,7 +127,7 @@ describe("section inbox watcher", () => {
       // 2026-05-04 producer-allowlist would quarantine it as `producer_unknown`.
       // This simulates an admin recovery script: the legitimate path for
       // dropping work into a mid-line section.
-      const wp = createWorkpiece("inbox-watcher-test", "drop test");
+      const wp = createWorkpiece(LineName("inbox-watcher-test"), "drop test");
       const stationBInbox = resolve(linePath, "stations", "station-b", "queue", "inbox");
       const dropPath = resolve(stationBInbox, `${wp.id}.json`);
       const dropFileName = `${wp.id}.json`;

@@ -178,7 +178,7 @@ describe("error banner - dashboard-data", () => {
 
     const state = await getFullState(edgeDir) as any;
     expect(state.errors.length).toBe(1);
-    expect(state.errors[0].id).toBe("wp-edge");
+    expect(state.errors[0].id as string).toBe("wp-edge");
     expect(state.errors[0].failed).toEqual([]);
     expect(state.errors[0].fileName).toBe("wp-edge.json");
   });

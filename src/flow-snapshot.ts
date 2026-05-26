@@ -1,6 +1,7 @@
 import { resolve } from "path";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { getLineQueueState, getSectionQueueState } from "./queue";
+import type { StationName } from "./ids";
 
 export interface FlowSectionCounts {
   inbox: number;
@@ -20,7 +21,7 @@ export function flowFilePath(linePath: string): string {
   return resolve(linePath, "queues", "flow.jsonl");
 }
 
-export function takeSnapshot(linePath: string, sequence: string[]): FlowSnapshot {
+export function takeSnapshot(linePath: string, sequence: StationName[]): FlowSnapshot {
   const line = getLineQueueState(linePath);
   const sections: Record<string, FlowSectionCounts> = {};
   for (const name of sequence) {
@@ -43,7 +44,7 @@ export interface StartFlowWriterOptions {
 
 export function startFlowSnapshotWriter(
   linePath: string,
-  sequence: string[],
+  sequence: StationName[],
   opts: StartFlowWriterOptions = {}
 ): { stop: () => void } {
   const intervalMs = opts.intervalMs ?? envIntervalMs() ?? DEFAULT_FLOW_INTERVAL_MS;

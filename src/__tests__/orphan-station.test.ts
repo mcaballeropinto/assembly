@@ -11,6 +11,7 @@ import {
 import { startOrchestrator, type OrchestratorHandle } from "../orchestrator";
 import { createWorkpiece, writeStation } from "../workpiece";
 import { __resetUsageGateStateForTest } from "../usage";
+import { LineName, StationName } from '../ids';
 
 const orchestrators: OrchestratorHandle[] = [];
 const tempDirs: string[] = [];
@@ -92,8 +93,8 @@ describe("orphan station support", () => {
     // Seed: workpiece in stations/a/queue/processing/, already marked done
     // for A. This simulates an adopted worker that finished its station's
     // work and dropped output (but we're simulating without spawning).
-    let wp = createWorkpiece("orphan-test", "stranded by reload");
-    wp = writeStation(wp, "a", { summary: "a finished" }, {
+    let wp = createWorkpiece(LineName("orphan-test"), "stranded by reload");
+    wp = writeStation(wp, StationName("a"), { summary: "a finished" }, {
       model: "script",
       tokens: { in: 0, out: 0 },
       cost_usd: 0,
@@ -137,8 +138,8 @@ describe("orphan station support", () => {
     const doneFiles = readdirSync(doneDir).filter((f) => f.endsWith(".json"));
     expect(doneFiles.length).toBe(1);
     const finalWp = JSON.parse(readFileSync(resolve(doneDir, doneFiles[0]), "utf-8"));
-    expect(finalWp.stations.a?.status).toBe("done");
-    expect(finalWp.stations.b?.status).toBe("done");
+    expect(finalWp.stations[StationName("a")]?.status).toBe("done");
+    expect(finalWp.stations[StationName("b")]?.status).toBe("done");
 
     // Activity log should show orphan_routed_forward (a → b).
     const activityPath = resolve(linePath, "queues", "activity.jsonl");
@@ -182,12 +183,12 @@ describe("orphan station support", () => {
     writeFileSync(resolve(bDir, "ok.ts"), `console.log(JSON.stringify({summary:"ok"}));\n`);
 
     // Workpiece already done for BOTH A (orphan) and B (live).
-    let wp = createWorkpiece("orphan-done", "everything finished");
-    wp = writeStation(wp, "a", { summary: "a-finished" }, {
+    let wp = createWorkpiece(LineName("orphan-done"), "everything finished");
+    wp = writeStation(wp, StationName("a"), { summary: "a-finished" }, {
       model: "script", tokens: { in: 0, out: 0 }, cost_usd: 0,
       started_at: "2026-01-01T00:00:00Z", finished_at: "2026-01-01T00:00:01Z",
     });
-    wp = writeStation(wp, "b", { summary: "b-finished" }, {
+    wp = writeStation(wp, StationName("b"), { summary: "b-finished" }, {
       model: "script", tokens: { in: 0, out: 0 }, cost_usd: 0,
       started_at: "2026-01-01T00:00:02Z", finished_at: "2026-01-01T00:00:03Z",
     });
@@ -268,7 +269,7 @@ describe("orphan station support", () => {
     // spawn a worker. With orphan=true it must not.
     const inboxDir = resolve(aDir, "queue", "inbox");
     mkdirSync(inboxDir, { recursive: true });
-    const wp = createWorkpiece("orphan-no-spawn", "should not run");
+    const wp = createWorkpiece(LineName("orphan-no-spawn"), "should not run");
     writeFileSync(resolve(inboxDir, `${wp.id}.json`), JSON.stringify(wp));
 
     await new Promise((r) => setTimeout(r, 1_500));

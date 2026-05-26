@@ -359,7 +359,7 @@ describe("Activity Log - Backward compatibility", () => {
 
     expect(state.completed).toBeDefined();
     expect(state.completed.length).toBe(1);
-    expect(state.completed[0].id).toBe("wp-test-1");
+    expect(state.completed[0].id as string).toBe("wp-test-1");
     expect(state.completed[0].fileName).toBe("wp-test-1.json");
   });
 });

@@ -29,6 +29,7 @@ import { unlinkStderrLog, moveStderrLogAlongside } from "./stderr-log";
 import { computeRoundsFromProgress } from "./tool-rounds";
 import type { Workpiece, Provider, ProgressCallback, ProgressEvent, HeartbeatConfig, LLMMessage, LLMResult, RepairConfig, FailureClass, OnEventCallback, StationEnvelope, EvalResult } from "./types";
 import { appendTaskEvent, initTaskEventDir, updateTaskEventIndex } from "./task-events";
+import { StationName, asWorkpiece } from "./ids";
 
 const HEARTBEAT_MS = 30_000;
 
@@ -262,7 +263,7 @@ async function main() {
 
   const stationDir = resolve(args[0]);
   const workpiecePath = resolve(args[1]);
-  const stationName = basename(stationDir);
+  const stationName = StationName(basename(stationDir));
   const outputDir = resolve(stationDir, "queue", "output");
   // stationDir is <linePath>/stations/<stationName>, so linePath is two levels up
   const linePath = resolve(stationDir, "..", "..");
@@ -271,9 +272,9 @@ async function main() {
   const station = await loadStation(stationDir, stationName);
 
   // Load workpiece
-  let workpiece: Workpiece = JSON.parse(
+  let workpiece: Workpiece = asWorkpiece<Workpiece>(JSON.parse(
     await Bun.file(workpiecePath).text()
-  );
+  ));
 
   const provider: Provider = station.provider ?? "claude-code";
   const model = station.model ?? "sonnet";
@@ -440,7 +441,7 @@ async function main() {
     flushing = true;
     try {
       const diskData = readFileSync(workpiecePath, 'utf-8');
-      const diskWorkpiece = JSON.parse(diskData) as Workpiece;
+      const diskWorkpiece = asWorkpiece<Workpiece>(JSON.parse(diskData));
       const stationResult = diskWorkpiece.stations[stationName];
 
       if (stationResult?.status === 'done') {

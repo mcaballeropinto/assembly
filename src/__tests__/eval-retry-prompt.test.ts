@@ -5,12 +5,13 @@ import {
   buildRetryWithFeedback,
 } from "../prompt";
 import type { StationConfig, Workpiece, StationResult } from "../types";
+import { WorkpieceId, LineName, StationName } from "../ids";
 
 // === Test Helpers ===
 
 function makeStation(prompt = "You are a helpful assistant."): StationConfig {
   return {
-    name: "test-station",
+    name: StationName("test-station"),
     dir: "/tmp/test-station",
     prompt,
     memoryDir: "/tmp/test-station/memory",
@@ -45,8 +46,8 @@ function makeWorkpiece(
     stations[`station-${i}`] = makeStationResult(contentSizeKB);
   }
   return {
-    id: "test-workpiece-001",
-    line: "test-line",
+    id: WorkpieceId("test-workpiece-001"),
+    line: LineName("test-line"),
     task: "Implement the feature described in the plan",
     input: {
       url: "https://example.com",
@@ -212,8 +213,8 @@ describe("buildEvalRetryPrompt", () => {
   it("works with empty workpiece (no prior stations)", () => {
     const station = makeStation();
     const workpiece: Workpiece = {
-      id: "empty-001",
-      line: "test-line",
+      id: WorkpieceId("empty-001"),
+      line: LineName("test-line"),
       task: "Do something",
       input: {},
       stations: {},

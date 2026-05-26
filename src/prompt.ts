@@ -1,4 +1,5 @@
 import type { Workpiece, StationConfig, StationEnvelope, EvalConfig, LLMMessage } from "./types";
+import type { StationName } from "./ids";
 
 const ENVELOPE_INSTRUCTION = `
 IMPORTANT: You MUST respond with valid JSON and nothing else. No markdown fences, no explanation outside the JSON.
@@ -147,7 +148,7 @@ function buildExplicitContext(
         | "summary"
         | "content"
         | "data";
-      const result = workpiece.stations[stationName];
+      const result = workpiece.stations[stationName as any];
 
       if (result) {
         const value = result[field];
@@ -159,7 +160,7 @@ function buildExplicitContext(
       }
     } else {
       // Full station reference
-      const result = workpiece.stations[read];
+      const result = workpiece.stations[read as any];
       if (result) {
         const stationParts: string[] = [`## ${read}`];
         stationParts.push(`**Summary:** ${result.summary}`);
@@ -182,7 +183,7 @@ function buildExplicitContext(
  */
 export function buildEvalPrompt(
   evalConfig: EvalConfig,
-  stationName: string,
+  stationName: StationName,
   envelope: StationEnvelope,
   workpiece: Workpiece
 ): LLMMessage[] {

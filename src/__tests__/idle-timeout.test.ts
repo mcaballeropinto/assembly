@@ -11,6 +11,7 @@ import {
 import { loadLine, validateLine } from "../line";
 import { failStation } from "../workpiece";
 import type { Workpiece } from "../types";
+import { WorkpieceId, LineName, StationName } from '../ids';
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-idle-timeout-${Date.now()}`);
 
@@ -42,14 +43,14 @@ function createTestWorkpiece(
   stationStatus?: string
 ): Workpiece {
   const wp: Workpiece = {
-    id: `test-${Date.now()}`,
-    line: "test-line",
+    id: WorkpieceId(`test-${Date.now()}`),
+    line: LineName("test-line"),
     task: "test task",
     input: {},
     stations: {},
   };
   if (stationName && stationStatus) {
-    wp.stations[stationName] = {
+    wp.stations[StationName(stationName) as keyof typeof wp.stations] = {
       status: stationStatus as any,
       summary: `Station ${stationStatus}`,
       started_at: new Date().toISOString(),
@@ -333,7 +334,7 @@ describe("SIGTERM handler state flush", () => {
     // Simulate the flush logic from the SIGTERM handler
     const diskData = readFileSync(wpPath, "utf-8");
     const diskWorkpiece = JSON.parse(diskData) as Workpiece;
-    const stationResult = diskWorkpiece.stations["test-station"];
+    const stationResult = diskWorkpiece.stations[StationName("test-station") as keyof typeof diskWorkpiece.stations];
 
     expect(stationResult?.status).toBe("done");
 
@@ -346,7 +347,7 @@ describe("SIGTERM handler state flush", () => {
 
     // Verify content is preserved
     const flushed = JSON.parse(readFileSync(outPath, "utf-8")) as Workpiece;
-    expect(flushed.stations["test-station"]?.status).toBe("done");
+    expect(flushed.stations[StationName("test-station") as keyof typeof flushed.stations]?.status).toBe("done");
   });
 
   test("workpiece without envelope gets failStation on flush", () => {
@@ -363,12 +364,12 @@ describe("SIGTERM handler state flush", () => {
     // Simulate the flush logic: station not done → failStation
     const diskData = readFileSync(wpPath, "utf-8");
     const diskWorkpiece = JSON.parse(diskData) as Workpiece;
-    const stationResult = diskWorkpiece.stations["test-station"];
+    const stationResult = diskWorkpiece.stations[StationName("test-station") as keyof typeof diskWorkpiece.stations];
 
     expect(stationResult).toBeUndefined();
 
     // Write failure using failStation
-    const failed = failStation(diskWorkpiece, "test-station", "idle timeout after 30s", {
+    const failed = failStation(diskWorkpiece, StationName("test-station"), "idle timeout after 30s", {
       model: "api:test",
       tokens: { in: 0, out: 0 },
       started_at: new Date().toISOString(),
@@ -385,8 +386,8 @@ describe("SIGTERM handler state flush", () => {
 
     // Verify failure was written
     const flushed = JSON.parse(readFileSync(outPath, "utf-8")) as Workpiece;
-    expect(flushed.stations["test-station"]?.status).toBe("failed");
-    expect(flushed.stations["test-station"]?.summary).toContain("idle timeout");
+    expect(flushed.stations[StationName("test-station") as keyof typeof flushed.stations]?.status).toBe("failed");
+    expect(flushed.stations[StationName("test-station") as keyof typeof flushed.stations]?.summary).toContain("idle timeout");
   });
 });
 
@@ -403,7 +404,7 @@ describe("backward compatibility", () => {
     expect(config.max_wall_clock).toBeUndefined();
     expect(config.flush_grace).toBeUndefined();
     expect(config.timeout).toBeUndefined();
-    expect(config.name).toBe("test-line");
+    expect(config.name as string).toBe("test-line");
   });
 
   test("assembly-dev line with timeout: 900 validates", async () => {

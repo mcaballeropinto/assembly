@@ -19,6 +19,7 @@ import {
   type HandoffWorker,
 } from "../handoff";
 import { __resetUsageGateStateForTest } from "../usage";
+import { LineName } from '../ids';
 
 // Disable usage gate. Mirrors orchestrator-shutdown.test.ts pattern.
 const originalFetch = globalThis.fetch;
@@ -89,7 +90,7 @@ async function spawnDetachedWorker(opts: {
     `await new Promise((r) => setTimeout(r, ${sleepSeconds * 1000}));\nconsole.log(JSON.stringify({ summary: "ok" }));\n`
   );
 
-  const wp = createWorkpiece("adoption-test", "adopt me");
+  const wp = createWorkpiece(LineName("adoption-test"), "adopt me");
   const processingDir = resolve(stationDir, "queue", "processing");
   mkdirSync(processingDir, { recursive: true });
   const processingPath = resolve(processingDir, `${wp.id}.json`);
@@ -203,7 +204,7 @@ describe("worker adoption", () => {
     writeFileSync(resolve(stationDir, "AGENT.md"), `---\nprovider: script\nscript: ok.ts\n---\n`);
     writeFileSync(resolve(stationDir, "ok.ts"), `console.log(JSON.stringify({summary:"ok"}));\n`);
 
-    const wp = createWorkpiece("adoption-dead-test", "stranded");
+    const wp = createWorkpiece(LineName("adoption-dead-test"), "stranded");
     const processingDir = resolve(stationDir, "queue", "processing");
     mkdirSync(processingDir, { recursive: true });
     const processingPath = resolve(processingDir, `${wp.id}.json`);

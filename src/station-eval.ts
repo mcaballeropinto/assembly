@@ -3,6 +3,7 @@ import { callScript, callLLM } from "./llm";
 import { buildEvalPrompt } from "./prompt";
 import { parseEvalResponse } from "./envelope";
 import { calculateCostWithCache } from "./pricing";
+import { StationName } from "./ids";
 import type {
   Workpiece,
   StationEnvelope,
@@ -21,7 +22,7 @@ import type {
  */
 export async function runStationEval(
   evalConfig: EvalConfig,
-  stationName: string,
+  stationName: StationName,
   stationDir: string,
   envelope: StationEnvelope,
   workpiece: Workpiece,

@@ -13,15 +13,16 @@ import {
   stampInboxPayloadVersion,
 } from '../schemas/inbox-payload';
 import { createWorkpiece } from '../workpiece';
+import { LineName } from '../ids';
 
 describe('workpiece schema version', () => {
   test('createWorkpiece stamps schema_version: 1', () => {
-    const wp = createWorkpiece('test-line', 'test task');
+    const wp = createWorkpiece(LineName('test-line'), 'test task');
     expect(wp.schema_version).toBe(1);
   });
 
   test('roundtrip: JSON.stringify → parse → validate preserves version', () => {
-    const wp = createWorkpiece('test-line', 'test task');
+    const wp = createWorkpiece(LineName('test-line'), 'test task');
     const raw = JSON.parse(JSON.stringify(wp));
     const result = validateWorkpieceVersion(raw);
     expect(result.schema_version).toBe(1);

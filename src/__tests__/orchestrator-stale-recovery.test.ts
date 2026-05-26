@@ -13,6 +13,7 @@ import {
 } from "../orchestrator";
 import { initSectionQueue } from "../queue";
 import { createWorkpiece } from "../workpiece";
+import { LineName, StationName } from '../ids';
 
 // Only runs on Linux — /proc scanning is the liveness signal. On other
 // platforms findWorkerForWorkpiece returns null by design (fall-through to
@@ -114,7 +115,7 @@ describe.skipIf(!isLinux)("recoverStaleProcessing() liveness check", () => {
 
       // Seed a workpiece in processing/ with NO station result (so normal
       // recovery would requeue).
-      const wp = createWorkpiece("stale-test", "still running");
+      const wp = createWorkpiece(LineName("stale-test"), "still running");
       const processingPath = resolve(section.queue.processing, `${wp.id}.json`);
       writeFileSync(processingPath, JSON.stringify(wp, null, 2));
 
@@ -153,7 +154,7 @@ describe.skipIf(!isLinux)("recoverStaleProcessing() liveness check", () => {
       mkdirSync(errorDir, { recursive: true });
       const { log, events } = createLog();
 
-      const wp = createWorkpiece("stale-test", "dead worker");
+      const wp = createWorkpiece(LineName("stale-test"), "dead worker");
       const processingPath = resolve(section.queue.processing, `${wp.id}.json`);
       writeFileSync(processingPath, JSON.stringify(wp, null, 2));
 
@@ -186,8 +187,8 @@ describe.skipIf(!isLinux)("recoverStaleProcessing() liveness check", () => {
       mkdirSync(errorDir, { recursive: true });
       const { log, events } = createLog();
 
-      const wp = createWorkpiece("stale-test", "was done");
-      wp.stations["s3"] = {
+      const wp = createWorkpiece(LineName("stale-test"), "was done");
+      wp.stations[StationName("s3")] = {
         status: "done",
         summary: "finished",
         started_at: "2026-01-01T00:00:00Z",

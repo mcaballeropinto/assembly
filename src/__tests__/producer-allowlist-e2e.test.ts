@@ -12,6 +12,7 @@ import { homedir } from "os";
 import { startOrchestrator } from "../orchestrator";
 import { createWorkpiece } from "../workpiece";
 import { __resetUsageGateStateForTest } from "../usage";
+import { LineName } from '../ids';
 
 function createScriptLine(linePath: string, stationName: string): void {
   mkdirSync(resolve(linePath, "queues", "inbox"), { recursive: true });
@@ -117,7 +118,7 @@ describe("producer-allowlist end-to-end", () => {
       // directly into the section inbox via raw writeFileSync, with NO
       // recordEmit. This is what a Bash-armed agent does when it fakes
       // fanout output instead of reporting a real fetch failure.
-      const wp = createWorkpiece("rogue-test", "should never run");
+      const wp = createWorkpiece(LineName("rogue-test"), "should never run");
       const stationInbox = resolve(linePath, "stations", "the-station", "queue", "inbox");
       const dropPath = resolve(stationInbox, `${wp.id}.json`);
       writeFileSync(dropPath, JSON.stringify(wp, null, 2));

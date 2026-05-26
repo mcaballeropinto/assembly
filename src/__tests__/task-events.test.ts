@@ -22,13 +22,13 @@ afterAll(() => {
 
 describe("initTaskEventDir", () => {
   test("creates task-events directory for a workpiece", () => {
-    initTaskEventDir(LINE_PATH, "wp-init-1");
+    initTaskEventDir(LINE_PATH, WorkpieceId("wp-init-1"));
     expect(existsSync(resolve(LINE_PATH, "queues", "task-events", "wp-init-1"))).toBe(true);
   });
 
   test("is idempotent — calling twice does not throw", () => {
-    initTaskEventDir(LINE_PATH, "wp-init-2");
-    initTaskEventDir(LINE_PATH, "wp-init-2");
+    initTaskEventDir(LINE_PATH, WorkpieceId("wp-init-2"));
+    initTaskEventDir(LINE_PATH, WorkpieceId("wp-init-2"));
     expect(existsSync(resolve(LINE_PATH, "queues", "task-events", "wp-init-2"))).toBe(true);
   });
 });
@@ -87,7 +87,7 @@ describe("appendTaskEvent + readTaskEvents round-trip", () => {
   });
 
   test("readTaskEvents on nonexistent file returns empty page", () => {
-    const page = readTaskEvents(LINE_PATH, "wp-nonexistent", "station-z");
+    const page = readTaskEvents(LINE_PATH, WorkpieceId("wp-nonexistent"), "station-z");
     expect(page.events).toEqual([]);
     expect(page.total).toBe(0);
     expect(page.has_more).toBe(false);
@@ -143,7 +143,7 @@ describe("appendTaskEvent failure handling", () => {
   test("does not throw when directory does not exist", () => {
     // Do NOT call initTaskEventDir — directory missing, should swallow error
     expect(() => {
-      appendTaskEvent(LINE_PATH, "wp-no-dir", "station-x", { kind: "heartbeat", summary: "tick" });
+      appendTaskEvent(LINE_PATH, WorkpieceId("wp-no-dir"), "station-x", { kind: "heartbeat", summary: "tick" });
     }).not.toThrow();
   });
 });
@@ -158,7 +158,7 @@ describe("pagination", () => {
 
   test("limit=10 returns at most 10 events", () => {
     seedEvents("wp-pg-1", 25);
-    const page = readTaskEvents(LINE_PATH, "wp-pg-1", "pager", { limit: 10 });
+    const page = readTaskEvents(LINE_PATH, WorkpieceId("wp-pg-1"), "pager", { limit: 10 });
     expect(page.events.length).toBe(10);
     expect(page.has_more).toBe(true);
     expect(page.total).toBe(25);
@@ -166,18 +166,18 @@ describe("pagination", () => {
 
   test("after=N returns events with seq > N", () => {
     seedEvents("wp-pg-2", 10);
-    const first = readTaskEvents(LINE_PATH, "wp-pg-2", "pager", { limit: 5 });
+    const first = readTaskEvents(LINE_PATH, WorkpieceId("wp-pg-2"), "pager", { limit: 5 });
     const afterCursor = first.next_cursor;
-    const next = readTaskEvents(LINE_PATH, "wp-pg-2", "pager", { after: afterCursor, limit: 10 });
+    const next = readTaskEvents(LINE_PATH, WorkpieceId("wp-pg-2"), "pager", { after: afterCursor, limit: 10 });
     expect(next.events.every((e) => e.seq > afterCursor)).toBe(true);
     expect(next.events.length).toBe(5);
   });
 
   test("before=N returns events with seq < N", () => {
     seedEvents("wp-pg-3", 10);
-    const allPage = readTaskEvents(LINE_PATH, "wp-pg-3", "pager", { limit: 10 });
+    const allPage = readTaskEvents(LINE_PATH, WorkpieceId("wp-pg-3"), "pager", { limit: 10 });
     const midSeq = allPage.events[5].seq;
-    const earlier = readTaskEvents(LINE_PATH, "wp-pg-3", "pager", { before: midSeq, limit: 100 });
+    const earlier = readTaskEvents(LINE_PATH, WorkpieceId("wp-pg-3"), "pager", { before: midSeq, limit: 100 });
     expect(earlier.events.every((e) => e.seq < midSeq)).toBe(true);
   });
 });
@@ -223,7 +223,7 @@ describe("updateTaskEventIndex + listTaskEventStations", () => {
   });
 
   test("listTaskEventStations returns [] for missing index", () => {
-    const stations = listTaskEventStations(LINE_PATH, "wp-no-index");
+    const stations = listTaskEventStations(LINE_PATH, WorkpieceId("wp-no-index"));
     expect(stations).toEqual([]);
   });
 });

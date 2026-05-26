@@ -31,6 +31,7 @@ import {
   validateInboxPayloadVersion,
   UnsupportedSchemaVersionError,
 } from './schemas';
+import { StationName, asWorkpiece } from './ids';
 
 // ─── Process-group helpers ────────────────────────────────────────
 
@@ -207,7 +208,7 @@ export function decideRetry(
 }
 
 export interface SectionInfo {
-  name: string;
+  name: StationName;
   dir: string;
   queue: QueuePaths;
   timeout?: number; // seconds of idle (no output) before SIGTERM — undefined = no timeout
@@ -262,20 +263,20 @@ export async function startOrchestrator(
   bootstrapManifest(lineQueue.inbox);
 
   // Build per-station override maps from sequence
-  const stationTimeouts = new Map<string, number>();
-  const stationMaxWallClocks = new Map<string, number>();
-  const stationFlushGraces = new Map<string, number>();
+  const stationTimeouts = new Map<StationName, number>();
+  const stationMaxWallClocks = new Map<StationName, number>();
+  const stationFlushGraces = new Map<StationName, number>();
   for (const step of config.sequence) {
     if (typeof step === 'object' && 'station' in step) {
       const s = (step as { station: { name: string; timeout?: number; max_wall_clock?: number; flush_grace?: number } }).station;
       if (s.timeout !== undefined && s.timeout > 0) {
-        stationTimeouts.set(s.name, s.timeout);
+        stationTimeouts.set(StationName(s.name), s.timeout);
       }
       if (s.max_wall_clock !== undefined && s.max_wall_clock > 0) {
-        stationMaxWallClocks.set(s.name, s.max_wall_clock);
+        stationMaxWallClocks.set(StationName(s.name), s.max_wall_clock);
       }
       if (s.flush_grace !== undefined && s.flush_grace >= 0) {
-        stationFlushGraces.set(s.name, s.flush_grace);
+        stationFlushGraces.set(StationName(s.name), s.flush_grace);
       }
     }
   }
@@ -419,7 +420,7 @@ export async function startOrchestrator(
       const dirents = readdirSync(stationsRoot, { withFileTypes: true });
       for (const d of dirents) {
         if (!d.isDirectory()) continue;
-        if (sequenceSet.has(d.name)) continue;
+        if (sequenceSet.has(StationName(d.name))) continue;
         const stationDir = resolve(stationsRoot, d.name);
         const processingDir = resolve(stationDir, "queue", "processing");
         if (!existsSync(processingDir)) continue;
@@ -427,7 +428,7 @@ export async function startOrchestrator(
         if (remaining.length === 0) continue;
         const queue = initSectionQueue(stationDir);
         sections.push({
-          name: d.name,
+          name: StationName(d.name),
           dir: stationDir,
           queue,
           // No timeouts/spawn config — orphan means no new spawns; idle
@@ -457,7 +458,7 @@ export async function startOrchestrator(
   const retryCounts = new Map<string, number>();
 
   // Track active workers per station for concurrency control
-  const activeWorkers = new Map<string, number>();
+  const activeWorkers = new Map<StationName, number>();
   const concurrencyLimit = config.concurrency ?? Infinity;
 
   interface ActiveWorkerHandle {
@@ -1525,8 +1526,8 @@ export async function startOrchestrator(
         });
 
         try {
-          const raw = JSON.parse(await Bun.file(processingPath).text()) as Workpiece;
-          validateWorkpieceVersion(raw as Record<string, unknown>);
+          const raw = asWorkpiece<Workpiece>(JSON.parse(await Bun.file(processingPath).text()));
+          validateWorkpieceVersion(raw as unknown as Record<string, unknown>);
           const errorMsg = stderr.trim().slice(0, 200) || `Worker exited with code ${exitCode}`;
 
           // Write failure status to workpiece. Non-zero exit / signal death =
@@ -1836,8 +1837,8 @@ export async function startOrchestrator(
       const remaining = listQueue(section.queue.processing);
       for (const filePath of remaining) {
         try {
-          const wp = JSON.parse(await Bun.file(filePath).text()) as Workpiece;
-          validateWorkpieceVersion(wp as Record<string, unknown>);
+          const wp = asWorkpiece<Workpiece>(JSON.parse(await Bun.file(filePath).text()));
+          validateWorkpieceVersion(wp as unknown as Record<string, unknown>);
           const sr = wp.stations[section.name];
           // Worker may have already written a result (done or failed) before
           // dying on SIGKILL — don't overwrite, just leave it for the post-
@@ -1984,10 +1985,10 @@ export async function recoverStaleProcessing(
 
     for (const filePath of processingFiles) {
       try {
-        const workpiece = JSON.parse(
+        const workpiece = asWorkpiece<Workpiece>(JSON.parse(
           await Bun.file(filePath).text()
-        ) as Workpiece;
-        validateWorkpieceVersion(workpiece as Record<string, unknown>);
+        ));
+        validateWorkpieceVersion(workpiece as unknown as Record<string, unknown>);
         const stationResult = workpiece.stations[section.name];
         const progressSidecar = filePath + ".progress.jsonl";
 
@@ -2094,19 +2095,19 @@ export async function recoverStaleProcessing(
 /**
  * Flatten sequence into ordered station names (simple sequential).
  */
-function flattenSequence(config: LineConfig): string[] {
-  const result: string[] = [];
+function flattenSequence(config: LineConfig): StationName[] {
+  const result: StationName[] = [];
   for (const step of config.sequence) {
     if (typeof step === "string") {
-      result.push(step);
+      result.push(StationName(step));
     } else if ("parallel" in step) {
-      result.push(...step.parallel);
+      result.push(...step.parallel.map(StationName));
     } else if ("gate" in step) {
-      result.push(step.gate.if_true);
+      result.push(StationName(step.gate.if_true));
     } else if ("loop" in step) {
-      result.push(...step.loop.stations);
+      result.push(...step.loop.stations.map(StationName));
     } else if ("station" in step) {
-      result.push((step as { station: { name: string } }).station.name);
+      result.push(StationName((step as { station: { name: string } }).station.name));
     }
   }
   return result;

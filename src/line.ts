@@ -3,6 +3,7 @@ import { existsSync } from "fs";
 import YAML from "yaml";
 import type { LineConfig, StationConfig } from "./types";
 import { loadStation } from "./station";
+import { LineName, StationName } from "./ids";
 
 /**
  * Load a line from its folder path.
@@ -24,6 +25,9 @@ export async function loadLine(linePath: string): Promise<{
   const config = YAML.parse(raw) as LineConfig;
 
   if (!config.name) throw new Error("line.yaml must have a 'name' field");
+
+  // Brand the line name at the YAML boundary
+  config.name = LineName(config.name as any);
   if (!config.sequence?.length)
     throw new Error("line.yaml must have a non-empty 'sequence'");
 
@@ -193,7 +197,8 @@ export async function loadLine(linePath: string): Promise<{
   const stations = new Map<string, StationConfig>();
   for (const name of stationNames) {
     const stationDir = resolve(linePath, "stations", name);
-    const station = await loadStation(stationDir, name);
+    const brandedName = StationName(name);
+    const station = await loadStation(stationDir, brandedName);
     stations.set(name, station);
   }
 
