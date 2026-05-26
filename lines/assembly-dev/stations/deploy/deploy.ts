@@ -9,10 +9,18 @@
  * Fails (exit 1) if:
  *   - any test in the worktree fails
  *   - the branch is missing or not ahead of BASE (ASSEMBLY_DEPLOY_BRANCH)
- *   - the merge produces conflicts or errors
- *   - the merge commit is not a real merge commit
- *   - the push to origin fails or remote SHA != local SHA
- *   - the live worktree (REPO) can't be fast-forwarded to origin/BASE
+ *   - rebase onto origin/BASE can't be completed (AI resolver exhausted,
+ *     markers left over, agent crashed)
+ *   - push to origin is rejected (non-FF — origin/BASE moved since fetch)
+ *     or remote SHA != local SHA after push
+ *   - LIVE worktree (ASSEMBLY_LIVE_ROOT) can't be reset --hard to
+ *     origin/BASE after a successful push
+ *
+ * History is kept linear: deploy rebases the feature branch onto the latest
+ * origin/BASE in a throwaway worktree (with the AI conflict resolver wrapping
+ * each pause), then `git push origin HEAD:BASE` as a fast-forward. No merge
+ * commits land on BASE. Conflicts surface via the AI resolver — neither
+ * deploy nor any --force flag ever overwrites a remote commit.
  *
  * Best-effort (logs a warning, doesn't fail):
  *   - worktree cleanup
@@ -20,6 +28,7 @@
  *   - dashboard service restart
  */
 import { readFileSync, existsSync } from "fs";
+import { resolve as resolvePath } from "path";
 import { spawnSync } from "child_process";
 
 const REPO = process.env.ASSEMBLY_REPO_ROOT;
@@ -28,12 +37,21 @@ if (!REPO) {
   process.exit(2);
 }
 
-// Branch deploy merges into and pushes. REPO is the LIVE worktree on this
-// branch (services restart from here). Default keeps the pre-2026-05-26
-// single-clone behavior; assembly's setup overrides with ASSEMBLY_DEPLOY_BRANCH
-// (e.g. "production") when the canonical edit checkout lives on a different
-// branch and the deploy worktree is split out.
+// Branch deploy merges into and pushes — the canonical history. Post-merge
+// we `git push origin HEAD:${BASE}`. Default matches the pre-2026-05-26
+// single-clone behavior.
 const BASE = process.env.ASSEMBLY_DEPLOY_BRANCH ?? "main";
+
+// Live worktree services run from. After pushing to origin/${BASE} we
+// `git -C ${LIVE} reset --hard origin/${BASE}` so its working tree (on
+// whatever branch — typically "production" for worktree-isolation from a
+// user-owned ${BASE} checkout) matches what was just shipped, then restart
+// services. Defaults to REPO when not split out.
+const LIVE = process.env.ASSEMBLY_LIVE_ROOT ?? REPO;
+
+// Model used by the conflict-resolution helper agent. Matches develop.ts
+// default — sonnet is enough for resolving merge markers in this repo.
+const MODEL = process.env.ASSEMBLY_DEPLOY_MODEL ?? "sonnet";
 
 function log(msg: string) {
   process.stderr.write(`[deploy] ${new Date().toISOString()} ${msg}\n`);
@@ -271,20 +289,18 @@ log("safety re-check passed");
 
 // ─── 3. Merge in a throwaway worktree ────────────────────────────────
 //
-// Pre-2026-05-26 deploy did `git checkout BASE; git merge; git push`
-// directly inside REPO. That coupled REPO's working tree to the merge
-// operation — anyone editing REPO saw their files change underneath them,
-// and uncommitted edits could block deploy. Now:
-//   1. Spawn a throwaway worktree at /tmp/assembly-deploy/<wpId>, detached
-//      at BASE's tip. REPO already has BASE checked out as a branch;
-//      `--detach` avoids the per-branch worktree lock.
-//   2. Merge the dev branch into the detached HEAD there.
-//   3. `git push origin HEAD:BASE` — origin/BASE advances; the push
-//      side-effect also updates our local refs/remotes/origin/BASE.
-//   4. Fast-forward REPO's local BASE to origin/BASE — REPO IS the live
-//      checkout the dashboard restarts from, so this is what makes the
-//      merged code reachable.
-//   5. Tear down the throwaway worktree.
+// Two-phase deploy:
+//   (a) SHIP THE CODE — merge feature branch into BASE in a throwaway
+//       worktree, push HEAD:BASE so origin/BASE is the canonical record.
+//       Neither REPO nor LIVE is touched during this phase.
+//   (b) DEPLOY TO LIVE — `git -C LIVE reset --hard origin/BASE` so LIVE's
+//       working tree (typically on a separate "production" branch for
+//       worktree-isolation from a user-owned BASE checkout) matches what
+//       was just shipped, then restart services.
+//
+// Pre-2026-05-26 deploy ran phase (a) directly inside REPO, coupling the
+// merge to REPO's working tree and blocking anyone editing it. The
+// throwaway worktree decouples the two.
 
 const deployWtRoot = `/tmp/assembly-deploy/${wp.id}`;
 
@@ -293,74 +309,277 @@ if (existsSync(deployWtRoot)) {
   spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
 }
 
-log(`creating throwaway worktree ${deployWtRoot} detached at ${BASE}`);
+// Fetch BASE so the throwaway forks from the latest remote tip — guards
+// against the case where some external push moved origin/BASE between
+// develop and deploy. The throwaway detaches at refs/remotes/origin/BASE
+// rather than the local BASE branch (which may be stale, especially when
+// BASE is checked out in a user-owned worktree they haven't pulled in).
+log(`fetching origin/${BASE} before throwaway`);
+const fetchR = spawnSync("git", ["-C", REPO, "fetch", "origin", BASE], { encoding: "utf-8" });
+if (fetchR.status !== 0) {
+  fatal(`git fetch origin ${BASE} failed`, (fetchR.stdout ?? "") + "\n" + (fetchR.stderr ?? ""));
+}
+
+log(`creating throwaway worktree ${deployWtRoot} detached at feature=${branch}`);
 const wtAddR = spawnSync(
   "git",
-  ["-C", REPO, "worktree", "add", "--detach", deployWtRoot, BASE],
+  ["-C", REPO, "worktree", "add", "--detach", deployWtRoot, branch],
   { encoding: "utf-8" }
 );
 if (wtAddR.status !== 0) {
   fatal("git worktree add for deploy throwaway failed", (wtAddR.stdout ?? "") + "\n" + (wtAddR.stderr ?? ""));
 }
 
-const problemStatement = (
-  wp.stations?.plan?.data?.problem_statement ??
-  wp.stations?.plan?.summary ??
-  wp.task ??
-  ""
-)
-  .toString()
-  .split("\n")[0]
-  .slice(0, 200);
+// Sanity-count feature commits relative to origin/${BASE} before rebase.
+// Used after rebase to verify all commits made it through (rebase can drop
+// commits that become empty when replayed onto a new base).
+const preFeatureCountR = spawnSync(
+  "git",
+  ["-C", deployWtRoot, "rev-list", "--count", `origin/${BASE}..HEAD`],
+  { encoding: "utf-8" }
+);
+const preFeatureCount = parseInt((preFeatureCountR.stdout ?? "0").trim(), 10) || 0;
+if (preFeatureCount === 0) {
+  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+  fatal(`feature ${branch} has no commits ahead of origin/${BASE} — nothing to deploy`);
+}
+log(`feature has ${preFeatureCount} commit(s) ahead of origin/${BASE}`);
 
-const filesChanged = Array.isArray(developData.files_changed) ? developData.files_changed : [];
-const commitMsg = [
-  `feat(assembly): ${problemStatement}`,
-  "",
-  "Implemented via assembly-dev line.",
-  `Branch: ${branch}`,
-  `Files changed: ${JSON.stringify(filesChanged)}`,
-].join("\n");
-
-log(`merge ${branch} --no-ff in throwaway worktree`);
-const mergeR = spawnSync(
+log(`rebasing ${branch} onto origin/${BASE}`);
+let rebaseR = spawnSync(
   "git",
   [
     "-C", deployWtRoot,
     "-c", "user.name=assembly-deploy",
     "-c", "user.email=assembly-deploy@local",
-    "merge", branch, "--no-ff", "-m", commitMsg,
+    "-c", "core.editor=true",
+    "rebase", `origin/${BASE}`,
   ],
   { encoding: "utf-8" }
 );
-if (mergeR.status !== 0) {
-  spawnSync("git", ["-C", deployWtRoot, "merge", "--abort"], { encoding: "utf-8" });
-  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
-  fatal("git merge failed", (mergeR.stdout ?? "") + "\n" + (mergeR.stderr ?? ""));
+
+let conflictResolved = false;
+let resolutionCount = 0;
+const MAX_REBASE_RESOLUTIONS = 20;
+
+while (rebaseR.status !== 0 && resolutionCount < MAX_REBASE_RESOLUTIONS) {
+  const conflictsR = spawnSync(
+    "git",
+    ["-C", deployWtRoot, "diff", "--name-only", "--diff-filter=U"],
+    { encoding: "utf-8" }
+  );
+  const conflictedFiles = ((conflictsR.stdout ?? "").trim().split("\n")).filter(Boolean);
+
+  if (conflictedFiles.length === 0) {
+    spawnSync("git", ["-C", deployWtRoot, "rebase", "--abort"], { encoding: "utf-8" });
+    spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+    fatal("rebase failed without reporting conflicts", (rebaseR.stdout ?? "") + "\n" + (rebaseR.stderr ?? ""));
+  }
+
+  resolutionCount++;
+  log(`rebase pause #${resolutionCount}: conflicts in ${conflictedFiles.length} file(s): ${conflictedFiles.join(", ")}`);
+
+  // AI resolver — mirrors develop.ts pre-rebase resolver. Each pause is one
+  // commit being replayed; resolve, stage, `git rebase --continue` proceeds
+  // to the next commit (which may pause again, hence the loop).
+  const resolveSystemPrompt = `You are a senior developer resolving rebase conflicts inside an Assembly framework worktree.
+
+## Your cwd IS the worktree
+- You are running at: ${deployWtRoot}
+- The worktree is mid-rebase: \`git rebase origin/${BASE}\` paused on a conflicted commit.
+- The conflicted files have \`<<<<<<<\` / \`=======\` / \`>>>>>>>\` markers (HEAD = origin/${BASE}'s tip plus any already-replayed commits; the incoming side is the feature commit being replayed now).
+- Do NOT edit anything under ${REPO} or ${LIVE} — those are DIFFERENT checkouts.
+- Do NOT run git commands. The script around you will stage and continue the rebase after you finish. NO \`git add\`, \`git commit\`, \`git rebase\`, \`git reset\`, etc.
+
+## Your job
+For each conflicted file: read it, understand BOTH sides, write a merged version with no markers that preserves the intent of both. The feature commit's new work and origin/${BASE}'s drift both matter — don't drop either. If two sides edit the same logical block, integrate them.
+
+## Conflicted files
+${conflictedFiles.map((f) => `- ${f}`).join("\n")}
+
+## Verification
+After editing each file, re-read it and confirm no \`<<<<<<<\`, \`=======\` (between markers), or \`>>>>>>>\` lines remain. The script will reject files with leftover markers and hard-fail.
+
+Only edit the conflicted files listed above. Auto-merged files are already staged correctly — do not touch them.`;
+
+  const resolveUserMsg = [
+    `# Rebase-conflict resolution (deploy, pause #${resolutionCount})`,
+    ``,
+    `\`git rebase origin/${BASE}\` paused with content conflicts in:`,
+    ...conflictedFiles.map((f) => `- ${f}`),
+    ``,
+    `Resolve each by editing out the markers while preserving both sides' intent.`,
+    ``,
+    `# Original task`,
+    wp.task,
+    ``,
+    `# Plan summary`,
+    wp.stations?.plan?.summary ?? "(no summary)",
+  ].join("\n");
+
+  log(`spawning claude for rebase conflict resolution model=${MODEL}`);
+  const resolveProc = Bun.spawn(
+    [
+      "claude",
+      "-p",
+      "--output-format", "stream-json",
+      "--verbose",
+      "--model", MODEL,
+      "--input-format", "stream-json",
+      "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep",
+      "--disallowedTools", "Skill",
+      "--no-session-persistence",
+    ],
+    {
+      cwd: deployWtRoot,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: process.env,
+    }
+  );
+
+  const resolvePayload = JSON.stringify({
+    type: "user",
+    system: resolveSystemPrompt,
+    message: { role: "user", content: resolveUserMsg },
+  }) + "\n";
+  resolveProc.stdin.write(resolvePayload);
+  await resolveProc.stdin.end();
+
+  let resolveBuffer = "";
+  const resolveReader = resolveProc.stdout.getReader();
+  const dec = new TextDecoder();
+  while (true) {
+    const { done, value } = await resolveReader.read();
+    if (done) break;
+    resolveBuffer += dec.decode(value);
+    let idx;
+    while ((idx = resolveBuffer.indexOf("\n")) !== -1) {
+      const line = resolveBuffer.slice(0, idx);
+      resolveBuffer = resolveBuffer.slice(idx + 1);
+      if (!line.trim()) continue;
+      try {
+        const ev = JSON.parse(line);
+        if (ev.type === "assistant" && ev.message?.content) {
+          for (const block of ev.message.content) {
+            if (block.type === "tool_use") {
+              log(`resolve.tool_use ${block.name} ${JSON.stringify(block.input).slice(0, 160)}`);
+            }
+          }
+        }
+      } catch { /* non-JSON line — ignore */ }
+    }
+  }
+
+  const resolveStderr = await new Response(resolveProc.stderr).text();
+  const resolveExit = await resolveProc.exited;
+
+  if (resolveExit !== 0) {
+    spawnSync("git", ["-C", deployWtRoot, "rebase", "--abort"], { encoding: "utf-8" });
+    spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+    fatal("conflict-resolution agent exited non-zero", `exit=${resolveExit}\n${resolveStderr.slice(-2000)}`);
+  }
+
+  const markerLeftovers: string[] = [];
+  for (const f of conflictedFiles) {
+    const absPath = resolvePath(deployWtRoot, f);
+    if (!existsSync(absPath)) continue; // accepted deletion
+    const content = readFileSync(absPath, "utf-8");
+    if (
+      /^<{7} /m.test(content) ||
+      /^={7}$/m.test(content) ||
+      /^>{7} /m.test(content)
+    ) {
+      markerLeftovers.push(f);
+    }
+  }
+  if (markerLeftovers.length > 0) {
+    spawnSync("git", ["-C", deployWtRoot, "rebase", "--abort"], { encoding: "utf-8" });
+    spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+    fatal(
+      "conflict markers remain after resolution agent",
+      `Files still containing markers:\n${markerLeftovers.map((f) => `  ${f}`).join("\n")}`
+    );
+  }
+
+  const addR = spawnSync(
+    "git",
+    ["-C", deployWtRoot, "add", "--", ...conflictedFiles],
+    { encoding: "utf-8" }
+  );
+  if (addR.status !== 0) {
+    spawnSync("git", ["-C", deployWtRoot, "rebase", "--abort"], { encoding: "utf-8" });
+    spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+    fatal("git add of resolved conflict files failed", (addR.stdout ?? "") + "\n" + (addR.stderr ?? ""));
+  }
+
+  rebaseR = spawnSync(
+    "git",
+    [
+      "-C", deployWtRoot,
+      "-c", "user.name=assembly-deploy",
+      "-c", "user.email=assembly-deploy@local",
+      "-c", "core.editor=true",
+      "rebase", "--continue",
+    ],
+    { encoding: "utf-8" }
+  );
+  conflictResolved = true;
 }
 
-const parentsR = spawnSync("git", ["-C", deployWtRoot, "rev-list", "--parents", "-n", "1", "HEAD"], { encoding: "utf-8" });
-const parentsCount = (parentsR.stdout ?? "").trim().split(/\s+/).length - 1;
-if (parentsCount !== 2) {
+if (rebaseR.status !== 0) {
+  spawnSync("git", ["-C", deployWtRoot, "rebase", "--abort"], { encoding: "utf-8" });
   spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
-  fatal(`HEAD is not a merge commit (parents=${parentsCount})`);
+  fatal(
+    `rebase exhausted ${MAX_REBASE_RESOLUTIONS} resolutions without completing`,
+    (rebaseR.stdout ?? "") + "\n" + (rebaseR.stderr ?? "")
+  );
+}
+
+if (conflictResolved) {
+  log(`rebase completed after ${resolutionCount} resolution(s)`);
+} else {
+  log(`rebase clean (no conflicts)`);
+}
+
+// ─── Validate post-rebase state ─────────────────────────────────────
+
+const ancestorR = spawnSync(
+  "git",
+  ["-C", deployWtRoot, "merge-base", "--is-ancestor", `origin/${BASE}`, "HEAD"],
+  { encoding: "utf-8" }
+);
+if (ancestorR.status !== 0) {
+  spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+  fatal(`HEAD is not a descendant of origin/${BASE} after rebase — refusing to push`);
 }
 
 const shaR = spawnSync("git", ["-C", deployWtRoot, "rev-parse", "HEAD"], { encoding: "utf-8" });
 const mergeSha = (shaR.stdout ?? "").trim();
 if (mergeSha.length !== 40) {
   spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
-  fatal(`unable to capture merge SHA (got "${mergeSha}")`);
+  fatal(`unable to capture post-rebase HEAD SHA (got "${mergeSha}")`);
 }
 
-if (spawnSync("git", ["-C", deployWtRoot, "merge-base", "--is-ancestor", commitSha, "HEAD"]).status !== 0) {
+const postCountR = spawnSync(
+  "git",
+  ["-C", deployWtRoot, "rev-list", "--count", `origin/${BASE}..HEAD`],
+  { encoding: "utf-8" }
+);
+const postCount = parseInt((postCountR.stdout ?? "0").trim(), 10) || 0;
+if (postCount === 0) {
   spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
-  fatal(`develop commit ${commitSha} not in merge history of ${mergeSha}`);
+  fatal(`rebase consumed all feature commits — nothing to push (HEAD = origin/${BASE})`);
 }
-
-log(`merge_commit=${mergeSha}`);
+log(`post-rebase HEAD=${mergeSha.slice(0, 8)} (${postCount} commits ahead of origin/${BASE}, was ${preFeatureCount})`);
 
 // ─── 4. Push to origin ────────────────────────────────────────────────
+//
+// Plain push, no --force / --force-with-lease. If origin/${BASE} moved
+// between our fetch and this push, the push is rejected (non-fast-forward)
+// — we fail loudly, never overwrite. Operator (or next deploy run) handles
+// re-rebasing against the new origin/${BASE}.
 
 log(`pushing HEAD to origin/${BASE}`);
 const pushR = spawnSync(
@@ -370,46 +589,76 @@ const pushR = spawnSync(
 );
 if (pushR.status !== 0) {
   spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
-  fatal(`git push origin HEAD:${BASE} failed`, (pushR.stdout ?? "") + "\n" + (pushR.stderr ?? ""));
+  fatal(
+    `git push origin HEAD:${BASE} failed — likely non-FF (origin/${BASE} moved since fetch). Re-run deploy.`,
+    (pushR.stdout ?? "") + "\n" + (pushR.stderr ?? "")
+  );
 }
 
 const lsR = spawnSync("git", ["-C", REPO, "ls-remote", "origin", `refs/heads/${BASE}`], { encoding: "utf-8" });
 const remoteSha = ((lsR.stdout ?? "").split(/\s+/)[0] ?? "").trim();
 if (remoteSha !== mergeSha) {
   spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
-  fatal(`remote ${BASE} (${remoteSha}) does not match local merge (${mergeSha})`);
+  fatal(`remote ${BASE} (${remoteSha}) does not match local HEAD (${mergeSha})`);
 }
 
 log(`pushed, remote_sha=${remoteSha}`);
 
-// ─── 4b. Fast-forward the live worktree (REPO) ───────────────────────
+// ─── 4b. Deploy to live worktree (LIVE) ──────────────────────────────
 //
-// REPO is the live worktree services run from. It's on BASE but stale
-// relative to origin/BASE (we just pushed). The push side-effect already
-// advanced our local refs/remotes/origin/BASE — now FF the local BASE
-// branch and update REPO's working tree atomically so the dashboard
-// restart below picks up the new code.
+// Phase (b) — make the just-shipped code reachable to the running services.
+// LIVE is on some non-${BASE} branch (typically "production") so that ${BASE}
+// can be checked out elsewhere by a user without colliding. We force-sync
+// LIVE's branch to origin/${BASE} via `git reset --hard`:
+//   - moves LIVE's current branch ref to origin/${BASE}'s commit
+//   - updates LIVE's working tree atomically — services restart below pick
+//     up the new code from disk
+//   - does NOT touch ${BASE} as a ref (so a worktree on ${BASE} stays put)
+//
+// If LIVE has uncommitted modifications they're discarded. Services don't
+// write to source files, so this should never happen in practice; if it
+// does, the discard is the correct behavior (LIVE must match what shipped).
 
-log(`fast-forwarding REPO=${REPO} to origin/${BASE}`);
-const ffR = spawnSync(
+log(`reset --hard LIVE=${LIVE} to origin/${BASE}`);
+const resetR = spawnSync(
   "git",
-  ["-C", REPO, "merge", "--ff-only", `origin/${BASE}`],
+  ["-C", LIVE, "reset", "--hard", `origin/${BASE}`],
   { encoding: "utf-8" }
 );
-if (ffR.status !== 0) {
-  // The merge is already on origin — we can't roll it back. REPO has
-  // diverged from origin/BASE (uncommitted edits, manual commits, etc.).
-  // Fail loudly; operator must reconcile REPO before next deploy.
+if (resetR.status !== 0) {
   spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
   fatal(
-    `fast-forward of live worktree REPO=${REPO} to origin/${BASE} failed — origin has merge ${mergeSha} but REPO diverged`,
-    (ffR.stdout ?? "") + "\n" + (ffR.stderr ?? "")
+    `git reset --hard origin/${BASE} on LIVE=${LIVE} failed — origin has merge ${mergeSha} but LIVE could not be reset`,
+    (resetR.stdout ?? "") + "\n" + (resetR.stderr ?? "")
   );
 }
 
-const repoHeadR = spawnSync("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf-8" });
-if ((repoHeadR.stdout ?? "").trim() !== mergeSha) {
-  log(`warning: REPO HEAD ${(repoHeadR.stdout ?? "").trim()} != merge ${mergeSha} after FF (non-fatal)`);
+const liveHeadR = spawnSync("git", ["-C", LIVE, "rev-parse", "HEAD"], { encoding: "utf-8" });
+if ((liveHeadR.stdout ?? "").trim() !== mergeSha) {
+  log(`warning: LIVE HEAD ${(liveHeadR.stdout ?? "").trim()} != merge ${mergeSha} after reset (non-fatal)`);
+}
+
+// Best-effort: push LIVE's branch (production) to origin so origin/production
+// also tracks the latest deployed commit. Plain push (no --force) — since
+// reset moves production strictly forward (to origin/${BASE} which is itself
+// a descendant of the previous deploy), the push is a fast-forward and
+// requires no force. If someone manually advanced origin/production behind
+// our back, push is rejected — we log and continue (main is already shipped).
+const liveBranchR = spawnSync("git", ["-C", LIVE, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf-8" });
+const liveBranch = (liveBranchR.stdout ?? "").trim();
+let liveBranchPushed = false;
+if (liveBranch && liveBranch !== "HEAD" && liveBranch !== BASE) {
+  log(`pushing LIVE branch ${liveBranch} to origin`);
+  const livePushR = spawnSync(
+    "git",
+    ["-C", LIVE, "push", "origin", `${liveBranch}:${liveBranch}`],
+    { encoding: "utf-8" }
+  );
+  if (livePushR.status === 0) {
+    liveBranchPushed = true;
+  } else {
+    log(`push of LIVE branch ${liveBranch} failed (non-fatal): ${livePushR.stderr ?? ""}`);
+  }
 }
 
 // ─── 5. Clean up worktrees + branch (best-effort) ─────────────────────
@@ -437,19 +686,17 @@ if (brDelR.status !== 0) {
 // brings it back. The service ExecStart runs `bun run src/cli.ts dashboard
 // start`, which re-reads the just-merged source from disk.
 //
-// Daemon: we do NOT call `assembly daemon reload` from inside a deploy
-// worker running under a systemd-managed daemon. Reload's handoff design
-// (old daemon spawns detached successor, exits 0) is incompatible with
-// `Type=simple`/`Restart=on-failure`: systemd sees a clean MainPID exit,
-// marks the service deactivated, and the detached successor — not tracked
-// as MainPID — gets killed when its grandparent shell exits. Verified
-// outage on 2026-05-19 23:38.
+// Daemon: scheduled via `systemd-run --no-block --on-active=Ns` to run in
+// a detached transient unit, NOT inline. deploy.ts is running inside a
+// section-worker that is a descendant of the assembly daemon — calling
+// `systemctl restart assembly` directly would SIGTERM the whole cgroup
+// (including ourselves) before we could emit the envelope. The deferred
+// transient unit fires N seconds after we exit, after the envelope is
+// safely persisted by section-worker.
 //
-// Station scripts (this file, plan/develop/deploy AGENT.md, etc.) are read
-// off disk per task invocation, so changes to those land immediately on
-// the next task. For changes to daemon code itself (orchestrator, runner,
-// queue, etc.), a manual `systemctl restart assembly` is required.
-// `daemon_reloaded` stays false to signal that.
+// The N-second delay also lets the dashboard restart settle. The previous
+// `daemon reload` (in-app handoff) approach was incompatible with the
+// systemd Type=simple unit model — see commit history around 2026-05-19.
 
 const dashboardService = process.env.ASSEMBLY_DASHBOARD_SERVICE ?? "assembly-dashboard";
 let dashboardRestarted = false;
@@ -464,26 +711,59 @@ let dashboardRestarted = false;
   }
 }
 
-const daemonReloaded = false;
+const daemonService = process.env.ASSEMBLY_DAEMON_SERVICE ?? "assembly";
+const daemonRestartDelay = process.env.ASSEMBLY_DAEMON_RESTART_DELAY ?? "15s";
+let daemonRestartScheduled = false;
+{
+  const cmdR = spawnSync(
+    "systemd-run",
+    [
+      "--no-block",
+      "--on-active=" + daemonRestartDelay,
+      "--description=post-deploy daemon restart for " + wp.id,
+      "systemctl", "restart", daemonService,
+    ],
+    { encoding: "utf-8" }
+  );
+  daemonRestartScheduled = cmdR.status === 0;
+  if (!daemonRestartScheduled) {
+    log(`systemd-run daemon restart schedule failed (non-fatal): rc=${cmdR.status} ${(cmdR.stderr ?? "").slice(-200)}`);
+  } else {
+    log(`scheduled deferred daemon restart (${daemonService}, fires in ${daemonRestartDelay})`);
+  }
+}
 
 // ─── 7. Emit envelope ─────────────────────────────────────────────────
+//
+// Field naming note: `merge_commit` keeps its name for envelope-consumer
+// compat, but it now holds the post-rebase HEAD SHA (no merge commit
+// exists — feature commits are replayed linearly on top of origin/BASE).
 
 emit({
-  summary: `Merged ${branch} to ${BASE} at ${mergeSha.slice(0, 8)}`,
+  summary: `Rebased ${branch} onto ${BASE} at ${mergeSha.slice(0, 8)}${conflictResolved ? ` (${resolutionCount} conflict resolution${resolutionCount === 1 ? "" : "s"})` : ""}`,
   content: [
-    `Merged ${branch} to ${BASE} at ${mergeSha}.`,
+    `Rebased ${branch} onto ${BASE} at ${mergeSha}.`,
     `Pushed to origin; remote_sha=${remoteSha}.`,
+    conflictResolved ? `Resolved ${resolutionCount} conflict pause(s) via AI during rebase.` : `Rebase was clean (no conflicts).`,
+    `LIVE branch ${liveBranch || "(none)"} reset --hard to origin/${BASE}; pushed=${liveBranchPushed}.`,
     `worktree_cleaned=${worktreeCleaned}`,
     `dashboard_restarted=${dashboardRestarted}`,
-    `daemon_reloaded=${daemonReloaded}`,
+    `daemon_restart_scheduled=${daemonRestartScheduled} (fires in ${daemonRestartDelay})`,
   ].join("\n"),
   data: {
     merged: true,
     merge_commit: mergeSha,
     pushed: true,
+    rebased: true,
+    conflict_resolved: conflictResolved,
+    resolution_count: resolutionCount,
+    live_branch: liveBranch,
+    live_branch_pushed: liveBranchPushed,
     worktree_cleaned: worktreeCleaned,
     dashboard_restarted: dashboardRestarted,
-    daemon_reloaded: daemonReloaded,
+    daemon_restart_scheduled: daemonRestartScheduled,
+    daemon_restart_delay: daemonRestartDelay,
+    daemon_reloaded: false,
     conflicts: [],
   },
 });

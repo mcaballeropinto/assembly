@@ -894,37 +894,55 @@ if (!(aheadR.stdout ?? "").trim()) {
   );
 }
 
-// ─── Pre-merge with BASE: surface conflicts here, not in deploy ──────
+// ─── Pre-rebase onto origin/BASE: surface conflicts here, not in deploy ─
 //
-// deploy.ts does `git merge <branch> --no-ff` on BASE and hardFails on
-// conflicts — and the orchestrator just retries deploy, which hits the
-// same conflict every time. We pre-resolve here, where the agent
-// context is still fresh and where retry-with-feedback already works:
+// Linear history: feature's commit(s) get re-applied on top of the latest
+// origin/${BASE}, no merge commits. Mirrors deploy's rebase — by surfacing
+// conflicts here (with fresh agent context + the retry-with-feedback path
+// already wired) we avoid them landing on deploy.
 //
-//   1. `git merge ${BASE} --no-edit --no-ff` inside the worktree.
-//   2. Clean / fast-forward / already-up-to-date → continue.
-//   3. Conflicts → spawn a focused resolution agent, verify markers
-//      gone, stage + commit the merge. Re-run tests on the merged tree.
+// Flow:
+//   1. `git fetch origin ${BASE}` so origin/${BASE} is current.
+//   2. `git rebase origin/${BASE}` inside the worktree.
+//   3. Clean (already on top, or no overlap) → continue.
+//   4. Rebase pause (conflict) → spawn focused resolution agent, verify
+//      markers gone, `git add` + `git rebase --continue`. Loop until
+//      rebase exits 0 (each iteration handles one paused commit).
 //
-// After this step, `commit_sha` points at the post-merge HEAD; deploy's
-// later `git merge <branch> --no-ff` on BASE becomes a clean fast-
-// forward-able merge (no conflicts since BASE is already in the branch).
+// After this step, `commit_sha` points at the post-rebase HEAD. Deploy's
+// later rebase against origin/${BASE} is a no-op (feature already on top).
 
-log(`pre-merge: bringing ${BASE} into branch ${branch}`);
-const preMergeCommitMsg = `Merge ${BASE} into ${branch} to pre-resolve before deploy`;
-const preMergeR = spawnSync(
+log(`pre-rebase: fetching origin/${BASE}`);
+const fetchPreRebaseR = spawnSync(
+  "git",
+  ["-C", wtRoot, "fetch", "origin", BASE],
+  { encoding: "utf-8" }
+);
+if (fetchPreRebaseR.status !== 0) {
+  hardFail(
+    `git fetch origin ${BASE} failed`,
+    `${fetchPreRebaseR.stdout ?? ""}\n${fetchPreRebaseR.stderr ?? ""}`
+  );
+}
+
+log(`pre-rebase: rebasing ${branch} onto origin/${BASE}`);
+let preRebaseR = spawnSync(
   "git",
   [
     "-C", wtRoot,
     "-c", "user.name=assembly-dev",
     "-c", "user.email=assembly-dev@local",
-    "merge", BASE, "--no-edit", "--no-ff", "-m", preMergeCommitMsg,
+    "-c", "core.editor=true",
+    "rebase", `origin/${BASE}`,
   ],
   { encoding: "utf-8" }
 );
 
-let preMergeResolved = false;
-if (preMergeR.status !== 0) {
+let preRebaseResolved = false;
+let preRebaseResolutionCount = 0;
+const MAX_REBASE_RESOLUTIONS = 20;
+
+while (preRebaseR.status !== 0 && preRebaseResolutionCount < MAX_REBASE_RESOLUTIONS) {
   const conflictsR = spawnSync(
     "git",
     ["-C", wtRoot, "diff", "--name-only", "--diff-filter=U"],
@@ -933,26 +951,27 @@ if (preMergeR.status !== 0) {
   const conflictedFiles = ((conflictsR.stdout ?? "").trim().split("\n")).filter(Boolean);
 
   if (conflictedFiles.length === 0) {
-    spawnSync("git", ["-C", wtRoot, "merge", "--abort"], { encoding: "utf-8" });
+    spawnSync("git", ["-C", wtRoot, "rebase", "--abort"], { encoding: "utf-8" });
     hardFail(
-      "pre-merge failed without reporting conflicts",
-      `${preMergeR.stdout ?? ""}\n${preMergeR.stderr ?? ""}`
+      "pre-rebase failed without reporting conflicts",
+      `${preRebaseR.stdout ?? ""}\n${preRebaseR.stderr ?? ""}`
     );
   }
 
-  log(`pre-merge conflicts in ${conflictedFiles.length} file(s): ${conflictedFiles.join(", ")}`);
+  preRebaseResolutionCount++;
+  log(`pre-rebase pause #${preRebaseResolutionCount}: conflicts in ${conflictedFiles.length} file(s): ${conflictedFiles.join(", ")}`);
 
-  const resolveSystemPrompt = `You are a senior developer resolving merge conflicts inside an Assembly framework worktree.
+  const resolveSystemPrompt = `You are a senior developer resolving rebase conflicts inside an Assembly framework worktree.
 
 ## Your cwd IS the worktree
 - You are running at: ${wt}
-- The worktree just attempted \`git merge ${BASE} --no-edit --no-ff\` and hit content conflicts.
-- The conflicted files have \`<<<<<<<\` / \`=======\` / \`>>>>>>>\` markers.
+- The worktree is mid-rebase: \`git rebase origin/${BASE}\` paused on a conflicted commit.
+- The conflicted files have \`<<<<<<<\` / \`=======\` / \`>>>>>>>\` markers (HEAD = origin/${BASE}'s tip; the incoming side is your feature's commit being replayed).
 - Do NOT edit anything under ${REPO} — that is a DIFFERENT checkout.
-- Do NOT run git commands. The script around you will stage and commit after you finish. NO \`git add\`, \`git commit\`, \`git merge\`, \`git reset\`, etc.
+- Do NOT run git commands. The script around you will stage and continue the rebase after you finish. NO \`git add\`, \`git commit\`, \`git rebase\`, \`git reset\`, etc.
 
 ## Your job
-For each conflicted file: read it, understand BOTH sides, write a merged version with no markers that preserves the intent of both. The branch's new work and ${BASE}'s drift both matter — don't drop either. If two sides edit the same logical block, integrate them.
+For each conflicted file: read it, understand BOTH sides, write a merged version with no markers that preserves the intent of both. The feature commit's new work and origin/${BASE}'s drift both matter — don't drop either. If two sides edit the same logical block, integrate them.
 
 ## Conflicted files
 ${conflictedFiles.map((f) => `- ${f}`).join("\n")}
@@ -963,9 +982,9 @@ After editing each file, re-read it and confirm no \`<<<<<<<\`, \`=======\` (bet
 Only edit the conflicted files listed above. Auto-merged files are already staged correctly — do not touch them.`;
 
   const resolveUserMsg = [
-    `# Merge-conflict resolution`,
+    `# Rebase-conflict resolution (pause #${preRebaseResolutionCount})`,
     ``,
-    `\`git merge ${BASE} --no-edit --no-ff\` produced content conflicts in:`,
+    `\`git rebase origin/${BASE}\` paused with content conflicts in:`,
     ...conflictedFiles.map((f) => `- ${f}`),
     ``,
     `Resolve each by editing out the markers while preserving both sides' intent. Refer to the original task and plan below for context on what the branch was trying to accomplish.`,
@@ -981,7 +1000,7 @@ Only edit the conflicted files listed above. Auto-merged files are already stage
     try { unlinkSync(envelopePath); } catch {}
   }
 
-  log(`spawning claude for conflict resolution model=${MODEL}`);
+  log(`spawning claude for rebase conflict resolution model=${MODEL}`);
   const resolveProc = Bun.spawn(["claude", ...claudeArgs], {
     cwd: wt,
     stdin: "pipe",
@@ -1026,7 +1045,7 @@ Only edit the conflicted files listed above. Auto-merged files are already stage
   const resolveExit = await resolveProc.exited;
 
   if (resolveExit !== 0) {
-    spawnSync("git", ["-C", wtRoot, "merge", "--abort"], { encoding: "utf-8" });
+    spawnSync("git", ["-C", wtRoot, "rebase", "--abort"], { encoding: "utf-8" });
     hardFail(
       "conflict-resolution agent exited non-zero",
       `exit=${resolveExit}\n${resolveStderr.slice(-2000)}`
@@ -1037,10 +1056,7 @@ Only edit the conflicted files listed above. Auto-merged files are already stage
   const markerLeftovers: string[] = [];
   for (const f of conflictedFiles) {
     const absPath = resolvePath(wt, f);
-    if (!existsSync(absPath)) {
-      // Both sides deleted the file or agent removed it — accept the deletion.
-      continue;
-    }
+    if (!existsSync(absPath)) continue; // accepted deletion
     const content = readFileSync(absPath, "utf-8");
     if (
       /^<{7} /m.test(content) ||
@@ -1051,78 +1067,87 @@ Only edit the conflicted files listed above. Auto-merged files are already stage
     }
   }
   if (markerLeftovers.length > 0) {
-    spawnSync("git", ["-C", wtRoot, "merge", "--abort"], { encoding: "utf-8" });
+    spawnSync("git", ["-C", wtRoot, "rebase", "--abort"], { encoding: "utf-8" });
     hardFail(
       "conflict markers remain after resolution agent",
-      `Files still containing markers:\n${markerLeftovers.map((f) => `  ${f}`).join("\n")}\n` +
-        `Agent did not fully resolve the conflicts.`
+      `Files still containing markers:\n${markerLeftovers.map((f) => `  ${f}`).join("\n")}`
     );
   }
 
-  // Stage resolved files and complete the merge commit.
+  // Stage resolved files; rebase --continue commits with the original message.
   const addR = spawnSync(
     "git",
     ["-C", wtRoot, "add", "--", ...conflictedFiles],
     { encoding: "utf-8" }
   );
   if (addR.status !== 0) {
-    spawnSync("git", ["-C", wtRoot, "merge", "--abort"], { encoding: "utf-8" });
+    spawnSync("git", ["-C", wtRoot, "rebase", "--abort"], { encoding: "utf-8" });
     hardFail(
       "git add of resolved conflict files failed",
       `${addR.stdout ?? ""}\n${addR.stderr ?? ""}`
     );
   }
 
-  const mergeCommitR = spawnSync(
+  preRebaseR = spawnSync(
     "git",
     [
       "-C", wtRoot,
       "-c", "user.name=assembly-dev",
       "-c", "user.email=assembly-dev@local",
-      "commit", "--no-edit",
+      "-c", "core.editor=true",
+      "rebase", "--continue",
     ],
     { encoding: "utf-8" }
   );
-  if (mergeCommitR.status !== 0) {
-    hardFail(
-      "git commit of merge resolution failed",
-      `${mergeCommitR.stdout ?? ""}\n${mergeCommitR.stderr ?? ""}`
-    );
-  }
-
-  preMergeResolved = true;
-  log(`pre-merge conflicts resolved across ${conflictedFiles.length} file(s)`);
+  preRebaseResolved = true;
 
   if (existsSync(envelopePath)) {
     try { unlinkSync(envelopePath); } catch {}
   }
-} else {
-  // mergeR.status === 0 — either fast-forward, no-op (Already up to date),
-  // or clean auto-merge. The stdout tells us which but we don't care.
-  log(`pre-merge clean: ${(preMergeR.stdout ?? "").trim().split("\n")[0] ?? "ok"}`);
 }
 
-// Refresh commitSha — merge or merge-commit may have moved HEAD.
+if (preRebaseR.status !== 0) {
+  spawnSync("git", ["-C", wtRoot, "rebase", "--abort"], { encoding: "utf-8" });
+  hardFail(
+    `pre-rebase exhausted ${MAX_REBASE_RESOLUTIONS} resolutions without completing`,
+    `${preRebaseR.stdout ?? ""}\n${preRebaseR.stderr ?? ""}`
+  );
+}
+
+if (preRebaseResolved) {
+  log(`pre-rebase completed after ${preRebaseResolutionCount} resolution(s)`);
+} else {
+  log(`pre-rebase clean (already on origin/${BASE}'s tip or no overlap)`);
+}
+
+// Refresh commitSha — rebase rewrites commit SHAs.
 const postMergeShaR = spawnSync("git", ["-C", wtRoot, "rev-parse", "HEAD"], { encoding: "utf-8" });
 commitSha = (postMergeShaR.stdout ?? "").trim();
 
-// Re-run tests after merging BASE in — automerged code or our resolution
-// may have introduced semantic breakage even if markers are gone.
-if (preMergeResolved || preMergeR.status === 0) {
-  // Only re-run if BASE actually contributed something. "Already up to
-  // date" leaves HEAD unchanged, so the earlier run is still valid.
-  const ahead2R = spawnSync("git", ["-C", wtRoot, "log", `${BASE}..HEAD`, "--oneline"], { encoding: "utf-8" });
-  const aheadCount = (ahead2R.stdout ?? "").trim().split("\n").filter(Boolean).length;
-  // After a real merge, branch has at least 2 commits ahead of BASE (the
-  // agent's commit + the merge commit). After "Already up to date", it
-  // has the original single commit and re-testing is wasteful.
-  if (preMergeResolved || aheadCount > 1) {
-    log(`re-running bun test on post-merge HEAD=${commitSha.slice(0, 8)}`);
+// Re-run tests after rebasing onto origin/BASE — the replayed commit may
+// behave differently against the new base (semantic conflicts even when
+// markers were resolved cleanly, or no markers at all if the rebase was
+// auto-clean but origin/BASE drifted under the feature).
+//
+// Skip the re-run if the rebase didn't move HEAD relative to the original
+// commit — i.e. origin/BASE was already an ancestor of HEAD (rebase no-op).
+const headChangedR = spawnSync(
+  "git",
+  ["-C", wtRoot, "rev-parse", "HEAD"],
+  { encoding: "utf-8" }
+);
+const headAfterRebase = (headChangedR.stdout ?? "").trim();
+// commitSha was just refreshed; pre-rebase original was the agent's commit.
+// If we ran any resolution OR origin/BASE contributed commits, re-test.
+const rebaseChangedHead = preRebaseResolved || (preRebaseR.status === 0 && headAfterRebase !== commitSha);
+if (preRebaseResolved || preRebaseR.status === 0) {
+  if (rebaseChangedHead || preRebaseResolved) {
+    log(`re-running bun test on post-rebase HEAD=${commitSha.slice(0, 8)}`);
     const reTestR = spawnSync("bun", ["test"], { cwd: wt, encoding: "utf-8", timeout: 180_000 });
     testOut = ((reTestR.stdout ?? "") + "\n" + (reTestR.stderr ?? "")).slice(-4000);
     testsPassed = reTestR.status === 0;
     if (!testsPassed) {
-      log(`post-merge tests failed (exit ${reTestR.status}) — deferring to eval for retry-with-feedback`);
+      log(`post-rebase tests failed (exit ${reTestR.status}) — deferring to eval for retry-with-feedback`);
     }
   }
 }
