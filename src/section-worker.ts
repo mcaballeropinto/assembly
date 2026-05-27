@@ -21,12 +21,13 @@ import { callLLM, callScript, mergeClaudeEnv, callAnthropicRepair, DEFAULT_REPAI
 import { calculateCostWithCache } from "./pricing";
 import { parseEnvelope, EnvelopeError, GuardrailError, buildRepairPrompt, buildGuardrailRepairPrompt, validateGuardrails } from "./envelope";
 import { nudgeForEnvelope } from "./envelope-nudge";
-import { writeStation, failStation } from "./workpiece";
+import { writeStation, failStation, escalateStation } from "./workpiece";
+import { runStationEval } from "./station-eval";
 import { loadEnvFiles } from "./paths";
 import { sessionLogPathFor, unlinkSessionLog, moveSessionLogAlongside } from "./session-log";
 import { unlinkStderrLog, moveStderrLogAlongside } from "./stderr-log";
 import { computeRoundsFromProgress } from "./tool-rounds";
-import type { Workpiece, Provider, ProgressCallback, ProgressEvent, HeartbeatConfig, LLMMessage, LLMResult, RepairConfig, FailureClass, OnEventCallback } from "./types";
+import type { Workpiece, Provider, ProgressCallback, ProgressEvent, HeartbeatConfig, LLMMessage, LLMResult, RepairConfig, FailureClass, OnEventCallback, StationEnvelope, EvalResult } from "./types";
 import { appendTaskEvent, initTaskEventDir, updateTaskEventIndex } from "./task-events";
 
 const HEARTBEAT_MS = 30_000;
@@ -518,7 +519,12 @@ async function main() {
   process.on('SIGUSR2', () => gracefulFlush("aborted"));
   process.on('SIGTERM', () => gracefulFlush("aborted"));
 
-  // Script provider — no LLM, no prompt
+  // Script provider — no LLM, no prompt. With optional eval+retry loop:
+  // when EVAL.md is present, after each script run we invoke the station's
+  // eval and, on `action: retry`, thread its feedback into the workpiece's
+  // ephemeral `_pending_eval_feedback` slot so the script can show it to its
+  // own agent on the next attempt. Mirrors runner.ts's script-provider loop
+  // so the daemon and CLI paths obey the same EVAL.md contract.
   if (provider === "script") {
     if (!station.script) {
       stopHeartbeat();
@@ -527,24 +533,133 @@ async function main() {
       );
     }
     const scriptPath = resolve(stationDir, station.script);
+    const maxAttempts = station.eval ? 1 + (station.eval.max_retries ?? 1) : 1;
+
+    let envelope: StationEnvelope | undefined;
+    let evalResult: EvalResult | undefined;
+    let evalFeedback: string | undefined;
+    const evalTokens = { in: 0, out: 0, cache_read: 0, cache_creation: 0 };
+    let evalCost = 0;
+    type Outcome = "pass" | "warn" | "fail" | "retry" | "escalate";
+    let outcome: Outcome = "pass";
 
     try {
-      writeProgress(progressPath, startedAtMs, lastActivityRef, "script", "started", `Running ${station.script}`);
-      const response = await callScript(scriptPath, workpiecePath, lastActivityRef, effectiveCwd);
-      writeProgress(progressPath, startedAtMs, lastActivityRef, "script", "done", "Script completed");
-      const envelope = parseEnvelope(response.content);
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        // Thread prior eval feedback through `_pending_eval_feedback` on the
+        // workpiece file the script reads. Develop/plan scripts already look
+        // for this slot (develop.ts:262) and surface it in their agent prompt.
+        if (evalFeedback) {
+          const wpWithFeedback = {
+            ...workpiece,
+            _pending_eval_feedback: { station: stationName, feedback: evalFeedback, attempt },
+          };
+          await Bun.write(workpiecePath, JSON.stringify(wpWithFeedback, null, 2));
+        }
 
-      workpiece = writeStation(workpiece, stationName, envelope, {
+        const attemptLabel = maxAttempts > 1 ? ` (attempt ${attempt}/${maxAttempts})` : "";
+        writeProgress(progressPath, startedAtMs, lastActivityRef, "script", "started", `Running ${station.script}${attemptLabel}`);
+        const response = await callScript(scriptPath, workpiecePath, lastActivityRef, effectiveCwd);
+        writeProgress(progressPath, startedAtMs, lastActivityRef, "script", "done", `Script completed${attemptLabel}`);
+        envelope = parseEnvelope(response.content);
+
+        if (!station.eval) {
+          outcome = "pass";
+          break;
+        }
+
+        writeProgress(progressPath, startedAtMs, lastActivityRef, "eval", "started", `Evaluating attempt ${attempt}/${maxAttempts}`);
+        const decision = await runStationEval(
+          station.eval,
+          stationName,
+          stationDir,
+          envelope,
+          workpiece,
+          provider,
+          model,
+          maxTokens,
+          attempt,
+          maxAttempts
+        );
+        writeProgress(progressPath, startedAtMs, lastActivityRef, "eval", "done", `outcome=${decision.outcome}`);
+
+        evalResult = decision.evalResult;
+        evalTokens.in += decision.tokens.in;
+        evalTokens.out += decision.tokens.out;
+        evalTokens.cache_read += decision.tokens.cache_read;
+        evalTokens.cache_creation += decision.tokens.cache_creation;
+        evalCost += decision.cost_usd;
+
+        outcome = decision.outcome;
+        if (outcome === "pass" || outcome === "warn") break;
+        if (outcome === "fail") {
+          throw new Error(`Eval failed: ${evalResult.feedback}`);
+        }
+        if (outcome === "escalate") break;
+        // retry — exhaust check, otherwise loop with feedback threaded in
+        if (attempt === maxAttempts) {
+          outcome = "escalate"; // auto-escalate on retry exhaustion (mirrors runner.ts:227)
+          break;
+        }
+        evalFeedback = evalResult.feedback;
+        console.log(`  🔄 Retrying station with eval feedback (attempt ${attempt + 1}/${maxAttempts})…`);
+      }
+
+      const finishedAt = new Date().toISOString();
+      const outputPath = resolve(outputDir, basename(workpiecePath));
+
+      if (outcome === "escalate") {
+        const reason = evalResult?.feedback ?? "Eval requested escalation";
+        const wasExhausted = (station.eval && evalResult && evalResult.action !== "escalate");
+        const escalationReason = wasExhausted
+          ? `Max retries exhausted (${maxAttempts}). Last eval: ${reason}`
+          : reason;
+
+        workpiece = escalateStation(workpiece, stationName, escalationReason, {
+          model: "script",
+          tokens: evalTokens,
+          cost_usd: evalCost,
+          started_at: startedAt,
+          finished_at: finishedAt,
+        });
+        workpiece.stations[stationName].eval = { ...evalResult!, tokens: evalTokens, cost_usd: evalCost };
+        workpiece = attachRounds(workpiece);
+        await Bun.write(workpiecePath, JSON.stringify(workpiece, null, 2));
+        renameSync(workpiecePath, outputPath);
+        moveStderrLogAlongside(workpiecePath, outputPath);
+        moveEnvelopeSidecarAlongside(outputPath);
+
+        console.log(
+          JSON.stringify({
+            status: "escalated",
+            station: stationName,
+            summary: escalationReason.slice(0, 200),
+          })
+        );
+        cleanupProgress();
+        appendTaskEvent(linePath, workpiece.id, stationName, {
+          kind: "lifecycle",
+          summary: "Escalated: " + escalationReason.slice(0, 200),
+          detail: { subtype: "escalated", reason: escalationReason.slice(0, 500) },
+        });
+        updateTaskEventIndex(linePath, workpiece.id, stationName, "escalated", startedAt, finishedAt);
+        stopHeartbeat();
+        return;
+      }
+
+      // pass or warn — write the station as done with eval cost/tokens folded in
+      workpiece = writeStation(workpiece, stationName, envelope!, {
         model: "script",
-        tokens: { in: 0, out: 0 },
-        cost_usd: 0,
+        tokens: { in: evalTokens.in, out: evalTokens.out },
+        cost_usd: evalCost,
         started_at: startedAt,
-        finished_at: new Date().toISOString(),
+        finished_at: finishedAt,
       });
+      if (station.eval && evalResult) {
+        workpiece.stations[stationName].eval = { ...evalResult, tokens: evalTokens, cost_usd: evalCost };
+      }
 
       workpiece = attachRounds(workpiece);
       await Bun.write(workpiecePath, JSON.stringify(workpiece, null, 2));
-      const outputPath = resolve(outputDir, basename(workpiecePath));
       renameSync(workpiecePath, outputPath);
       unlinkStderrLog(workpiecePath);
       unlinkEnvelopeSidecar();
@@ -553,18 +668,17 @@ async function main() {
         JSON.stringify({
           status: "done",
           station: stationName,
-          summary: envelope.summary,
-          tokens: { in: 0, out: 0 },
+          summary: envelope!.summary,
+          tokens: { in: evalTokens.in, out: evalTokens.out },
         })
       );
       cleanupProgress();
-      const scriptFinishedAt = new Date().toISOString();
       appendTaskEvent(linePath, workpiece.id, stationName, {
         kind: "lifecycle",
         summary: "Finished",
         detail: { subtype: "finished" },
       });
-      updateTaskEventIndex(linePath, workpiece.id, stationName, "ok", startedAt, scriptFinishedAt);
+      updateTaskEventIndex(linePath, workpiece.id, stationName, "ok", startedAt, finishedAt);
       stopHeartbeat();
       return; // Exit early — don't fall through to LLM path
     } catch (err) {
@@ -573,7 +687,7 @@ async function main() {
 
       workpiece = failStation(workpiece, stationName, error.message, {
         model: "script",
-        tokens: { in: 0, out: 0 },
+        tokens: { in: evalTokens.in, out: evalTokens.out },
         started_at: startedAt,
         finished_at: new Date().toISOString(),
       }, failureClass);

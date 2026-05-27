@@ -28,7 +28,7 @@ export interface TaskEvent {
 
 export interface StationMeta {
   name: string;
-  status: "running" | "ok" | "error" | "aborted" | "timeout";
+  status: "running" | "ok" | "error" | "aborted" | "timeout" | "escalated";
   started_at: string;
   finished_at?: string;
   event_count: number;
