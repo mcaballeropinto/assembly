@@ -1,7 +1,6 @@
 import { test, expect, describe, afterEach } from "bun:test";
 import { readFileSync } from "fs";
 import { killProcessGroup, getProcessGroupSize } from "../orchestrator";
-import { scanAndReap } from "../reaper";
 
 const isLinux = process.platform === "linux";
 
@@ -221,184 +220,13 @@ describe("getProcessGroupSize", () => {
   });
 });
 
-// ─── Orphan reaper ────────────────────────────────────────────────
-
-describe("orphan reaper", () => {
-  test.skipIf(!isLinux)(
-    "reaper kills orphaned claude-named process with PPID=1",
-    async () => {
-      // Spawn a bash that double-forks an orphan named 'claude' via exec -a
-      // The parent bash exits immediately, orphaning the child to PPID=1
-      const proc = Bun.spawn(
-        [
-          "bash",
-          "-c",
-          // Fork a child that renames itself to 'claude' and sleeps
-          // Parent exits immediately → child re-parents to PID 1
-          '(exec -a claude sleep 300) & CHILD=$!; disown $CHILD; echo $CHILD',
-        ],
-        {
-          stdout: "pipe",
-          stderr: "pipe",
-        }
-      );
-
-      const reader = proc.stdout.getReader();
-      const { value } = await reader.read();
-      const orphanPid = parseInt(new TextDecoder().decode(value).trim(), 10);
-      reader.releaseLock();
-      spawnedPids.push(orphanPid);
-
-      // Wait for parent bash to exit so child is re-parented to PID 1
-      await proc.exited;
-      await Bun.sleep(500);
-
-      // Verify it's alive
-      let alive = false;
-      try {
-        process.kill(orphanPid, 0);
-        alive = true;
-      } catch {}
-
-      if (!alive) {
-        // If exec -a didn't work, skip the test
-        console.warn("exec -a claude didn't produce a persistent orphan, skipping");
-        return;
-      }
-
-      // Verify PPID is 1
-      try {
-        const stat = readFileSync(`/proc/${orphanPid}/stat`, "utf-8");
-        const closeParen = stat.lastIndexOf(")");
-        const fields = stat.slice(closeParen + 2).split(" ");
-        const ppid = parseInt(fields[1], 10);
-        if (ppid !== 1) {
-          // Not yet re-parented; give it more time
-          await Bun.sleep(500);
-        }
-      } catch {
-        return; // process already gone
-      }
-
-      // Run the reaper
-      const reaped = scanAndReap({
-        binaryAllowlist: /^(claude|sleep)$/,
-        olderThanMs: 0, // don't wait for age threshold in test
-      });
-
-      // Verify the orphan was reaped
-      const found = reaped.find((r) => r.pid === orphanPid);
-      if (found) {
-        // SIGKILL is async — poll until the OS cleans up the process (up to 2 s)
-        let dead = false;
-        for (let i = 0; i < 20; i++) {
-          await Bun.sleep(100);
-          try {
-            process.kill(orphanPid, 0);
-          } catch {
-            dead = true;
-            break;
-          }
-        }
-        expect(dead).toBe(true);
-      }
-      // Note: if comm didn't match (exec -a is unreliable on some systems),
-      // this is a known limitation and we don't fail the test
-    },
-    15_000
-  );
-
-  test.skipIf(!isLinux)(
-    "reaper does NOT kill process outside allowlist",
-    async () => {
-      // Spawn a bash that double-forks an orphan named 'not-claude-test'
-      const proc = Bun.spawn(
-        [
-          "bash",
-          "-c",
-          '(exec -a not-claude-test sleep 300) & CHILD=$!; disown $CHILD; echo $CHILD',
-        ],
-        {
-          stdout: "pipe",
-          stderr: "pipe",
-        }
-      );
-
-      const reader = proc.stdout.getReader();
-      const { value } = await reader.read();
-      const orphanPid = parseInt(new TextDecoder().decode(value).trim(), 10);
-      reader.releaseLock();
-      spawnedPids.push(orphanPid);
-
-      // Wait for parent to exit
-      await proc.exited;
-      await Bun.sleep(500);
-
-      // Run the reaper with the standard allowlist — should NOT match 'not-claude-test'
-      const reaped = scanAndReap({
-        binaryAllowlist: /^(claude|mcp-.*|.*-mcp-server)$/,
-        olderThanMs: 0,
-      });
-
-      // Verify no match for our PID
-      const found = reaped.find((r) => r.pid === orphanPid);
-      expect(found).toBeUndefined();
-
-      // Verify the process is still alive
-      try {
-        process.kill(orphanPid, 0);
-        // Still alive — correct!
-      } catch {
-        // May have died for other reasons — don't fail
-      }
-    },
-    15_000
-  );
-
-  test.skipIf(!isLinux)(
-    "reaper respects olderThanMs threshold",
-    async () => {
-      // Spawn a process that will be orphaned
-      const proc = Bun.spawn(
-        [
-          "bash",
-          "-c",
-          '(exec -a claude sleep 300) & CHILD=$!; disown $CHILD; echo $CHILD',
-        ],
-        {
-          stdout: "pipe",
-          stderr: "pipe",
-        }
-      );
-
-      const reader = proc.stdout.getReader();
-      const { value } = await reader.read();
-      const orphanPid = parseInt(new TextDecoder().decode(value).trim(), 10);
-      reader.releaseLock();
-      spawnedPids.push(orphanPid);
-
-      await proc.exited;
-      await Bun.sleep(500);
-
-      // Run reaper with high age threshold — should NOT reap (process is < 2 minutes old)
-      const reaped = scanAndReap({
-        binaryAllowlist: /^(claude|sleep)$/,
-        olderThanMs: 120_000, // 2 minutes
-      });
-
-      const found = reaped.find((r) => r.pid === orphanPid);
-      expect(found).toBeUndefined();
-
-      // Process should still be alive
-      try {
-        process.kill(orphanPid, 0);
-      } catch {
-        // May have died for other reasons
-      }
-    },
-    15_000
-  );
-});
+// Orphan-reaper exercise tests were removed: they called the production
+// scanAndReap() against the live host with real-matching allowlists
+// (/^(claude|sleep)$/, /^(claude|mcp-.*|.*-mcp-server)$/) and olderThanMs:0,
+// so running the suite SIGKILLed the live assembly daemon and any matching
+// process on the box. The reaper's protection contract is still covered safely
+// by reaper-adoption-safety.test.ts (sentinel allowlists that can't match a
+// real process) and by adoption.test.ts (own tracked worker pids).
 
 // ─── Backward compatibility ───────────────────────────────────────
 
