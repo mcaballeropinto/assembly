@@ -1228,7 +1228,7 @@ export function computeStationStatuses(
   columns: KanbanColumn[],
   sequence: string[],
   errorColumns: KanbanColumn[],
-  linePath: string,
+  _linePath: string,
 ): Record<string, StationStatus> {
   const statuses: Record<string, StationStatus> = {};
   const now = Date.now();

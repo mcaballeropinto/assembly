@@ -67,13 +67,13 @@ describe("Branded ID types", () => {
       // These are compile-time errors:
 
       // @ts-expect-error - Can't assign LineName to WorkpieceId
-      const id: WorkpieceId = LineName("test");
+      const _id: WorkpieceId = LineName("test");
 
       // @ts-expect-error - Can't assign StationName to LineName
-      const line: LineName = StationName("plan");
+      const _line: LineName = StationName("plan");
 
       // Can't pass plain string where branded type expected
-      function takeWorkpieceId(id: WorkpieceId) {}
+      function takeWorkpieceId(_id: WorkpieceId) {}
       // @ts-expect-error - Plain string not assignable to WorkpieceId
       takeWorkpieceId("plain-string");
 

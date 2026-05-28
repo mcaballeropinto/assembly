@@ -46,6 +46,7 @@ describe("Gate soft-fail logic", () => {
     const longDetails = "x".repeat(5000);
     softGateFail("test-gate", longDetails);
 
+    expect(gateFailed).toBe(true);
     expect(agentEnv.data.gate_failure.details.length).toBe(3000);
   });
 
