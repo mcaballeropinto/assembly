@@ -638,6 +638,47 @@ if ((liveHeadR.stdout ?? "").trim() !== mergeSha) {
   log(`warning: LIVE HEAD ${(liveHeadR.stdout ?? "").trim()} != merge ${mergeSha} after reset (non-fatal)`);
 }
 
+// ─── 4c. Sync line-discovery root ─────────────────────────────────────
+//
+// If the daemon discovers lines from a directory other than LIVE/REPO
+// (check ~/.assembly/config.yaml line_dirs), that directory must be kept in
+// sync with what just shipped — otherwise station scripts run from stale code.
+// ASSEMBLY_LINE_ROOT env var points at this directory (e.g., /root/assembly).
+// We git reset --hard it to origin/${BASE} after LIVE reset, so both views
+// see the new code. If unset, log a warning (backward compatible, but the
+// line-discovery dir may go stale).
+
+const LINE_ROOT = process.env.ASSEMBLY_LINE_ROOT;
+if (LINE_ROOT && LINE_ROOT !== LIVE && LINE_ROOT !== REPO) {
+  log(`sync LINE_ROOT=${LINE_ROOT} to origin/${BASE}`);
+  const lrFetchR = spawnSync("git", ["-C", LINE_ROOT, "fetch", "origin", BASE], { encoding: "utf-8" });
+  if (lrFetchR.status !== 0) {
+    spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+    fatal(
+      `git fetch origin ${BASE} on LINE_ROOT=${LINE_ROOT} failed — line-discovery root is out of sync`,
+      (lrFetchR.stdout ?? "") + "\n" + (lrFetchR.stderr ?? "")
+    );
+  }
+  const lrResetR = spawnSync("git", ["-C", LINE_ROOT, "reset", "--hard", `origin/${BASE}`], { encoding: "utf-8" });
+  if (lrResetR.status !== 0) {
+    spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
+    fatal(
+      `git reset --hard origin/${BASE} on LINE_ROOT=${LINE_ROOT} failed — line-discovery root is out of sync`,
+      (lrResetR.stdout ?? "") + "\n" + (lrResetR.stderr ?? "")
+    );
+  }
+  const lrHeadR = spawnSync("git", ["-C", LINE_ROOT, "rev-parse", "HEAD"], { encoding: "utf-8" });
+  const lrHead = (lrHeadR.stdout ?? "").trim();
+  if (lrHead !== mergeSha) {
+    log(`warning: LINE_ROOT HEAD ${lrHead} != merge ${mergeSha} after reset (non-fatal)`);
+  }
+  log(`LINE_ROOT synced, HEAD=${lrHead.slice(0, 8)}`);
+} else if (LINE_ROOT) {
+  log(`ASSEMBLY_LINE_ROOT=${LINE_ROOT} matches LIVE or REPO — no separate sync needed`);
+} else {
+  log("ASSEMBLY_LINE_ROOT not set — skipping line-root sync (line-discovery dir may be stale)");
+}
+
 // Best-effort: push LIVE's branch (production) to origin so origin/production
 // also tracks the latest deployed commit. Plain push (no --force) — since
 // reset moves production strictly forward (to origin/${BASE} which is itself

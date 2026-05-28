@@ -27,6 +27,8 @@ The deployment target is the git repo at `${ASSEMBLY_REPO_ROOT}/`. The default b
 
 > **Operator-specific:** the orchestrator and dashboard services in the snippets below (`assembly.service`, `assembly-dashboard.service`) are example systemd unit names. Adjust to your environment. The script-based `deploy.ts` reads `ASSEMBLY_DASHBOARD_SERVICE` and skips the restart if unset.
 
+> **Line-root sync:** If the daemon discovers lines from a directory other than `ASSEMBLY_LIVE_ROOT` (check `~/.assembly/config.yaml` `line_dirs`), set `ASSEMBLY_LINE_ROOT` in the systemd unit to that path (e.g., `Environment=ASSEMBLY_LINE_ROOT=/root/assembly`). Deploy will `git reset --hard origin/${BASE}` on that path after the LIVE reset, so station scripts match the deployed code. Without this, deploys update `/srv/assembly` but the daemon keeps running old scripts from the line-discovery directory.
+
 ## Prerequisites
 
 The develop station has already:

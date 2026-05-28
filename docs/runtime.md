@@ -97,6 +97,28 @@ Each discovered line gets a per-line orchestrator. New lines are picked up by th
 
 ---
 
+## Line-root sync (deploy)
+
+When the daemon discovers lines from a path other than `ASSEMBLY_LIVE_ROOT` (the directory `deploy.ts` resets after pushing to `origin/main`), station scripts can go stale. For example:
+
+- LIVE = `/srv/assembly` (reset by deploy)
+- `config.yaml` `line_dirs` includes `/root/assembly/lines`
+- Daemon spawns `develop.ts` from `/root/assembly/lines/assembly-dev/stations/develop/develop.ts`
+- Deploy resets `/srv/assembly` but `/root/assembly` still has the old code
+- Next task runs the **old** `develop.ts` until someone manually pulls `/root/assembly`
+
+Fix: set `ASSEMBLY_LINE_ROOT` in the daemon's systemd unit:
+
+```ini
+Environment=ASSEMBLY_LINE_ROOT=/root/assembly
+```
+
+`deploy.ts` step 4c will `git fetch origin main && git reset --hard origin/main` on that path after the LIVE reset. If unset, this step is skipped (backward compatible) — but a warning is logged.
+
+The reset is safe because `.gitignore` excludes `lines/*/queues/` and `lines/*/stations/*/queue/` — `git reset --hard` only touches tracked files, leaving queue runtime state untouched.
+
+---
+
 ## Per-line orchestrator
 
 For each discovered line, [`startOrchestrator(linePath)`](../src/orchestrator.ts) creates watchers, claims state, and stays running until the daemon stops.
