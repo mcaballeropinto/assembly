@@ -56,6 +56,37 @@ export {
 // ─── API Response Interfaces ───────────────────────────────────────────────
 
 /**
+ * A single activity entry in the activity log. Each entry represents a discrete
+ * event (station_done, error, trigger_fired, etc.). Fields vary by event type.
+ */
+export interface ActivityEntry {
+  ts: string;
+  event: string;
+  station?: string;
+  workpiece?: string;
+  summary?: string;
+  task?: string;
+  error?: string;
+  source?: string;
+  target?: string;
+  reason?: string;
+  child_live?: boolean;
+  silent_s?: number;
+  last_activity_ts?: string;
+  tick?: number;
+  elapsed_s?: number;
+  attempt?: number;
+  delay_s?: number;
+  from?: string;
+  to?: string;
+  line?: string;
+  stations?: string[];
+  effective_env?: Record<string, unknown>;
+  _line?: string; // client-side tag for multi-line merge
+  [key: string]: unknown; // future-proof for new event fields
+}
+
+/**
  * Response from GET /api/state — the global overview of all lines.
  */
 export interface ApiStateLineEntry {
@@ -106,7 +137,7 @@ export interface ApiStateLineEntry {
       }
     >;
     pipelineTotalMs?: number | null;
-    activity: unknown[];
+    activity: ActivityEntry[];
     completed: unknown[];
     errors: unknown[];
     banner_errors?: unknown[];
@@ -265,7 +296,7 @@ export type ApiLineStateResponse =
         }
       >;
       pipelineTotalMs: number | null;
-      activity: unknown[];
+      activity: ActivityEntry[];
       completed: unknown[];
       errors: unknown[];
       banner_errors: unknown[];

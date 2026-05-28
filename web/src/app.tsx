@@ -1,22 +1,25 @@
+import { useEffect, useMemo, useState } from "react"
 import { Outlet, useRouterState, useSearch } from "@tanstack/react-router"
 
+import { ActivityFeed } from "./components/activity/activity-feed"
+import {
+  ActivityFilter,
+  filterActivity,
+  readFiltersFromURL,
+  writeFiltersToURL,
+} from "./components/activity/activity-filter"
 import { ErrorBanner } from "./components/banners/error-banner"
 import { FetchErrorBanner } from "./components/banners/fetch-error-banner"
 import { WorkpieceDrawer } from "./components/drawer/workpiece-drawer"
 import { AppShell } from "./components/shell/app-shell"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "./components/ui/card"
 import {
   mockBannerErrors,
   mockFetchError,
   noopDismiss,
   noopRetry,
 } from "./lib/dashboard-mock-data"
+import type { ActivityEntry } from "./lib/api"
+import { useGlobalState } from "./hooks/use-state-query"
 
 export function App() {
   const pathname = useRouterState({
@@ -34,6 +37,35 @@ export function App() {
         ? search.line
         : undefined
   const hasWorkpieceParam = typeof search.wp === "string" && search.wp.length > 0
+  const { data, isLoading, error } = useGlobalState()
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() =>
+    readFiltersFromURL()
+  )
+
+  useEffect(() => {
+    writeFiltersToURL(selectedKeys)
+  }, [selectedKeys])
+
+  const allActivity = useMemo(() => {
+    if (!data?.lines) return []
+
+    const merged: ActivityEntry[] = []
+    for (const line of data.lines) {
+      if (line.state?.activity) {
+        for (const act of line.state.activity) {
+          merged.push({ ...act, _line: line.name })
+        }
+      }
+    }
+
+    merged.sort((a, b) => (b.ts || "").localeCompare(a.ts || ""))
+    return merged.slice(0, 50)
+  }, [data])
+
+  const filteredActivity = useMemo(
+    () => filterActivity(allActivity, selectedKeys),
+    [allActivity, selectedKeys]
+  )
 
   if (pathname !== "/") {
     return <Outlet />
@@ -46,23 +78,24 @@ export function App() {
         <FetchErrorBanner error={mockFetchError} onRetry={noopRetry} />
       </div>
 
-      <Card className="max-w-2xl">
-        <CardHeader>
-          <CardTitle>Chrome primitive mock wiring</CardTitle>
-          <CardDescription>
-            Header chips, page banners, and drawer content are rendered from dashboard wiring.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">
-            {hasWorkpieceParam
-              ? lineName
-                ? "Drawer parameters detected."
-                : "Cannot open workpiece drawer: missing line context."
-              : "No workpiece selected."}
-          </div>
-        </CardContent>
-      </Card>
+      <section className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold">Overview</h1>
+          <ActivityFilter
+            selectedKeys={selectedKeys}
+            onSelectionChange={setSelectedKeys}
+          />
+        </div>
+        <ActivityFeed entries={filteredActivity} />
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : null}
+        {error ? (
+          <p className="text-sm text-destructive">
+            Failed to fetch: {(error as Error).message}
+          </p>
+        ) : null}
+      </section>
 
       {hasWorkpieceParam && !lineName ? (
         <p

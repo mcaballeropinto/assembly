@@ -1,8 +1,16 @@
 import type {
+  ApiStateResponse,
   ApiTaskEventsResponse,
   ApiTaskEventStationsResponse,
   ApiWorkpieceResponse,
   ApiWorkpieceSidecarsResponse,
+} from "../../../src/dashboard-api"
+
+export type {
+  ActivityEntry,
+  ApiStateLineEntry,
+  ApiStateResponse,
+  ApiStateTotals,
 } from "../../../src/dashboard-api"
 
 export type KanbanLane = "inbox" | "processing" | "output"
@@ -98,49 +106,6 @@ export interface KanbanState {
   stationStatuses?: Record<string, StationStatus>
   stationFreshness?: Record<string, StationFreshness>
   stationMeta?: Record<string, StationTooltipMeta>
-}
-
-export interface ApiStateResponse {
-  lines: Array<{
-    name: string
-    path: string
-    status: "running" | "error"
-    error?: string
-    startedAt: string
-    state: {
-      line: string
-      description?: string
-      lineQueue?: {
-        inbox: number
-        done: number
-        error: number
-        errorActive: number
-        review: number
-      }
-      health?: { state: string; count: number; detail: string }
-      throughput?: { last_1h: number; last_24h: number }
-      sessionTotals?: {
-        cost_usd: number
-        tokens_in: number
-        tokens_out: number
-      }
-      timestamp: string
-    } | null
-  }>
-  totals: {
-    lines: number
-    linesRunning: number
-    linesErrored: number
-    totalInbox: number
-    totalDone: number
-    totalErrors: number
-    totalReview: number
-    totalCostUsd: number
-    totalThroughput1h: number
-    totalThroughput24h: number
-  }
-  timestamp: string
-  version: string
 }
 
 export interface ApiLocalErrorResponse {
@@ -264,6 +229,8 @@ export function fetchApiState(
   const signal = input && "aborted" in input ? input : input?.signal
   return fetchJson<ApiStateResponse>("/api/state", { signal })
 }
+
+export const fetchGlobalState = fetchApiState
 
 export function getLineKanban(lineName: string): Promise<KanbanState> {
   return fetchJson<KanbanState>(`/api/line/${enc(lineName)}/kanban`)

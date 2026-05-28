@@ -268,3 +268,39 @@ Task events: `GET /api/task-events/:line/:wpId` returns `{ stations: StationMeta
 **Mutations:** None.
 
 **Non-obvious:** Progress data also appears in `stationTimings[station].latestProgress` in the main line state (for the kanban view). The `/api/progress` endpoint reads from the most recent `.progress.jsonl` file in the station's processing directory. Progress is polled independently (not part of the main 3s loop). Events are parsed from JSONL format; malformed lines are skipped.
+
+---
+
+## §5.6 — Visual Smoke Test: Overview Activity Feed
+
+**Test procedure:**
+1. Start the Assembly dashboard backend: `assembly dashboard --port 4111`
+2. In a second terminal: `cd web && bun install && bun run dev`
+3. Open the old dashboard at `http://localhost:4111` — screenshot the Activity section.
+4. Open the new React dashboard at `http://localhost:5173` — screenshot the ActivityFeed component.
+5. Compare side-by-side.
+
+**Before (old dashboard):**
+- String-concatenated HTML in `buildOverviewDom` activity loop
+- Plain text rows with CSS classes: `.activity-entry`, `.time`, `.event`, `.detail`
+- No filter controls on overview (filters are detail-view only)
+- No virtualization — all 50 entries rendered as DOM nodes
+
+**After (new React dashboard):**
+- `<ActivityFeed>` component in shadcn Card with p-6 padding
+- ScrollArea h-[480px] with smooth scrollbar
+- Each row: event-type lucide icon (replacing avatar), timestamp (mono), line badge, event name, detail text
+- ActivityFilter Combobox with 8 checkable event types, persisted in URL ?events= param
+- Virtualized via @tanstack/react-virtual when row count > 100
+- Spacing: flex items-start gap-3 py-3 border-b last:border-0 per spec
+
+**Status:** [ ] Pending — run smoke test after implementation
+
+**Screenshots:** (add paths after capture)
+- Before:
+- After:
+
+**Notes:**
+- The overview feed now includes filter controls (the old dashboard only had filters in the detail view)
+- Retry grouping from the old detail view is NOT implemented in the overview feed (matching current behavior — overview shows flat entries)
+- Workpiece click handler is wired but navigates nowhere until the router + drawer are implemented in later phases
