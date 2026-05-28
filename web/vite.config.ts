@@ -1,28 +1,31 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
-import path from 'path'
-import { fileURLToPath } from 'url'
+import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
+import { TanStackRouterVite } from "@tanstack/router-plugin/vite"
+import path from "path"
+import { fileURLToPath } from "url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
-  root: '.',
-  plugins: [TanStackRouterVite({ target: 'react', autoCodeSplitting: true }), react()],
+  root: ".",
+  plugins: [TanStackRouterVite({ target: "react", autoCodeSplitting: true }), react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      "@": path.resolve(__dirname, "./src"),
     },
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:4111',
+      "/api": {
+        target: "http://localhost:4111",
+        changeOrigin: true,
+      },
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: "dist",
     rollupOptions: {
-      input: path.resolve(__dirname, 'index.html'),
+      input: path.resolve(__dirname, "index.html"),
     },
   },
 })

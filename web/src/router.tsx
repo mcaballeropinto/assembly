@@ -8,33 +8,38 @@ import { ConnectionChipDemo } from "./dev/connection-chip-demo"
 import { ErrorBannerDemo } from "./dev/error-banner-demo"
 import { FetchErrorBannerDemo } from "./dev/fetch-error-banner-demo"
 import { UsageChipDemo } from "./dev/usage-chip-demo"
-import { routeTree } from "./routeTree.gen"
+import { Route as rootRoute } from "./routes/__root"
+import { Route as indexRoute } from "./routes/index"
+import { Route as lineRoute } from "./routes/line.$name"
+import { Route as lineKanbanRoute } from "./routes/line.$name.kanban"
 
 const connectionChipRoute = createRoute({
-  getParentRoute: () => routeTree,
+  getParentRoute: () => rootRoute,
   path: "/dev/connection-chip",
   component: ConnectionChipDemo,
 })
 
 const usageChipRoute = createRoute({
-  getParentRoute: () => routeTree,
+  getParentRoute: () => rootRoute,
   path: "/dev/usage-chip",
   component: UsageChipDemo,
 })
 
 const errorBannerRoute = createRoute({
-  getParentRoute: () => routeTree,
+  getParentRoute: () => rootRoute,
   path: "/dev/error-banner",
   component: ErrorBannerDemo,
 })
 
 const fetchErrorBannerRoute = createRoute({
-  getParentRoute: () => routeTree,
+  getParentRoute: () => rootRoute,
   path: "/dev/fetch-error-banner",
   component: FetchErrorBannerDemo,
 })
 
-const dashboardRouteTree = routeTree.addChildren([
+const dashboardRouteTree = rootRoute.addChildren([
+  indexRoute,
+  lineRoute.addChildren([lineKanbanRoute]),
   connectionChipRoute,
   usageChipRoute,
   errorBannerRoute,

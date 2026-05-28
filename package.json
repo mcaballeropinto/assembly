@@ -17,7 +17,9 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "dashboard:web": "cd web && bun run dev",
+    "build:web": "cd web && bun run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
