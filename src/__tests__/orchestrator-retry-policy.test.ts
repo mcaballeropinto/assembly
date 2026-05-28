@@ -190,7 +190,7 @@ function buildFailedWorkpiece(
   );
   // Strip failure_class when simulating legacy workpieces.
   if (failureClass === undefined) {
-    delete (withFailure.stations[stationName] as { failure_class?: FailureClass })
+    delete (withFailure.stations[StationName(stationName)] as { failure_class?: FailureClass })
       .failure_class;
   }
   return withFailure;

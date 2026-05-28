@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from "fs";
 import { loadLine, validateLine } from "../line";
+import { LineName } from "../ids";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-timeout-${Date.now()}`);
 
@@ -243,7 +244,7 @@ describe("backward compatibility", () => {
     );
     const { config } = await loadLine(lineDir);
     expect(config.timeout).toBeUndefined();
-    expect(config.name).toBe("test-line");
+    expect(config.name).toBe(LineName("test-line"));
   });
 
   test("repo-health-digest line validates successfully (no timeout)", async () => {

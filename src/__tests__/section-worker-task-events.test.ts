@@ -17,6 +17,7 @@ import {
 } from "fs";
 import { readTaskEvents, listTaskEventStations } from "../task-events";
 import { startHeartbeat } from "../section-worker";
+import { WorkpieceId, StationName } from "../ids";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-sw-te-${Date.now()}`);
 const WORKER_PATH = resolve(import.meta.dir, "../section-worker.ts");
@@ -106,7 +107,7 @@ describe("section-worker task-events integration (script provider)", () => {
     expect(existsSync(teDir)).toBe(true);
 
     // events file must have lifecycle started + finished
-    const page = readTaskEvents(lineDir, wpId, "s1");
+    const page = readTaskEvents(lineDir, WorkpieceId(wpId), StationName("s1"));
     expect(page.events.length).toBeGreaterThanOrEqual(2);
 
     const kinds = page.events.map((e) => `${e.kind}:${e.detail && typeof e.detail === "object" && "subtype" in e.detail ? (e.detail as any).subtype : ""}`);
@@ -123,7 +124,7 @@ describe("section-worker task-events integration (script provider)", () => {
     expect((last.detail as any)?.subtype).toBe("finished");
 
     // index.json must exist with status ok
-    const stations = listTaskEventStations(lineDir, wpId);
+    const stations = listTaskEventStations(lineDir, WorkpieceId(wpId));
     expect(stations.length).toBe(1);
     expect(stations[0].name).toBe("s1");
     expect(stations[0].status).toBe("ok");
@@ -141,7 +142,7 @@ describe("section-worker task-events integration (script provider)", () => {
     const { code } = await runWorker(stationDir, wpPath);
     expect(code).toBe(1);
 
-    const page = readTaskEvents(lineDir, wpId, "s1");
+    const page = readTaskEvents(lineDir, WorkpieceId(wpId), StationName("s1"));
     expect(page.events.length).toBeGreaterThanOrEqual(2);
 
     const first = page.events[0];
@@ -152,7 +153,7 @@ describe("section-worker task-events integration (script provider)", () => {
     expect(last.kind).toBe("lifecycle");
     expect((last.detail as any)?.subtype).toBe("failed");
 
-    const stations = listTaskEventStations(lineDir, wpId);
+    const stations = listTaskEventStations(lineDir, WorkpieceId(wpId));
     expect(stations[0].status).toBe("error");
   }, 15000);
 
@@ -165,13 +166,13 @@ describe("section-worker task-events integration (script provider)", () => {
 
     const stop = startHeartbeat(
       lineDir,
-      "s1",
+      StationName("s1"),
       "wp-hb.json",
       Date.now(),
       ref,
       { interval_ms: 100 },
       (tick, elapsedS, silentS) => {
-        appendTaskEvent(LINE_PATH, WorkpieceId("wp-hb"), "s1", {
+        appendTaskEvent(lineDir, WorkpieceId("wp-hb"), StationName("s1"), {
           kind: "heartbeat",
           summary: `tick ${tick} · elapsed ${elapsedS}s · silent ${silentS}s`,
         });
@@ -181,7 +182,7 @@ describe("section-worker task-events integration (script provider)", () => {
     await new Promise((r) => setTimeout(r, 350));
     stop();
 
-    const page = readTaskEvents(lineDir, WorkpieceId("wp-hb"), "s1");
+    const page = readTaskEvents(lineDir, WorkpieceId("wp-hb"), StationName("s1"));
     expect(page.events.length).toBeGreaterThanOrEqual(2);
     expect(page.events[0].kind).toBe("heartbeat");
     expect(page.events[0].summary).toMatch(/tick \d+/);

@@ -6,6 +6,7 @@ import { calculateCost } from "../pricing";
 import { parseEnvelope } from "../envelope";
 import { loadStation } from "../station";
 import { validateLine } from "../line";
+import { StationName } from "../ids";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-script-${Date.now()}`);
 
@@ -170,7 +171,7 @@ reads: [score.data]
 `
     );
 
-    const station = await loadStation(stationDir, "test-station");
+    const station = await loadStation(stationDir, StationName("test-station"));
 
     expect(station.provider).toBe("script");
     expect(station.script).toBe("push.ts");
@@ -194,7 +195,7 @@ Do something.
 `
     );
 
-    const station = await loadStation(stationDir, "test-station-no-script");
+    const station = await loadStation(stationDir, StationName("test-station-no-script"));
 
     expect(station.provider).toBe("api");
     expect(station.script).toBeUndefined();

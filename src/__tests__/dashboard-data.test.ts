@@ -13,7 +13,6 @@ import {
   flowFilePath,
   type FlowSnapshot,
 } from "../flow-snapshot";
-import { StationName } from "../ids";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-dashboard-data-${Date.now()}`);
 const LINE_DIR = resolve(TEMP_DIR, "test-line");

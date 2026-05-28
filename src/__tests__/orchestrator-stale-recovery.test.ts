@@ -31,7 +31,7 @@ function createTestSection(name: string, subDir: string): SectionInfo {
   const dir = resolve(base, "stations", name);
   mkdirSync(dir, { recursive: true });
   const queue = initSectionQueue(dir);
-  return { name, dir, queue };
+  return { name: StationName(name), dir, queue };
 }
 
 function createLog() {
