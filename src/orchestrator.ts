@@ -15,11 +15,11 @@ import {
   filterReadyByDeps,
   type QueuePaths,
 } from "./queue";
-import type { Workpiece, LineConfig, FailureClass, RetryPolicy, RetryPolicyMap } from "./types";
+import type { Workpiece, LineConfig, FailureClass, RetryPolicy, RetryPolicyMap, Provider } from "./types";
 import { autoArchiveOld } from "./error-dismiss";
 import { writeRetryState, clearRetryState, cleanupOrphanedRetryStates } from "./retry-state";
 import { startFlowSnapshotWriter } from "./flow-snapshot";
-import { evaluateAndSnapshot } from "./usage";
+import { evaluateAndSnapshotForProviders } from "./usage";
 import { computeRoundsFromProgress } from "./tool-rounds";
 import { recordEmit, isEmitted, quarantineUnverified, bootstrapManifest } from "./emit-manifest";
 import type { HandoffWorker, HandoffLineSnapshot, HandoffState } from "./handoff";
@@ -210,6 +210,7 @@ export function decideRetry(
 export interface SectionInfo {
   name: StationName;
   dir: string;
+  provider?: Provider;
   queue: QueuePaths;
   timeout?: number; // seconds of idle (no output) before SIGTERM — undefined = no timeout
   max_wall_clock?: number; // seconds — hard ceiling regardless of activity; undefined = no cap
@@ -242,7 +243,7 @@ export async function startOrchestrator(
 ): Promise<OrchestratorHandle> {
   loadEnvFiles();
 
-  const { config, linePath } = await loadLine(options.linePath);
+  const { config, stations, linePath } = await loadLine(options.linePath);
   // line.yaml retry_policy wins over the programmatic option; both merge on top of the defaults.
   const retryPolicy = mergeRetryPolicy({
     ...(options.retryPolicy ?? {}),
@@ -293,7 +294,8 @@ export async function startOrchestrator(
     const timeout = stationTimeouts.get(name) ?? (config.timeout && config.timeout > 0 ? config.timeout : undefined);
     const max_wall_clock = stationMaxWallClocks.get(name) ?? (config.max_wall_clock && config.max_wall_clock > 0 ? config.max_wall_clock : undefined);
     const flush_grace = stationFlushGraces.get(name) ?? config.flush_grace ?? 30;
-    return { name, dir, queue, timeout, max_wall_clock, flush_grace };
+    const provider = stations.get(name)?.provider ?? "claude-code";
+    return { name, dir, provider, queue, timeout, max_wall_clock, flush_grace };
   });
 
   // (Orphan station detection moved below — runs after log() is defined.)
@@ -1604,7 +1606,7 @@ export async function startOrchestrator(
   function startUsageResumePoll() {
     if (usageResumeTimer) return;
     usageResumeTimer = setInterval(() => {
-      evaluateAndSnapshot().then((decision) => {
+      evaluateAndSnapshotForProviders(["claude-code"]).then((decision) => {
         if (!decision.blocked) {
           stopUsageResumePoll();
           if (usagePaused) {
@@ -1672,7 +1674,7 @@ export async function startOrchestrator(
     // waiting — the resume poll owns the transition back to healthy.
     if (usagePaused) return;
 
-    evaluateAndSnapshot().then((decision) => {
+    evaluateAndSnapshotForProviders([section.provider ?? "claude-code"]).then((decision) => {
       if (decision.blocked) {
         if (!usagePaused) {
           usagePaused = true;

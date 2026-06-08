@@ -3,6 +3,7 @@ import {
   fetchClaudeCodeUsage,
   checkProviderUsage,
   evaluateAndSnapshot,
+  evaluateAndSnapshotForProviders,
   getEffectiveThreshold,
   __resetUsageGateStateForTest,
 } from "../usage";
@@ -157,6 +158,12 @@ describe("checkProviderUsage (claude-code)", () => {
     const status = await checkProviderUsage("script");
     expect(status.canProcess).toBe(true);
   });
+
+  test("claude-code-cached shares the claude-code usage gate", async () => {
+    stubFetch({ five_hour: { utilization: 10, resets_at: null } });
+    const status = await checkProviderUsage("claude-code-cached");
+    expect(status.canProcess).toBe(true);
+  });
 });
 
 describe("evaluateAndSnapshot", () => {
@@ -202,5 +209,15 @@ describe("evaluateAndSnapshot", () => {
     // Immediate second call — must not re-fetch or re-write.
     await evaluateAndSnapshot();
     expect(fetchCallCount).toBe(firstFetchCount);
+  });
+
+  test("skips Claude usage fetch for codex/script-only providers", async () => {
+    stubFetch({ five_hour: { utilization: 99, resets_at: null } });
+    const decision = await evaluateAndSnapshotForProviders(["codex", "script"]);
+    expect(decision.blocked).toBe(false);
+    expect(fetchCallCount).toBe(0);
+    const snap = readUsageSnapshot();
+    expect(snap?.paused).toBe(false);
+    expect(Object.keys(snap?.providers ?? {})).toEqual([]);
   });
 });

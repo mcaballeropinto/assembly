@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { unlinkSync, writeFileSync, mkdtempSync } from "fs";
+import { existsSync, unlinkSync, writeFileSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join as joinPath } from "path";
 import type { LLMMessage, LLMResult, Provider, ModelTier, ProgressCallback, OnEventCallback } from "./types";
@@ -468,17 +468,44 @@ export function resolveCodexBin(): string {
   return process.env.ASSEMBLY_CODEX_BIN || "codex";
 }
 
+function resolveCodexHomeFallback(sourceEnv: Record<string, string | undefined>): string | undefined {
+  if (sourceEnv.ASSEMBLY_CODEX_CODEX_HOME) return undefined;
+
+  const inheritedHome = sourceEnv.CODEX_HOME;
+  if (inheritedHome && existsSync(joinPath(inheritedHome, "auth.json"))) {
+    return undefined;
+  }
+
+  const userHome = sourceEnv.HOME;
+  if (!userHome) return undefined;
+
+  const defaultCodexHome = joinPath(userHome, ".codex");
+  if (defaultCodexHome === inheritedHome) return undefined;
+
+  return existsSync(joinPath(defaultCodexHome, "auth.json"))
+    ? defaultCodexHome
+    : undefined;
+}
+
 /**
  * Build the env for a spawned `codex` subprocess. Mirrors mergeClaudeEnv:
  * ASSEMBLY_CODEX_*-prefixed process vars are forwarded (with the prefix
- * stripped) so operators can tune codex without touching code.
+ * stripped) so operators can tune codex without touching code. If Assembly is
+ * launched from an agent with its own unauthenticated CODEX_HOME, fall back to
+ * the host login at ~/.codex when present.
  */
 export function mergeCodexEnv(
   lineEnv?: Record<string, string>,
-  stationEnv?: Record<string, string>
+  stationEnv?: Record<string, string>,
+  sourceEnv: Record<string, string | undefined> = process.env
 ): Record<string, string> {
   const processOverrides: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
+  const codexHomeFallback = resolveCodexHomeFallback(sourceEnv);
+  if (codexHomeFallback) {
+    processOverrides.CODEX_HOME = codexHomeFallback;
+  }
+
+  for (const [k, v] of Object.entries(sourceEnv)) {
     if (k.startsWith("ASSEMBLY_CODEX_") && v !== undefined) {
       // ASSEMBLY_CODEX_BIN selects the executable (handled by resolveCodexBin);
       // it is not a codex env var, so don't forward it into the subprocess.
