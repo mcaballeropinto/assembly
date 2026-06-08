@@ -2,11 +2,52 @@ import Anthropic from "@anthropic-ai/sdk";
 import { unlinkSync, writeFileSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join as joinPath } from "path";
-import type { LLMMessage, LLMResult, Provider, ProgressCallback, OnEventCallback } from "./types";
+import type { LLMMessage, LLMResult, Provider, ModelTier, ProgressCallback, OnEventCallback } from "./types";
 import { openSessionLog, appendSessionLogRaw, closeSessionLog } from "./session-log";
+import { calculateCostWithCache } from "./pricing";
 
 export const DEFAULT_REPAIR_MODEL = "claude-haiku-4-5-20251001";
 export const REPAIR_MAX_TOKENS = 64000;
+
+// ─── Model Tiers ────────────────────────────────────────────────────
+//
+// Stations declare an abstract tier ("cheap" | "reasoning") in `model:`
+// instead of a provider-specific model id. Each provider maps the tier to
+// its own concrete model here, so a station config is portable across
+// providers. Concrete model ids (legacy `sonnet`/`opus`/`haiku`, full
+// Anthropic ids, or codex ids like `gpt-5.5`) are passed through untouched —
+// the abstraction is opt-in and fully backward compatible.
+//
+// Codex on a ChatGPT-subscription account currently only exposes a single
+// model (gpt-5-codex is rejected), so both tiers point at it for now; bump
+// the `reasoning` entry when a stronger codex model becomes available.
+const MODEL_TIERS: Record<string, Record<ModelTier, string>> = {
+  "claude-code": { cheap: "sonnet", reasoning: "opus" },
+  "claude-code-cached": { cheap: "sonnet", reasoning: "opus" },
+  codex: { cheap: "gpt-5.5", reasoning: "gpt-5.5" },
+};
+
+export const DEFAULT_CODEX_MODEL = "gpt-5.5";
+
+function isModelTier(model: string): model is ModelTier {
+  return model === "cheap" || model === "reasoning";
+}
+
+/**
+ * Resolve a station's `model:` value to the concrete model a given provider
+ * should run. Abstract tiers map through MODEL_TIERS; anything else is treated
+ * as a concrete id and returned as-is.
+ */
+export function resolveModelForProvider(provider: Provider, model: string): string {
+  if (isModelTier(model)) {
+    const table = MODEL_TIERS[provider];
+    if (table) return table[model];
+    // Provider without a tier table (api/pi/script) — fall back to the
+    // claude-code mapping so the tier still resolves to *something* concrete.
+    return MODEL_TIERS["claude-code"][model];
+  }
+  return model;
+}
 
 /**
  * Defensive env vars passed to every spawned `claude` subprocess.
@@ -82,18 +123,23 @@ export async function callLLM(
   onEvent?: OnEventCallback,
   scratchCwd?: string
 ): Promise<LLMResult> {
-  if (provider !== "claude-code" && provider !== "claude-code-cached") {
+  if (provider !== "claude-code" && provider !== "claude-code-cached" && provider !== "codex") {
     throw new Error(
-      `Unsupported provider: ${provider}. Only 'claude-code' and 'claude-code-cached' are supported for LLM calls (use 'script' for non-LLM stations).`
+      `Unsupported provider: ${provider}. Only 'claude-code', 'claude-code-cached', and 'codex' are supported for LLM calls (use 'script' for non-LLM stations).`
     );
   }
 
   const cacheOptimized = provider === "claude-code-cached";
-  const modelsToTry = [model, ...fallbackModels];
+  // Resolve abstract tiers ("cheap"/"reasoning") to each provider's concrete
+  // model. Concrete ids pass through unchanged.
+  const modelsToTry = [model, ...fallbackModels].map((m) => resolveModelForProvider(provider, m));
   let lastError: Error | null = null;
 
   for (const currentModel of modelsToTry) {
     try {
+      if (provider === "codex") {
+        return await callCodex(messages, currentModel, maxTokens, onProgress, logger, sessionLogPath, allowedTools, envelopePath, onEvent, scratchCwd);
+      }
       return await callClaudeCode(messages, currentModel, maxTokens, onProgress, claudeEnv, cacheOptimized, logger, sessionLogPath, allowedTools, envelopePath, onEvent, scratchCwd);
     } catch (err) {
       lastError = err as Error;
@@ -105,7 +151,7 @@ export async function callLLM(
       }
 
       console.error(
-        `  ⚠ [claude-code] Model ${currentModel} failed: ${lastError.message}. ${fallbackModels.length > 0 ? "Trying fallback..." : ""}`
+        `  ⚠ [${provider}] Model ${currentModel} failed: ${lastError.message}. ${fallbackModels.length > 0 ? "Trying fallback..." : ""}`
       );
     }
   }
@@ -315,6 +361,136 @@ export function resolveDisallowedTools(
   return [...disallow];
 }
 
+/**
+ * The universal envelope contract appended to every station's prompt. The
+ * envelope file on disk — not the model's text reply — is the station's output;
+ * the watcher in callClaudeCode/callCodex polls for it.
+ *
+ * `shellOnly` tailors the two-step write protocol for providers without named
+ * Write/Bash tools (codex), where everything happens through the shell.
+ */
+export function buildEnvelopeInstruction(outputFile: string, shellOnly = false): string {
+  const protocol = shellOnly
+    ? `### The write protocol (do these in order, via your shell)
+
+1. Write the JSON envelope to ${outputFile}.tmp
+2. Run: mv "${outputFile}.tmp" "${outputFile}"
+
+The mv must be the LAST action you take.`
+    : `### The write protocol (two tool calls, in this order)
+
+1. Write tool → ${outputFile}.tmp   (contents: the JSON envelope)
+2. Bash tool  → mv "${outputFile}.tmp" "${outputFile}"
+
+The mv must be the LAST tool call you make. If you have not run the mv, the station has not finished, regardless of what your text reply says.`;
+
+  return `
+
+## Envelope Contract — READ THIS FIRST
+
+Your task ends ONLY when you have written a JSON envelope file at the EXACT path below. The envelope file is the entire output of this station; nothing in your text reply is read by the framework.
+
+### The path (use this EXACT absolute path)
+
+  ${outputFile}
+
+${protocol}
+
+DO NOT cat the envelope to stdout. DO NOT print the envelope JSON in your text reply. DO NOT read framework source files to "figure out" the shape — the shape is below.
+
+### The envelope shape (the universal wrapper)
+
+{
+  "summary": "<REQUIRED one-line string>",
+  "content": "<optional markdown/text>",
+  "data": { /* optional structured fields, schema per this station's AGENT.md */ }
+}
+
+The fields inside "data" are described by the station's own output schema (in its AGENT.md). The wrapper above is the same for every station.
+
+### If you cannot produce real data
+
+Write an envelope anyway. Use "summary" to explain why and set the required data array (e.g. data.jobs) to []. Empty is acceptable; a missing envelope file is not — the harness will then synthesize one for you, usually badly.
+
+## Writable paths
+
+- ${outputFile} — the envelope path above (absolute; works from any cwd)
+- /tmp/* — ad-hoc scratch (firecrawl payloads, intermediate JSON, log captures)
+- Your cwd — pinned to a disposable /tmp/assembly-scratch-* by the harness; safe to write to but discarded after the task
+
+Never write under the line/station tree (anywhere under lines/) outside the envelope path above. No FANOUT-*-RESULT.json, *-SUMMARY.md, or other deliverable sidefiles in line/station dirs. Everything goes in the envelope's "content" / "data" fields.`;
+}
+
+// ─── Codex Provider helpers ──────────────────────────────────────────
+
+/**
+ * Codex has no per-tool allow/deny gating like claude-code's --allowedTools;
+ * its capabilities are governed entirely by the OS-level sandbox mode. Map the
+ * station's declared `tools:` to the narrowest codex sandbox that still covers
+ * them:
+ *   - any of Write/Edit/Bash declared → workspace-write (shell + file edits)
+ *   - otherwise                        → read-only
+ *   - WebFetch/WebSearch declared      → request network access
+ *
+ * NOTE: when the envelope watcher is active the agent MUST be able to write the
+ * envelope file, so the caller forces workspace-write regardless — bounded to
+ * the scratch cwd + the envelope dir via --add-dir (see callCodex). This is the
+ * codex analogue of claude-code auto-injecting the scoped Write/Bash protocol
+ * tools.
+ */
+export function resolveCodexSandbox(stationTools?: string[]): {
+  sandbox: "read-only" | "workspace-write";
+  network: boolean;
+} {
+  const tools = Array.isArray(stationTools) ? stationTools : DEFAULT_ALLOWED_TOOLS;
+  const bare = tools.map(bareToolName);
+  const writes = bare.some((t) => t === "Write" || t === "Edit" || t === "Bash");
+  const network = bare.some((t) => t === "WebFetch" || t === "WebSearch");
+  return { sandbox: writes ? "workspace-write" : "read-only", network };
+}
+
+/**
+ * Build the env for a spawned `codex` subprocess. Mirrors mergeClaudeEnv:
+ * ASSEMBLY_CODEX_*-prefixed process vars are forwarded (with the prefix
+ * stripped) so operators can tune codex without touching code.
+ */
+export function mergeCodexEnv(
+  lineEnv?: Record<string, string>,
+  stationEnv?: Record<string, string>
+): Record<string, string> {
+  const processOverrides: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith("ASSEMBLY_CODEX_") && v !== undefined) {
+      processOverrides[k.replace("ASSEMBLY_CODEX_", "")] = v;
+    }
+  }
+  return {
+    ...processOverrides,
+    ...(lineEnv ?? {}),
+    ...(stationEnv ?? {}),
+  };
+}
+
+/** One-line progress summary for a codex JSONL `item` event. */
+export function summarizeCodexItem(item: any): string {
+  switch (item?.type) {
+    case "command_execution":
+      return `Running: ${(item.command ?? "").slice(0, 60)}`;
+    case "file_change":
+      return `Editing ${item.path ?? "file"}`;
+    case "mcp_tool_call":
+      return `Tool: ${item.server ?? ""}/${item.tool ?? ""}`;
+    case "web_search":
+      return `Searching: ${(item.query ?? "").slice(0, 50)}`;
+    case "reasoning":
+      return "Reasoning";
+    case "agent_message":
+      return "Message";
+    default:
+      return item?.type ?? "item";
+  }
+}
+
 async function callClaudeCode(
   messages: LLMMessage[],
   model: string,
@@ -357,46 +533,7 @@ async function callClaudeCode(
   // so the watcher never observes a partially-written file. For the legacy
   // /tmp path this is also cheap robustness; for the invocation-scoped path
   // it's what makes the watcher race safe against the Write tool's write.
-  const fileInstruction = `
-
-## Envelope Contract — READ THIS FIRST
-
-Your task ends ONLY when you have written a JSON envelope file at the EXACT path below. The envelope file is the entire output of this station; nothing in your text reply is read by the framework.
-
-### The path (use this EXACT absolute path)
-
-  ${outputFile}
-
-### The write protocol (two tool calls, in this order)
-
-1. Write tool → ${outputFile}.tmp   (contents: the JSON envelope)
-2. Bash tool  → mv "${outputFile}.tmp" "${outputFile}"
-
-The mv must be the LAST tool call you make. If you have not run the mv, the station has not finished, regardless of what your text reply says.
-
-DO NOT cat the envelope to stdout. DO NOT print the envelope JSON in your text reply. DO NOT read framework source files to "figure out" the shape — the shape is below.
-
-### The envelope shape (the universal wrapper)
-
-{
-  "summary": "<REQUIRED one-line string>",
-  "content": "<optional markdown/text>",
-  "data": { /* optional structured fields, schema per this station's AGENT.md */ }
-}
-
-The fields inside "data" are described by the station's own output schema (in its AGENT.md). The wrapper above is the same for every station.
-
-### If you cannot produce real data
-
-Write an envelope anyway. Use "summary" to explain why and set the required data array (e.g. data.jobs) to []. Empty is acceptable; a missing envelope file is not — the harness will then synthesize one for you, usually badly.
-
-## Writable paths
-
-- ${outputFile} — the envelope path above (absolute; works from any cwd)
-- /tmp/* — ad-hoc scratch (firecrawl payloads, intermediate JSON, log captures)
-- Your cwd — pinned to a disposable /tmp/assembly-scratch-* by the harness; safe to write to but discarded after the task
-
-Never write under the line/station tree (anywhere under lines/) outside the envelope path above. No FANOUT-*-RESULT.json, *-SUMMARY.md, or other deliverable sidefiles in line/station dirs. Everything goes in the envelope's "content" / "data" fields.`;
+  const fileInstruction = buildEnvelopeInstruction(outputFile);
 
   // When cache-optimized, keep the system prompt stable (no per-call unique path)
   // and move the file instruction to the user message instead.
@@ -985,6 +1122,382 @@ Never write under the line/station tree (anywhere under lines/) outside the enve
     fallbackContent: fallback ? fallback : undefined,
     tokens: { in: totalInputTokens, out: totalOutputTokens, cache_read: totalCacheRead, cache_creation: totalCacheCreation },
     model: `claude-code:${model}`,
+    cost_usd: costUsd,
+    getLastActivityMs: () => lastActivityMs,
+  };
+}
+
+// ─── Codex Provider (CLI, streaming) ────────────────────────────────
+
+/**
+ * Run a station via the `codex exec` CLI. Structurally a sibling of
+ * callClaudeCode: same invocation-scoped envelope-file contract, same watcher
+ * race against the stream, same stall watchdog, same salvage of streamed text.
+ *
+ * Key differences from claude-code:
+ *   - Prompt: codex exec has no --append-system-prompt-file, so the system
+ *     prompt + envelope contract + user message are concatenated into a single
+ *     stdin prompt.
+ *   - Tools: codex has no per-tool allow/deny list — capability is the OS-level
+ *     sandbox (read-only / workspace-write) plus an optional network flag,
+ *     derived from the station's `tools:` via resolveCodexSandbox.
+ *   - Auth: OPENAI_API_KEY is stripped so codex uses the logged-in ChatGPT
+ *     subscription (mirrors claude-code stripping ANTHROPIC_API_KEY).
+ *   - Cost: codex JSONL carries token usage but no cost, so we price it
+ *     locally via calculateCostWithCache.
+ */
+async function callCodex(
+  messages: LLMMessage[],
+  model: string,
+  maxTokens: number,
+  onProgress?: ProgressCallback,
+  logger?: (event: string, detail: Record<string, unknown>) => void,
+  sessionLogPath?: string,
+  allowedTools?: string[],
+  envelopePath?: string,
+  onEvent?: OnEventCallback,
+  scratchCwd?: string
+): Promise<LLMResult> {
+  const systemMsg = messages.find((m) => m.role === "system")?.content ?? "";
+  const userMsg = messages.find((m) => m.role === "user")?.content ?? "";
+
+  const outputFile = envelopePath
+    ? envelopePath
+    : `/tmp/assembly-envelope-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+  const usingWatcher = Boolean(envelopePath);
+
+  // Clean slate — a stale file from a prior attempt would race-win the watcher.
+  if (usingWatcher) {
+    try { unlinkSync(outputFile); } catch {}
+  }
+
+  const fileInstruction = buildEnvelopeInstruction(outputFile, /* shellOnly */ true);
+  // Single combined prompt: codex exec reads it from stdin.
+  //
+  // CACHING: codex (OpenAI) caches the prompt prefix automatically server-side
+  // — no explicit cache_control breakpoints like Anthropic, so there's no
+  // separate "codex-cached" provider. Order matters: the stable per-station
+  // systemMsg (AGENT.md) goes FIRST so it — together with codex's own large
+  // built-in instructions it prepends — forms the cacheable prefix. The unique
+  // per-invocation envelope path (in fileInstruction) follows it, and the
+  // per-task userMsg goes last. Cache hits are captured below from
+  // turn.completed.usage.cached_input_tokens and discounted in pricing.
+  const effectivePrompt = `${systemMsg}${fileInstruction}\n\n---\n\n${userMsg}`;
+
+  // Capture codex's final agent message to a file as a secondary salvage
+  // source (alongside the streamed agent_message text).
+  const lastMsgFile = `/tmp/assembly-codex-last-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`;
+
+  // Sandbox + network derived from declared tools. When the watcher is active
+  // the agent must write the envelope, so force workspace-write regardless.
+  const { sandbox: toolSandbox, network } = resolveCodexSandbox(allowedTools);
+  const sandbox = usingWatcher ? "workspace-write" : toolSandbox;
+
+  const args: string[] = [
+    "exec",
+    "--json",
+    "--skip-git-repo-check",
+    "--ephemeral",
+    "--color", "never",
+    "-m", model,
+    "-s", sandbox,
+    "-o", lastMsgFile,
+  ];
+  if (scratchCwd) args.push("-C", scratchCwd);
+  // Whitelist the envelope's directory so the workspace-write sandbox (which by
+  // default only allows writes under the cwd) lets the agent create the
+  // envelope file, which lives outside cwd under ~/.assembly/runs/.
+  if (usingWatcher && envelopePath) {
+    const envelopeDir = envelopePath.slice(0, envelopePath.lastIndexOf("/"));
+    if (envelopeDir) args.push("--add-dir", envelopeDir);
+  }
+  // workspace-write disables network by default; re-enable when the station
+  // declared web tools.
+  if (sandbox === "workspace-write" && network) {
+    args.push("-c", "sandbox_workspace_write.network_access=true");
+  }
+
+  // Prompt-size telemetry (mirrors callClaudeCode).
+  const promptBytes = Buffer.byteLength(effectivePrompt, "utf8");
+  const warnThreshold = getPromptWarnThreshold();
+  if (logger && promptBytes > warnThreshold) {
+    logger("prompt_size_warn", { model, total_bytes: promptBytes, threshold: warnThreshold });
+  }
+
+  // Use the ChatGPT subscription, not metered API billing. Mirrors
+  // callClaudeCode stripping ANTHROPIC_API_KEY.
+  const env = { ...process.env, ...mergeCodexEnv() };
+  delete env.OPENAI_API_KEY;
+  delete env.ASSEMBLY_OPENAI_API_KEY;
+
+  let lastActivityMs = Date.now();
+  let turns = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheRead = 0;
+  let costUsd = 0;
+  let textFallback = "";
+  let streamSawResult = false;
+  let streamResultError: Error | null = null;
+
+  const sessionStartedAt = Date.now();
+  if (sessionLogPath) {
+    openSessionLog(sessionLogPath, { model: `codex:${model}`, prompt_bytes: promptBytes, args });
+  }
+
+  const proc = Bun.spawn(["codex", ...args], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env,
+    cwd: scratchCwd,
+  });
+
+  // ── Stdout-idle watchdog (same rationale as callClaudeCode) ──────────
+  const STREAM_STALL_MS = parseInt(process.env.ASSEMBLY_CLAUDE_STREAM_STALL_MS ?? "420000", 10);
+  let stallKilled = false;
+  const stallWatchdog = setInterval(() => {
+    if (Date.now() - lastActivityMs >= STREAM_STALL_MS) {
+      stallKilled = true;
+      try { logger?.("codex_stream_stall_kill", { silent_ms: Date.now() - lastActivityMs, threshold_ms: STREAM_STALL_MS }); } catch {}
+      try { proc.kill("SIGKILL"); } catch {}
+      clearInterval(stallWatchdog);
+    }
+  }, 15_000);
+  if ((stallWatchdog as unknown as { unref?: () => void }).unref) {
+    (stallWatchdog as unknown as { unref: () => void }).unref();
+  }
+  proc.exited.finally(() => clearInterval(stallWatchdog));
+
+  // Send the prompt via stdin.
+  const writer = proc.stdin as unknown as { write: (data: string) => void; end: () => Promise<void> | void };
+  writer.write(effectivePrompt);
+  await writer.end();
+
+  const reader = proc.stdout.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const streamPromise: Promise<void> = (async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        lastActivityMs = Date.now();
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIdx: number;
+        while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, newlineIdx).trim();
+          buffer = buffer.slice(newlineIdx + 1);
+          if (!line) continue;
+          if (sessionLogPath) appendSessionLogRaw(sessionLogPath, line);
+
+          let event: any;
+          try { event = JSON.parse(line); } catch { continue; }
+
+          // Terminal-message + tool-use items.
+          if (event.type === "item.started" || event.type === "item.completed") {
+            const item = event.item ?? {};
+            if (item.type === "agent_message" && typeof item.text === "string" && item.text.length > 0) {
+              if (event.type === "item.completed") {
+                turns++;
+                textFallback += (textFallback ? "\n\n" : "") + item.text;
+                if (textFallback.length > CLAUDE_STREAM_TEXT_CAP) {
+                  textFallback = textFallback.slice(textFallback.length - CLAUDE_STREAM_TEXT_CAP);
+                }
+                if (onEvent) {
+                  try {
+                    const summary = item.text.length > 200 ? item.text.slice(0, 199) + "…" : item.text;
+                    onEvent({ kind: "message", summary, detail: item.text.slice(0, 4096) });
+                  } catch {}
+                }
+              }
+            } else if (item.type && item.type !== "agent_message") {
+              const detail = summarizeCodexItem(item);
+              if (onProgress) {
+                onProgress({
+                  detail,
+                  tool: item.type,
+                  tool_input: (item.command ?? item.path ?? item.query ?? "").toString().slice(0, 80),
+                  tokens: { in: totalInputTokens, out: totalOutputTokens },
+                  cost_usd: costUsd,
+                  turns,
+                });
+              }
+              if (onEvent && event.type === "item.started") {
+                try {
+                  onEvent({
+                    kind: "tool_call",
+                    summary: detail,
+                    detail: { tool_name: item.type, input_preview: JSON.stringify(item).slice(0, 1024) },
+                  });
+                } catch {}
+              }
+            }
+          }
+
+          if (event.type === "turn.completed") {
+            streamSawResult = true;
+            const usage = event.usage ?? {};
+            // codex's input_tokens is the total prompt size; cached_input_tokens
+            // is the cached subset of it (not additive, unlike claude-code).
+            totalInputTokens = usage.input_tokens ?? 0;
+            totalOutputTokens = usage.output_tokens ?? 0;
+            totalCacheRead = usage.cached_input_tokens ?? 0;
+            costUsd = calculateCostWithCache(`codex:${model}`, totalInputTokens, totalOutputTokens, totalCacheRead, 0);
+            try {
+              logger?.("codex_result_ok", {
+                tokens: { in: totalInputTokens, out: totalOutputTokens, cache_read: totalCacheRead },
+                cost_usd: costUsd,
+                model,
+              });
+            } catch {}
+          }
+
+          if (event.type === "turn.failed" || event.type === "error") {
+            const msg = event.error?.message ?? event.message ?? "unknown";
+            try { logger?.("codex_result_error", { error: String(msg).slice(0, 500), model }); } catch {}
+            // Don't throw from inside the consumer — let the watcher race
+            // decide; a written envelope still wins over a later error.
+            streamResultError = new Error(`Codex error: ${String(msg).slice(0, 300)}`);
+            return;
+          }
+        }
+      }
+    } finally {
+      try { reader.releaseLock(); } catch {}
+    }
+  })();
+
+  // ─── Envelope watcher race (identical strategy to callClaudeCode) ────
+  let envelopeFromWatcher: string | null = null;
+  if (usingWatcher) {
+    const pollAbort = { aborted: false };
+    const envelopeWatch: Promise<string | null> = (async () => {
+      while (!pollAbort.aborted) {
+        try {
+          const f = Bun.file(outputFile);
+          if (await f.exists()) {
+            const text = (await f.text()).trim();
+            if (text) {
+              try { JSON.parse(text); return text; } catch {}
+            }
+          }
+        } catch {}
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      return null;
+    })();
+
+    const winner = await Promise.race([
+      envelopeWatch.then((content) => ({ kind: "envelope" as const, content })),
+      streamPromise.then(() => ({ kind: "stream" as const, content: null })),
+    ]);
+
+    if (winner.kind === "envelope" && winner.content) {
+      envelopeFromWatcher = winner.content;
+      // The envelope is committed, but codex usually writes it mid-turn and the
+      // `turn.completed` usage event (our only token source — codex item events
+      // carry no per-message usage to back-fill from) arrives shortly after.
+      // Unlike claude-code, `codex exec` is non-interactive and terminates on
+      // its own once the turn finishes, so we let the stream drain naturally to
+      // capture usage rather than killing early. The drain below is capped, and
+      // the stall watchdog backstops a genuine hang.
+    } else {
+      // Final check for a file written in the sub-poll-interval window.
+      try {
+        const f = Bun.file(outputFile);
+        if (await f.exists()) {
+          const text = (await f.text()).trim();
+          if (text) {
+            try { JSON.parse(text); envelopeFromWatcher = text; } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    pollAbort.aborted = true;
+    // Drain the stream so usage/textFallback land. Generous cap because we
+    // deliberately did NOT kill early — codex should reach turn.completed and
+    // exit well within this; if it wedges, the cap (and stall watchdog) fire.
+    try {
+      await Promise.race([
+        streamPromise,
+        new Promise((r) => setTimeout(r, 30_000)),
+      ]);
+    } catch {}
+    // Ensure the subprocess is dead before returning (no-op if it self-exited).
+    try { proc.kill("SIGKILL"); } catch {}
+  } else {
+    try { await streamPromise; } catch (err) { throw err; }
+    if (streamResultError) throw streamResultError;
+  }
+
+  if (usingWatcher && !envelopeFromWatcher && streamResultError) throw streamResultError;
+  if (stallKilled && !envelopeFromWatcher) {
+    throw new Error(
+      `codex stream stalled (no stdout activity for ${Math.floor(STREAM_STALL_MS / 1000)}s) — killed by assembly stall watchdog`
+    );
+  }
+
+  const stderr = await new Response(proc.stderr).text();
+  const exitCode = await proc.exited;
+
+  const suppressExitCheck = usingWatcher && envelopeFromWatcher !== null;
+  if (!suppressExitCheck && exitCode !== 0 && !totalOutputTokens) {
+    if (sessionLogPath) {
+      closeSessionLog(sessionLogPath, {
+        outcome: "error",
+        kind: "exit_nonzero",
+        exit_code: exitCode,
+        stderr_preview: stderr.slice(0, 2000),
+        duration_ms: Date.now() - sessionStartedAt,
+      });
+    }
+    try { unlinkSync(lastMsgFile); } catch {}
+    throw new Error(`codex exited with code ${exitCode}: ${stderr.substring(0, 300)}`);
+  }
+
+  // Resolve envelope content: watcher wins; else read the file; else nothing.
+  let content: string;
+  if (envelopeFromWatcher) {
+    content = envelopeFromWatcher.trim();
+  } else {
+    try { content = (await Bun.file(outputFile).text()).trim(); } catch { content = ""; }
+    if (!usingWatcher) {
+      try { Bun.spawn(["rm", "-f", outputFile]); } catch {}
+    }
+  }
+
+  // Secondary salvage: the -o last-message file, if streamed text was empty.
+  let fallback = textFallback.trim();
+  if (!fallback) {
+    try {
+      const last = (await Bun.file(lastMsgFile).text()).trim();
+      if (last) fallback = last;
+    } catch {}
+  }
+  try { unlinkSync(lastMsgFile); } catch {}
+
+  if (sessionLogPath) {
+    closeSessionLog(sessionLogPath, {
+      outcome: "success",
+      exit_code: exitCode,
+      duration_ms: Date.now() - sessionStartedAt,
+      content_bytes: content.length,
+      fallback_bytes: fallback.length,
+      stderr_preview: stderr.slice(0, 1000),
+      tokens: { in: totalInputTokens, out: totalOutputTokens, cache_read: totalCacheRead, cache_creation: 0 },
+      cost_usd: costUsd,
+    });
+  }
+
+  return {
+    content,
+    fallbackContent: fallback ? fallback : undefined,
+    tokens: { in: totalInputTokens, out: totalOutputTokens, cache_read: totalCacheRead, cache_creation: 0 },
+    model: `codex:${model}`,
     cost_usd: costUsd,
     getLastActivityMs: () => lastActivityMs,
   };

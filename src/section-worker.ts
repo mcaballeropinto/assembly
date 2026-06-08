@@ -277,7 +277,9 @@ async function main() {
   ));
 
   const provider: Provider = station.provider ?? "claude-code";
-  const model = station.model ?? "sonnet";
+  // Default to the abstract "cheap" tier; each provider resolves it to its own
+  // concrete model at dispatch time (see resolveModelForProvider in llm.ts).
+  const model = station.model ?? "cheap";
   const maxTokens = 16384;
 
   const startedAt = new Date().toISOString();

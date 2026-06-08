@@ -152,7 +152,18 @@ export interface Workpiece {
 
 // === Provider Types ===
 
-export type Provider = "api" | "claude-code" | "claude-code-cached" | "pi" | "script";
+export type Provider = "api" | "claude-code" | "claude-code-cached" | "codex" | "pi" | "script";
+
+/**
+ * Abstract model tiers. Stations declare a tier (or a concrete model id) in
+ * `model:`; each provider maps the tier to its own concrete model at dispatch
+ * time (see resolveModelForProvider in llm.ts). This keeps station configs
+ * provider-agnostic — the same station runs on claude-code or codex without
+ * hardcoding `sonnet` / `gpt-5.5`.
+ *   - "cheap"     → the provider's everyday workhorse model
+ *   - "reasoning" → the provider's strongest model
+ */
+export type ModelTier = "cheap" | "reasoning";
 
 // === Station Config (from AGENT.md frontmatter) ===
 
@@ -161,8 +172,8 @@ export interface StationConfig {
   dir: string; // station directory path
   description?: string; // station description from AGENT.md frontmatter
   reads?: string[]; // what this station needs
-  provider?: Provider; // "api" | "claude-code" | "pi"
-  model?: string; // override model
+  provider?: Provider; // "claude-code" | "claude-code-cached" | "codex" | "script"
+  model?: string; // model tier ("cheap" | "reasoning") or a concrete model id
   tools?: string[]; // tools this agent can use (for claude-code/pi)
   script?: string; // script filename for script provider (relative to station dir)
   /**
