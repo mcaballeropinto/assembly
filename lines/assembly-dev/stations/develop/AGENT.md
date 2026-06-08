@@ -38,7 +38,7 @@ silently hallucinated a merge it never performed.
 
 The scripted flow makes the mechanical parts deterministic:
 - Worktree setup off `main` (or re-attach if branch exists from a retry).
-- Spawns the coding LLM with `cwd = worktree/assembly` — so relative and
+- Spawns Codex with `cwd = worktree/assembly` — so relative and
   default paths naturally land in the worktree.
 - Tight system prompt that forbids the agent from touching git state or
   `${ASSEMBLY_REPO_ROOT}/`.
@@ -52,7 +52,8 @@ context for the retry/repair path to do something useful.
 
 ## Config
 
-- `ASSEMBLY_DEV_MODEL` env var overrides the LLM model (default: `sonnet`).
+- `ASSEMBLY_DEV_MODEL` env var overrides the LLM model (default: `reasoning`,
+  which resolves to the current Codex model).
 - `REPO` and paths are hard-coded to `${ASSEMBLY_REPO_ROOT}` and
   `/tmp/assembly-dev/{id}` — update `develop.ts` if those move.
 

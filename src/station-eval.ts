@@ -30,7 +30,8 @@ export async function runStationEval(
   stationModel: string,
   maxTokens: number,
   attempt: number,
-  maxAttempts: number
+  maxAttempts: number,
+  scratchCwd?: string
 ): Promise<{
   outcome: "pass" | "warn" | "fail" | "retry" | "escalate";
   evalResult: EvalResult;
@@ -90,7 +91,21 @@ export async function runStationEval(
     const evalProvider = evalConfig.provider ?? stationProvider;
     const evalModel = evalConfig.model ?? stationModel;
     const evalMessages = buildEvalPrompt(evalConfig, stationName, envelope, workpiece);
-    const evalResponse = await callLLM(evalMessages, evalModel, maxTokens, [], evalProvider);
+    const evalResponse = await callLLM(
+      evalMessages,
+      evalModel,
+      maxTokens,
+      [],
+      evalProvider,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      scratchCwd
+    );
     tokens.in = evalResponse.tokens.in;
     tokens.out = evalResponse.tokens.out;
     tokens.cache_read = evalResponse.tokens.cache_read ?? 0;

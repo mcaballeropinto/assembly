@@ -30,6 +30,8 @@
 import { readFileSync, existsSync } from "fs";
 import { resolve as resolvePath } from "path";
 import { spawnSync } from "child_process";
+import { callLLM } from "../../../../src/llm";
+import type { LLMMessage, ProgressCallback } from "../../../../src/types";
 
 const REPO = process.env.ASSEMBLY_REPO_ROOT;
 if (!REPO) {
@@ -49,9 +51,8 @@ const BASE = process.env.ASSEMBLY_DEPLOY_BRANCH ?? "main";
 // services. Defaults to REPO when not split out.
 const LIVE = process.env.ASSEMBLY_LIVE_ROOT ?? REPO;
 
-// Model used by the conflict-resolution helper agent. Matches develop.ts
-// default — sonnet is enough for resolving merge markers in this repo.
-const MODEL = process.env.ASSEMBLY_DEPLOY_MODEL ?? "sonnet";
+// Model used by the conflict-resolution helper agent. Matches develop.ts.
+const MODEL = process.env.ASSEMBLY_DEPLOY_MODEL ?? "reasoning";
 
 function log(msg: string) {
   process.stderr.write(`[deploy] ${new Date().toISOString()} ${msg}\n`);
@@ -66,6 +67,43 @@ function fatal(msg: string, extra = ""): never {
 function emit(envelope: { summary: string; content?: string; data: Record<string, unknown> }): never {
   process.stdout.write(JSON.stringify(envelope) + "\n");
   process.exit(0);
+}
+
+async function runCodexAgent(
+  phase: string,
+  system: string,
+  user: string,
+  cwd: string
+) {
+  const onProgress: ProgressCallback = (evt) => {
+    log(
+      `${phase}.${evt.tool ?? "progress"} ${evt.detail}` +
+        (evt.tool_input ? ` ${evt.tool_input}` : "")
+    );
+  };
+  const logger = (event: string, detail: Record<string, unknown>) => {
+    log(`${phase}.${event} ${JSON.stringify(detail).slice(0, 500)}`);
+  };
+  const messages: LLMMessage[] = [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ];
+
+  return await callLLM(
+    messages,
+    MODEL,
+    32768,
+    [],
+    "codex",
+    onProgress,
+    undefined,
+    logger,
+    undefined,
+    ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+    undefined,
+    undefined,
+    cwd
+  );
 }
 
 // ─── Input ────────────────────────────────────────────────────────────
@@ -417,68 +455,16 @@ Only edit the conflicted files listed above. Auto-merged files are already stage
     wp.stations?.plan?.summary ?? "(no summary)",
   ].join("\n");
 
-  log(`spawning claude for rebase conflict resolution model=${MODEL}`);
-  const resolveProc = Bun.spawn(
-    [
-      "claude",
-      "-p",
-      "--output-format", "stream-json",
-      "--verbose",
-      "--model", MODEL,
-      "--input-format", "stream-json",
-      "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep",
-      "--disallowedTools", "Skill",
-      "--no-session-persistence",
-    ],
-    {
-      cwd: deployWtRoot,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: process.env,
-    }
-  );
-
-  const resolvePayload = JSON.stringify({
-    type: "user",
-    system: resolveSystemPrompt,
-    message: { role: "user", content: resolveUserMsg },
-  }) + "\n";
-  resolveProc.stdin.write(resolvePayload);
-  await resolveProc.stdin.end();
-
-  let resolveBuffer = "";
-  const resolveReader = resolveProc.stdout.getReader();
-  const dec = new TextDecoder();
-  while (true) {
-    const { done, value } = await resolveReader.read();
-    if (done) break;
-    resolveBuffer += dec.decode(value);
-    let idx;
-    while ((idx = resolveBuffer.indexOf("\n")) !== -1) {
-      const line = resolveBuffer.slice(0, idx);
-      resolveBuffer = resolveBuffer.slice(idx + 1);
-      if (!line.trim()) continue;
-      try {
-        const ev = JSON.parse(line);
-        if (ev.type === "assistant" && ev.message?.content) {
-          for (const block of ev.message.content) {
-            if (block.type === "tool_use") {
-              log(`resolve.tool_use ${block.name} ${JSON.stringify(block.input).slice(0, 160)}`);
-            }
-          }
-        }
-      } catch { /* non-JSON line — ignore */ }
-    }
-  }
-
-  const resolveStderr = await new Response(resolveProc.stderr).text();
-  const resolveExit = await resolveProc.exited;
-
-  if (resolveExit !== 0) {
+  log(`spawning codex for rebase conflict resolution model=${MODEL}`);
+  try {
+    await runCodexAgent("resolve", resolveSystemPrompt, resolveUserMsg, deployWtRoot);
+  } catch (e) {
     spawnSync("git", ["-C", deployWtRoot, "rebase", "--abort"], { encoding: "utf-8" });
     spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", deployWtRoot], { encoding: "utf-8" });
-    fatal("conflict-resolution agent exited non-zero", `exit=${resolveExit}\n${resolveStderr.slice(-2000)}`);
+    fatal(
+      "conflict-resolution agent exited non-zero",
+      String((e as Error).message ?? e).slice(-2000)
+    );
   }
 
   const markerLeftovers: string[] = [];

@@ -1259,7 +1259,6 @@ async function callCodex(
   let totalCacheRead = 0;
   let costUsd = 0;
   let textFallback = "";
-  let streamSawResult = false;
   let streamResultError: Error | null = null;
 
   const sessionStartedAt = Date.now();
@@ -1360,7 +1359,6 @@ async function callCodex(
           }
 
           if (event.type === "turn.completed") {
-            streamSawResult = true;
             const usage = event.usage ?? {};
             // codex's input_tokens is the total prompt size; cached_input_tokens
             // is the cached subset of it (not additive, unlike claude-code).
@@ -1656,4 +1654,3 @@ export async function callAnthropicRepair(
     getLastActivityMs: () => lastActivityMs,
   };
 }
-

@@ -17,13 +17,15 @@
 import { readFileSync, existsSync, statSync, unlinkSync } from "fs";
 import { resolve as resolvePath } from "path";
 import { spawnSync } from "child_process";
+import { callLLM } from "../../../../src/llm";
+import type { LLMMessage, ProgressCallback } from "../../../../src/types";
 
 const REPO = process.env.ASSEMBLY_REPO_ROOT;
 if (!REPO) {
   process.stderr.write("[develop] ASSEMBLY_REPO_ROOT must point at the cloned assembly repo root\n");
   process.exit(2);
 }
-const MODEL = process.env.ASSEMBLY_DEV_MODEL ?? "sonnet";
+const MODEL = process.env.ASSEMBLY_DEV_MODEL ?? "reasoning";
 
 // Base branch new feature branches fork from + that deploy merges into.
 // Default "main" preserves the pre-2026-05-26 single-clone behavior; assembly's
@@ -60,6 +62,44 @@ function hardFail(summary: string, details: string): never {
   process.exit(1);
 }
 
+async function runCodexAgent(
+  phase: string,
+  system: string,
+  user: string,
+  cwd: string,
+  envelopeFile?: string
+) {
+  const onProgress: ProgressCallback = (evt) => {
+    log(
+      `${phase}.${evt.tool ?? "progress"} ${evt.detail}` +
+        (evt.tool_input ? ` ${evt.tool_input}` : "")
+    );
+  };
+  const logger = (event: string, detail: Record<string, unknown>) => {
+    log(`${phase}.${event} ${JSON.stringify(detail).slice(0, 500)}`);
+  };
+  const messages: LLMMessage[] = [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ];
+
+  return await callLLM(
+    messages,
+    MODEL,
+    32768,
+    [],
+    "codex",
+    onProgress,
+    undefined,
+    logger,
+    undefined,
+    ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+    envelopeFile,
+    undefined,
+    cwd
+  );
+}
+
 // ─── Input ────────────────────────────────────────────────────────────
 
 const workpiecePath = process.argv[2];
@@ -84,7 +124,7 @@ const plan = wp.stations?.plan?.data;
 //      (we've seen "Feature already fully implemented" plans with empty file
 //      lists but `branch_name: "none/feature-already-implemented"`), so we
 //      infer the no-op from the file lists too.
-// Either way: no worktree, no claude spawn, no tests, no commit. The flag
+// Either way: no worktree, no Codex spawn, no tests, no commit. The flag
 // propagates to deploy so the merge/push/restart pipeline also short-circuits.
 function isNoOpPlan(plan: any): { is_no_op: boolean; reason: string } {
   if (!plan) return { is_no_op: false, reason: "" };
@@ -111,7 +151,7 @@ if (noOp.is_no_op) {
   log(`no-op from plan: ${noOp.reason}`);
   emit({
     summary: `No-op: ${noOp.reason.slice(0, 140)}`,
-    content: `Develop skipped — plan signalled no_op (explicit or inferred from empty file lists).\n\nReason: ${noOp.reason}\n\nNo worktree, no claude spawn, no tests, no commit.`,
+    content: `Develop skipped — plan signalled no_op (explicit or inferred from empty file lists).\n\nReason: ${noOp.reason}\n\nNo worktree, no Codex spawn, no tests, no commit.`,
     data: {
       no_op: true,
       no_op_reason: noOp.reason,
@@ -136,6 +176,14 @@ const wt = wtRoot;
 // ─── Worktree setup ───────────────────────────────────────────────────
 
 log(`worktree=${wtRoot} branch=${branch}`);
+
+// Clear git metadata for deleted /tmp worktrees before branch claiming.
+// Without this, retries can fail with "branch is already used by worktree"
+// even when the path is gone and marked prunable by `git worktree list`.
+const pruneR = spawnSync("git", ["-C", REPO, "worktree", "prune"], { encoding: "utf-8" });
+if (pruneR.status !== 0) {
+  hardFail("git worktree prune failed", pruneR.stderr ?? "");
+}
 
 // Auto-cleanup of stale worktrees holding the same branch.
 //
@@ -299,7 +347,7 @@ if (pendingFeedback) {
   log(`retry with prior-attempt feedback (${pendingFeedback.length} chars)`);
 }
 
-// ─── Spawn claude with cwd=worktree ───────────────────────────────────
+// ─── Spawn codex with cwd=worktree ────────────────────────────────────
 
 // Clear any stale envelope from a prior failed run in this worktree —
 // otherwise we'd read the old agent's output and skip the live one's failure.
@@ -307,72 +355,14 @@ if (existsSync(envelopePath)) {
   try { unlinkSync(envelopePath); } catch {}
 }
 
-log(`spawning claude cwd=${wt} model=${MODEL} envelope=${envelopePath}`);
+log(`spawning codex cwd=${wt} model=${MODEL} envelope=${envelopePath}`);
 
-const claudeArgs = [
-  "-p",
-  "--output-format", "stream-json",
-  "--verbose",
-  "--model", MODEL,
-  "--input-format", "stream-json",
-  "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep",
-  "--disallowedTools", "Skill",
-  "--no-session-persistence",
-];
-
-const proc = Bun.spawn(["claude", ...claudeArgs], {
-  cwd: wt,
-  stdin: "pipe",
-  stdout: "pipe",
-  stderr: "pipe",
-  env: process.env,
-});
-
-const payload = JSON.stringify({
-  type: "user",
-  system: systemPrompt,
-  message: { role: "user", content: userMsg },
-}) + "\n";
-proc.stdin.write(payload);
-await proc.stdin.end();
-
-// Stream stdout for tool-use logs only — the envelope comes from the file,
-// not from the model's final assistant turn. We still read stdout to drain
-// the pipe (otherwise the child blocks on backpressure).
-let buffer = "";
-const stdoutReader = proc.stdout.getReader();
-const dec = new TextDecoder();
-while (true) {
-  const { done, value } = await stdoutReader.read();
-  if (done) break;
-  buffer += dec.decode(value);
-  let idx;
-  while ((idx = buffer.indexOf("\n")) !== -1) {
-    const line = buffer.slice(0, idx);
-    buffer = buffer.slice(idx + 1);
-    if (!line.trim()) continue;
-    try {
-      const ev = JSON.parse(line);
-      if (ev.type === "assistant" && ev.message?.content) {
-        for (const block of ev.message.content) {
-          if (block.type === "tool_use") {
-            log(`tool_use ${block.name} ${JSON.stringify(block.input).slice(0, 160)}`);
-          }
-        }
-      }
-    } catch {
-      /* non-JSON line — ignore */
-    }
-  }
-}
-
-const stderrText = await new Response(proc.stderr).text();
-const exitCode = await proc.exited;
-
-if (exitCode !== 0) {
+try {
+  await runCodexAgent("codex", systemPrompt, userMsg, wt, envelopePath);
+} catch (e) {
   hardFail(
-    "claude exited non-zero",
-    `branch=${branch} worktree=${wtRoot}\nexit=${exitCode}\n${stderrText.slice(-2000)}`
+    "codex exited non-zero",
+    `branch=${branch} worktree=${wtRoot}\n${String((e as Error).message ?? e).slice(-2000)}`
   );
 }
 
@@ -1031,55 +1021,14 @@ Only edit the conflicted files listed above. Auto-merged files are already stage
     try { unlinkSync(envelopePath); } catch {}
   }
 
-  log(`spawning claude for rebase conflict resolution model=${MODEL}`);
-  const resolveProc = Bun.spawn(["claude", ...claudeArgs], {
-    cwd: wt,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: process.env,
-  });
-
-  const resolvePayload = JSON.stringify({
-    type: "user",
-    system: resolveSystemPrompt,
-    message: { role: "user", content: resolveUserMsg },
-  }) + "\n";
-  resolveProc.stdin.write(resolvePayload);
-  await resolveProc.stdin.end();
-
-  let resolveBuffer = "";
-  const resolveReader = resolveProc.stdout.getReader();
-  while (true) {
-    const { done, value } = await resolveReader.read();
-    if (done) break;
-    resolveBuffer += dec.decode(value);
-    let idx;
-    while ((idx = resolveBuffer.indexOf("\n")) !== -1) {
-      const line = resolveBuffer.slice(0, idx);
-      resolveBuffer = resolveBuffer.slice(idx + 1);
-      if (!line.trim()) continue;
-      try {
-        const ev = JSON.parse(line);
-        if (ev.type === "assistant" && ev.message?.content) {
-          for (const block of ev.message.content) {
-            if (block.type === "tool_use") {
-              log(`resolve.tool_use ${block.name} ${JSON.stringify(block.input).slice(0, 160)}`);
-            }
-          }
-        }
-      } catch { /* non-JSON line — ignore */ }
-    }
-  }
-
-  const resolveStderr = await new Response(resolveProc.stderr).text();
-  const resolveExit = await resolveProc.exited;
-
-  if (resolveExit !== 0) {
+  log(`spawning codex for rebase conflict resolution model=${MODEL}`);
+  try {
+    await runCodexAgent("resolve", resolveSystemPrompt, resolveUserMsg, wt, envelopePath);
+  } catch (e) {
     spawnSync("git", ["-C", wtRoot, "rebase", "--abort"], { encoding: "utf-8" });
     hardFail(
       "conflict-resolution agent exited non-zero",
-      `exit=${resolveExit}\n${resolveStderr.slice(-2000)}`
+      String((e as Error).message ?? e).slice(-2000)
     );
   }
 

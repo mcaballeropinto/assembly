@@ -581,7 +581,8 @@ async function main() {
           model,
           maxTokens,
           attempt,
-          maxAttempts
+          maxAttempts,
+          effectiveCwd
         );
         writeProgress(progressPath, startedAtMs, lastActivityRef, "eval", "done", `outcome=${decision.outcome}`);
 
@@ -779,49 +780,56 @@ async function main() {
 
       // Stage 1.5: in-session nudge — replay message history + one JSON-only turn.
       if (!envelope) {
-        try {
-          activityLogger("envelope_nudge_started", {
-            session_log: sessionLogPath,
-          });
-          writeProgress(progressPath, startedAtMs, lastActivityRef, "repair", "started", "In-session nudge for envelope");
-          const nudgeResult = await nudgeForEnvelope({
-            sessionLogPath,
-            station,
-            errorMessage: err.message,
-            model,
-          });
-          if (nudgeResult) {
-            envelope = parseEnvelope(nudgeResult.content);
-            activityLogger("envelope_nudged_in_session", {
-              tokens_in: nudgeResult.tokens.in,
-              tokens_out: nudgeResult.tokens.out,
+        const nudgeTransport = selectRepairTransport(repairConfig, {
+          ASSEMBLY_ANTHROPIC_API_KEY: process.env.ASSEMBLY_ANTHROPIC_API_KEY,
+        });
+        if (nudgeTransport.kind !== "anthropic") {
+          activityLogger("envelope_nudge_skipped", { reason: nudgeTransport.reason });
+        } else {
+          try {
+            activityLogger("envelope_nudge_started", {
+              session_log: sessionLogPath,
             });
-            // Merge nudge tokens + cost into the station result.
-            response.tokens.in += nudgeResult.tokens.in;
-            response.tokens.out += nudgeResult.tokens.out;
-            response.tokens.cache_read = (response.tokens.cache_read ?? 0) + (nudgeResult.tokens.cache_read ?? 0);
-            response.tokens.cache_creation = (response.tokens.cache_creation ?? 0) + (nudgeResult.tokens.cache_creation ?? 0);
+            writeProgress(progressPath, startedAtMs, lastActivityRef, "repair", "started", "In-session nudge for envelope");
+            const nudgeResult = await nudgeForEnvelope({
+              sessionLogPath,
+              station,
+              errorMessage: err.message,
+              model,
+            });
+            if (nudgeResult) {
+              envelope = parseEnvelope(nudgeResult.content);
+              activityLogger("envelope_nudged_in_session", {
+                tokens_in: nudgeResult.tokens.in,
+                tokens_out: nudgeResult.tokens.out,
+              });
+              // Merge nudge tokens + cost into the station result.
+              response.tokens.in += nudgeResult.tokens.in;
+              response.tokens.out += nudgeResult.tokens.out;
+              response.tokens.cache_read = (response.tokens.cache_read ?? 0) + (nudgeResult.tokens.cache_read ?? 0);
+              response.tokens.cache_creation = (response.tokens.cache_creation ?? 0) + (nudgeResult.tokens.cache_creation ?? 0);
 
-            const nudgeCost = calculateCostWithCache(
-              model,
-              nudgeResult.tokens.in,
-              nudgeResult.tokens.out,
-              nudgeResult.tokens.cache_read ?? 0,
-              nudgeResult.tokens.cache_creation ?? 0,
-            );
-            activityLogger("nudge_provider", {
-              provider: "anthropic",
-              model,
-              tokens: nudgeResult.tokens,
-              cost_usd: nudgeCost,
+              const nudgeCost = calculateCostWithCache(
+                model,
+                nudgeResult.tokens.in,
+                nudgeResult.tokens.out,
+                nudgeResult.tokens.cache_read ?? 0,
+                nudgeResult.tokens.cache_creation ?? 0,
+              );
+              activityLogger("nudge_provider", {
+                provider: "anthropic",
+                model,
+                tokens: nudgeResult.tokens,
+                cost_usd: nudgeCost,
+              });
+              writeProgress(progressPath, startedAtMs, lastActivityRef, "repair", "done", "Envelope nudged in-session");
+            }
+          } catch (nudgeErr) {
+            activityLogger("envelope_nudge_failed", {
+              error: (nudgeErr as Error).message?.slice(0, 300),
             });
-            writeProgress(progressPath, startedAtMs, lastActivityRef, "repair", "done", "Envelope nudged in-session");
+            // Fall through to Stage 2.
           }
-        } catch (nudgeErr) {
-          activityLogger("envelope_nudge_failed", {
-            error: (nudgeErr as Error).message?.slice(0, 300),
-          });
-          // Fall through to Stage 2.
         }
       }
 

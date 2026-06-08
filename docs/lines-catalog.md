@@ -96,26 +96,30 @@ can actually use to evolve the framework.
 ### Stations
 | Station | Provider | Role |
 |---------|----------|------|
-| `plan`    | `claude-code` (opus) + `EVAL` | Read-only — explore the codebase, produce a strict implementation plan. |
-| `develop` | `script` (spawns `claude`)    | In a git worktree — implement the plan, run `bun test`, commit. |
-| `deploy`  | `script`                      | Merge to main, push, optionally restart a systemd service. |
+| `plan`    | `codex` (reasoning) + `EVAL` (Codex) | Read-only — explore the codebase, produce a strict implementation plan. |
+| `develop` | `script` (spawns Codex)       | In a git worktree — implement the plan, run `bun test`, commit. |
+| `deploy`  | `script` (spawns Codex on conflicts) | Merge to main, push, optionally restart a systemd service. |
 
 ### Config
 ```yaml
 concurrency: 1            # one feature at a time
 timeout: 900              # 15-min idle
 defaults:
-  provider: claude-code-cached
-  model: opus
+  provider: codex
+  model: reasoning
   max_tokens: 32768
+  repair:
+    enabled: false
 ```
 
 ### Notable
 - Requires `ASSEMBLY_REPO_ROOT` pointing at the cloned repo root. Optional
   `ASSEMBLY_DASHBOARD_SERVICE` enables the post-merge systemd restart.
-- `develop` is a script provider that orchestrates a real `claude` subprocess
+- `develop` is a script provider that orchestrates Codex
   inside a per-task git worktree (`/tmp/assembly-dev/<wp-id>/`). The LLM
   writes code; the script handles worktree setup, test runs, and commits.
+- `repair.enabled: false` intentionally disables the Anthropic repair/nudge
+  fallback for this line, so assembly-dev has no Claude/Anthropic model path.
 - `plan` is read-only — no tools that can write to the source tree. That's
   the whole point: planning happens against the live codebase but cannot
   mutate it; only `develop` (in its sandboxed worktree) writes.
