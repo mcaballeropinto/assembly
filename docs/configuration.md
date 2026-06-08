@@ -33,8 +33,8 @@ heartbeat:                    # optional — keepalive config for claude-code pr
   emit_when_silent: true
 
 defaults:                     # optional — applied to every station unless overridden
-  provider: claude-code       # api | claude-code | claude-code-cached | pi | script
-  model: claude-sonnet-4-20250514
+  provider: claude-code       # api | claude-code | claude-code-cached | codex | pi | script
+  model: cheap                # tier (cheap | reasoning) or a concrete model id
   max_tokens: 4096
   fallback: [gpt-4o]          # not yet wired
   claude_env:                 # env vars merged into every claude-code spawn
@@ -128,9 +128,9 @@ The prompt + config for one station. Located at `stations/<name>/AGENT.md`.
 reads: [task, input, research.content, draft.summary]
 
 # Provider + model override
-provider: claude-code          # api | claude-code | claude-code-cached | pi | script
-model: sonnet                  # full model id, or short alias resolved by llm.ts
-tools: [WebFetch, Read, Bash]  # for claude-code / pi providers
+provider: claude-code          # api | claude-code | claude-code-cached | codex | pi | script
+model: cheap                   # model tier (cheap | reasoning) or a concrete model id
+tools: [WebFetch, Read, Bash]  # for claude-code / codex / pi providers
 
 # Only for provider: script — relative path to the script file
 script: ./push.ts
@@ -172,15 +172,64 @@ Return JSON with:
 | Key | Meaning |
 |-----|---------|
 | `reads` | Array of dotted paths to include in the prompt. Switches the context mode to `explicit`. Valid paths: `task`, `input`, `<station>`, `<station>.summary`, `<station>.content`, `<station>.data`. |
-| `provider` | One of `api`, `claude-code`, `claude-code-cached`, `pi`, `script`. Defaults to the line's `defaults.provider`. |
-| `model` | Full model id (`claude-sonnet-4-20250514`) or short alias (`sonnet`, `opus`, `haiku`) resolved by [`llm.ts`](../src/llm.ts). |
-| `tools` | Tool allowlist for `claude-code` / `pi` providers. |
+| `provider` | One of `api`, `claude-code`, `claude-code-cached`, `codex`, `pi`, `script`. Defaults to the line's `defaults.provider`. |
+| `model` | A **model tier** (`cheap` or `reasoning`) — resolved to each provider's concrete model — or a concrete id/alias (`claude-sonnet-4-20250514`, `sonnet`, `opus`, `haiku`, `gpt-5.5`). Resolved by [`llm.ts`](../src/llm.ts). |
+| `tools` | Tool allowlist for `claude-code` / `pi`. For `codex` this list is mapped to a sandbox mode rather than enforced per-tool — see [Codex provider](#codex-provider) below. |
 | `script` | Required when `provider: script` — relative path to the executable. Receives the workpiece path as `argv[1]`, writes the envelope to stdout. |
 | `guardrails.output.required` | Dotted paths that must resolve to defined, non-null values in the envelope. |
 | `guardrails.output.forbidden` | Dotted paths that must NOT be set. |
 | `guardrails.output.schema` | Type / value checks. See [`envelope-and-guardrails.md`](./envelope-and-guardrails.md#guardrails). |
 
 The body of the markdown file is the **system prompt** for the agent.
+
+### Model tiers
+
+Stations should declare an abstract **tier** in `model:` rather than a
+provider-specific id, so the same station runs on any provider:
+
+| Tier | claude-code | codex |
+|------|-------------|-------|
+| `cheap` | `sonnet` | `gpt-5.5` |
+| `reasoning` | `opus` | `gpt-5.5` |
+
+Tiers are resolved per provider at dispatch time by `resolveModelForProvider`
+in [`llm.ts`](../src/llm.ts). Concrete ids (`sonnet`, `opus`, `haiku`, full
+Anthropic ids, `gpt-5.5`) are still accepted and pass through unchanged, so
+existing configs keep working. (Codex on a ChatGPT-subscription account exposes
+a single model today, so both tiers point at it; bump the `reasoning` entry when
+a stronger codex model is available.)
+
+### Codex provider
+
+`provider: codex` runs the station through the [`codex exec`](https://github.com/openai/codex)
+CLI. It honours the same envelope contract as `claude-code` — the agent writes
+the JSON envelope to the invocation-scoped path and the framework watches for it
+— so stations are portable between the two providers.
+
+Differences from `claude-code`:
+
+- **Auth.** Codex uses the logged-in **ChatGPT subscription**; `OPENAI_API_KEY`
+  is stripped from the spawn env (mirroring how `claude-code` strips
+  `ANTHROPIC_API_KEY`). Run `codex login` once on the host.
+- **Tools → sandbox.** Codex has no per-tool allow/deny list. The station's
+  `tools:` are mapped to an OS-level sandbox by `resolveCodexSandbox`:
+  declaring any of `Write`/`Edit`/`Bash` selects `workspace-write`, otherwise
+  `read-only`; `WebFetch`/`WebSearch` enable network access. When the envelope
+  watcher is active the agent is always granted `workspace-write` (it must write
+  the envelope), bounded to the disposable scratch cwd plus the envelope dir via
+  `--add-dir`.
+- **Caching.** Codex caches the prompt prefix automatically (server-side, by
+  prefix) — there's no explicit `cache_control` to set, so unlike claude-code
+  there is no separate `codex-cached` provider. The prompt is ordered
+  system-prompt-first so the stable AGENT.md prefix is cacheable; cache hits are
+  read from `cached_input_tokens` and billed at the 10% cached rate.
+- **Tuning.** `ASSEMBLY_CODEX_*` env vars are forwarded to the subprocess with
+  the prefix stripped (parallel to `ASSEMBLY_CLAUDE_*`).
+- **Cost.** Codex reports token usage but no dollar cost, so cost is priced
+  explicitly from [`pricing.ts`](../src/pricing.ts) using OpenAI's published
+  GPT-5.x list prices — same as the claude-code provider prices usage. (No
+  metered billing actually occurs under a ChatGPT subscription, but the
+  dashboard still reports a real cost-equivalent.)
 
 ---
 
