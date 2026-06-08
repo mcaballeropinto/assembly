@@ -1,7 +1,7 @@
 ---
 reads: [task, input]
 description: "Produces a structured implementation plan from a feature request or bug report. Explores the codebase, identifies files to change, and outputs step-by-step instructions."
-provider: claude-code
+provider: codex
 model: reasoning
 tools: [Bash, Read, Glob, Grep]
 guardrails:
