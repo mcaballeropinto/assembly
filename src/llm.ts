@@ -373,7 +373,17 @@ export function buildEnvelopeInstruction(outputFile: string, shellOnly = false):
   const protocol = shellOnly
     ? `### The write protocol (do these in order, via your shell)
 
-1. Write the JSON envelope to ${outputFile}.tmp
+1. Write the JSON envelope to ${outputFile}.tmp using a QUOTED heredoc so NOTHING
+   in the content is interpolated:
+
+     cat > '${outputFile}.tmp' <<'ENVELOPE_EOF'
+     { ...your JSON envelope... }
+     ENVELOPE_EOF
+
+   Do NOT build the file with a double-quoted string, \`bun -e\`/\`node -e\`, or a
+   JS template literal — the envelope content contains backticks and $ that the
+   shell or JS will try to interpolate, which corrupts the file. The single-
+   quoted heredoc delimiter ('ENVELOPE_EOF') writes the bytes verbatim.
 2. Run: mv "${outputFile}.tmp" "${outputFile}"
 
 The mv must be the LAST action you take.`
