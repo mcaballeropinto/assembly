@@ -1,7 +1,7 @@
 import { resolve } from "path";
 import { existsSync } from "fs";
 import YAML from "yaml";
-import type { LineConfig, StationConfig } from "./types";
+import type { LineConfig, SequenceStationConfig, StationConfig } from "./types";
 import { loadStation } from "./station";
 import { LineName, StationName } from "./ids";
 
@@ -60,11 +60,19 @@ export async function loadLine(linePath: string): Promise<{
   }
 
   // Validate per-station overrides in sequence
+  const lineStationDescriptions = new Map<string, string>();
   for (const step of config.sequence) {
     if (typeof step === 'object' && 'station' in step) {
-      const s = (step as { station: { name: string; timeout?: number; max_wall_clock?: number; flush_grace?: number; heartbeat?: any; claude_env?: any } }).station;
+      const s = (step as { station: SequenceStationConfig & { heartbeat?: any; claude_env?: any; description?: unknown } }).station;
       if (!s.name || typeof s.name !== 'string') {
         throw new Error("sequence station object must have a 'name' string");
+      }
+      if (s.description !== undefined) {
+        if (typeof s.description !== 'string') {
+          throw new Error(`sequence station '${s.name}': description must be a string`);
+        }
+        const trimmed = s.description.trim();
+        if (trimmed) lineStationDescriptions.set(s.name, trimmed);
       }
       if (s.timeout !== undefined) {
         if (typeof s.timeout !== 'number' || s.timeout < 0 || !Number.isInteger(s.timeout)) {
@@ -199,6 +207,8 @@ export async function loadLine(linePath: string): Promise<{
     const stationDir = resolve(linePath, "stations", name);
     const brandedName = StationName(name);
     const station = await loadStation(stationDir, brandedName);
+    const lineDescription = lineStationDescriptions.get(name);
+    if (lineDescription) station.description = lineDescription;
     stations.set(name, station);
   }
 
@@ -221,7 +231,7 @@ function collectStationNames(sequence: LineConfig["sequence"]): string[] {
     } else if ("loop" in step) {
       names.push(...step.loop.stations);
     } else if ("station" in step) {
-      names.push((step as { station: { name: string } }).station.name);
+      names.push((step as { station: SequenceStationConfig }).station.name);
     }
   }
 

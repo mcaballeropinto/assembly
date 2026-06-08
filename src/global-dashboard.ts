@@ -1193,8 +1193,9 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       transition: opacity 150ms ease 400ms, visibility 0ms linear 550ms;
       pointer-events: none;
     }
-    .kanban-station-header:hover .station-desc-tooltip,
-    .kanban-station-header:focus-within .station-desc-tooltip {
+    .station-desc-trigger:hover ~ .station-desc-tooltip,
+    .station-desc-trigger:focus ~ .station-desc-tooltip,
+    .station-desc-tooltip:hover {
       opacity: 1;
       visibility: visible;
       transition-delay: 400ms, 0ms;
@@ -1213,8 +1214,9 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
     }
     @media (prefers-reduced-motion: reduce) {
       .station-desc-tooltip { transition: opacity 0ms, visibility 0ms; }
-      .kanban-station-header:hover .station-desc-tooltip,
-      .kanban-station-header:focus-within .station-desc-tooltip { transition-delay: 0ms; }
+      .station-desc-trigger:hover ~ .station-desc-tooltip,
+      .station-desc-trigger:focus ~ .station-desc-tooltip,
+      .station-desc-tooltip:hover { transition-delay: 0ms; }
     }
 
     .kanban-lanes {
@@ -3026,22 +3028,24 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
 
       // Build station description tooltip HTML
       var descTooltipHtml = '';
+      var descTooltipId = '';
       var meta = stationMeta && stationMeta[stationName];
       if (meta && meta.description) {
         var descText = meta.description.length > 300 ? meta.description.slice(0, 300) + '…' : meta.description;
-        descTooltipHtml = '<div class="station-desc-tooltip" role="tooltip">';
+        descTooltipId = 'station-desc-' + String(stationName).replace(/[^A-Za-z0-9_-]/g, '-');
+        descTooltipHtml = '<div id="' + esc(descTooltipId) + '" class="station-desc-tooltip" role="tooltip">';
         descTooltipHtml += '<div class="desc-text">' + esc(descText) + '</div>';
         var metaParts = [];
         if (meta.provider) metaParts.push('<span>Provider: ' + esc(meta.provider) + '</span>');
         if (meta.model) metaParts.push('<span>Model: ' + esc(meta.model) + '</span>');
-        if (meta.timeout) metaParts.push('<span>Timeout: ' + meta.timeout + 's</span>');
+        if (meta.timeout !== undefined) metaParts.push('<span>Timeout: ' + meta.timeout + 's</span>');
         if (metaParts.length > 0) {
           descTooltipHtml += '<div class="desc-meta">' + metaParts.join('') + '</div>';
         }
         descTooltipHtml += '</div>';
       }
 
-      var nameAttrs = descTooltipHtml ? ' tabindex="0" class="station-name station-desc-trigger"' : ' class="station-name"';
+      var nameAttrs = descTooltipHtml ? ' tabindex="0" class="station-name station-desc-trigger" aria-describedby="' + esc(descTooltipId) + '"' : ' class="station-name"';
       html += '<div class="kanban-station-header">' + statusDot + '<span' + nameAttrs + '>' + esc(stationName) + '</span>' + freshnessHtml + '<span class="station-count">' + total + '</span>' + stationChips + descTooltipHtml + '</div>';
       html += '<div class="kanban-lanes">';
       for (var j = 0; j < lanes.length; j++) {

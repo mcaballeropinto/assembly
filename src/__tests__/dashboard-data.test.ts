@@ -1439,20 +1439,23 @@ describe("flow-snapshot", () => {
 });
 
 describe("getKanbanState", () => {
-  function setupKanbanLine(name: string, opts: { concurrency?: number } = {}): string {
+  function setupKanbanLine(
+    name: string,
+    opts: { concurrency?: number; lineYaml?: string; stationAAgent?: string; stationBAgent?: string } = {}
+  ): string {
     const dir = resolve(TEMP_DIR, name);
     mkdirSync(dir, { recursive: true });
     const concurrencyLine = opts.concurrency !== undefined ? `concurrency: ${opts.concurrency}\n` : "";
     writeFileSync(
       resolve(dir, "line.yaml"),
-      `name: ${name}\n${concurrencyLine}sequence:\n  - station-a\n  - station-b\n`
+      opts.lineYaml ?? `name: ${name}\n${concurrencyLine}sequence:\n  - station-a\n  - station-b\n`
     );
     const stationA = resolve(dir, "stations", "station-a");
     const stationB = resolve(dir, "stations", "station-b");
     mkdirSync(stationA, { recursive: true });
     mkdirSync(stationB, { recursive: true });
-    writeFileSync(resolve(stationA, "AGENT.md"), "---\n---\nprompt A");
-    writeFileSync(resolve(stationB, "AGENT.md"), "---\n---\nprompt B");
+    writeFileSync(resolve(stationA, "AGENT.md"), opts.stationAAgent ?? "---\n---\nprompt A");
+    writeFileSync(resolve(stationB, "AGENT.md"), opts.stationBAgent ?? "---\n---\nprompt B");
     initSectionQueue(stationA);
     initSectionQueue(stationB);
     initLineQueue(dir);
@@ -1492,6 +1495,33 @@ describe("getKanbanState", () => {
     expect(procA.station).toBe("station-a");
     expect(procA.lane).toBe("processing");
     expect(procA.wipLimit).toBe(3);
+  });
+
+  test("includes line.yaml station description and positive timeout in stationMeta", async () => {
+    const dir = setupKanbanLine("kanban-station-description", {
+      lineYaml:
+        "name: kanban-station-description\nsequence:\n  - station:\n      name: station-a\n      description: Builds the first artifact.\n      timeout: 123\n  - station-b\n",
+    });
+
+    const out = (await getKanbanState(dir)) as KanbanState;
+
+    expect(out.stationMeta?.["station-a"]).toMatchObject({
+      description: "Builds the first artifact.",
+      timeout: 123,
+    });
+    expect(out.stationMeta?.["station-b"]).toBeUndefined();
+  });
+
+  test("line.yaml station description overrides AGENT.md frontmatter", async () => {
+    const dir = setupKanbanLine("kanban-station-description-override", {
+      lineYaml:
+        "name: kanban-station-description-override\nsequence:\n  - station:\n      name: station-a\n      description: Description from line yaml.\n  - station-b\n",
+      stationAAgent: "---\ndescription: Description from agent frontmatter.\n---\nprompt A",
+    });
+
+    const out = (await getKanbanState(dir)) as KanbanState;
+
+    expect(out.stationMeta?.["station-a"]?.description).toBe("Description from line yaml.");
   });
 
   test("card placement follows filesystem location", async () => {

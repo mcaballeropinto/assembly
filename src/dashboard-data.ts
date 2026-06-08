@@ -1594,15 +1594,15 @@ export async function getKanbanState(
       const sc = stations.get(name);
       if (!sc) continue;
       const meta: StationTooltipMeta = {};
-      if (sc.description) meta.description = sc.description;
+      const description = sc.description?.trim();
+      if (description) meta.description = description;
       const provider = sc.provider || config.defaults?.provider;
       if (provider) meta.provider = provider;
       const model = sc.model || config.defaults?.model;
       if (model) meta.model = model;
       const timeout = stationTimeouts[name] ?? config.timeout;
-      if (timeout !== undefined) meta.timeout = timeout;
-      // Only include if there's at least a description
-      if (Object.keys(meta).length > 0) stationMeta[name] = meta;
+      if (timeout !== undefined && timeout > 0) meta.timeout = timeout;
+      if (meta.description) stationMeta[name] = meta;
     }
   }
 

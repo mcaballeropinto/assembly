@@ -129,6 +129,28 @@ describe("timeout validation in loadLine()", () => {
     );
     expect(loadLine(lineDir)).rejects.toThrow("must have a 'name' string");
   });
+
+  test("accepts per-station line.yaml description", async () => {
+    const lineDir = createTestLine(
+      `station-description-${Date.now()}`,
+      `name: test-line\nsequence:\n  - station: { name: station-a, description: "Does work" }\n`,
+      ["station-a"]
+    );
+
+    const { stations } = await loadLine(lineDir);
+
+    expect(stations.get("station-a")?.description).toBe("Does work");
+  });
+
+  test("rejects non-string per-station description", async () => {
+    const lineDir = createTestLine(
+      `station-description-invalid-${Date.now()}`,
+      `name: test-line\nsequence:\n  - station: { name: station-a, description: 123 }\n`,
+      ["station-a"]
+    );
+
+    expect(loadLine(lineDir)).rejects.toThrow("description must be a string");
+  });
 });
 
 // ─── Station name extraction tests ────────────────────────────────

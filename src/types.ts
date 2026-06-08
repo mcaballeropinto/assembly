@@ -165,12 +165,12 @@ export type Provider = "api" | "claude-code" | "claude-code-cached" | "codex" | 
  */
 export type ModelTier = "cheap" | "reasoning";
 
-// === Station Config (from AGENT.md frontmatter) ===
+// === Station Config (from AGENT.md frontmatter and line.yaml overrides) ===
 
 export interface StationConfig {
   name: StationName; // derived from folder name
   dir: string; // station directory path
-  description?: string; // station description from AGENT.md frontmatter
+  description?: string; // station description; line.yaml overrides AGENT.md frontmatter
   reads?: string[]; // what this station needs
   provider?: Provider; // "claude-code" | "claude-code-cached" | "codex" | "script"
   model?: string; // model tier ("cheap" | "reasoning") or a concrete model id
@@ -246,7 +246,18 @@ export type SequenceStep =
         max: number;
       };
     }
-  | { station: { name: string; timeout?: number; max_wall_clock?: number; flush_grace?: number; heartbeat?: HeartbeatConfig; claude_env?: Record<string, string>; repair?: RepairConfig } };
+  | { station: SequenceStationConfig };
+
+export interface SequenceStationConfig {
+  name: string;
+  description?: string;
+  timeout?: number;
+  max_wall_clock?: number;
+  flush_grace?: number;
+  heartbeat?: HeartbeatConfig;
+  claude_env?: Record<string, string>;
+  repair?: RepairConfig;
+}
 
 export interface HeartbeatConfig {
   interval_ms?: number;
