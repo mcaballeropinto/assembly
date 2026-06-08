@@ -2,7 +2,7 @@
 reads: [discover, fetch, analyze]
 description: "Scores repository health on multiple dimensions and identifies priority issues."
 provider: claude-code
-model: sonnet
+model: cheap
 tools: []
 guardrails:
   output:

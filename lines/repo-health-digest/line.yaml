@@ -26,5 +26,5 @@ sequence:
 
 defaults:
   provider: claude-code-cached
-  model: sonnet
+  model: cheap
   max_tokens: 16384

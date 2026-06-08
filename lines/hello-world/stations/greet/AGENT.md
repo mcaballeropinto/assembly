@@ -2,7 +2,7 @@
 reads: [task]
 description: "Writes a short greeting based on the task description."
 provider: claude-code
-model: sonnet
+model: cheap
 tools: []
 guardrails:
   output:

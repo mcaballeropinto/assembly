@@ -15,5 +15,5 @@ sequence:
 
 defaults:
   provider: claude-code-cached
-  model: opus
+  model: reasoning
   max_tokens: 32768

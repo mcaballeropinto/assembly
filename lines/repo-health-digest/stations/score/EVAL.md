@@ -1,6 +1,6 @@
 ---
 provider: claude-code
-model: haiku
+model: cheap
 on_fail: retry
 max_retries: 2
 ---

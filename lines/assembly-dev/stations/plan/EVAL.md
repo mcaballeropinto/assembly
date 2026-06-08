@@ -1,6 +1,6 @@
 ---
 provider: claude-code
-model: opus
+model: reasoning
 on_fail: retry
 max_retries: 2
 ---

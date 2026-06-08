@@ -16,5 +16,5 @@ sequence:
 
 defaults:
   provider: claude-code-cached
-  model: haiku
+  model: cheap
   max_tokens: 4096
