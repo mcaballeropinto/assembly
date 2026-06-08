@@ -20,7 +20,7 @@ import { spawnSync } from "child_process";
 import { callLLM } from "../../../../src/llm";
 import type { LLMMessage, ProgressCallback } from "../../../../src/types";
 
-const REPO = process.env.ASSEMBLY_REPO_ROOT;
+const REPO = process.env.ASSEMBLY_REPO_ROOT || resolvePath(import.meta.dir, "../../../..");
 if (!REPO) {
   process.stderr.write("[develop] ASSEMBLY_REPO_ROOT must point at the cloned assembly repo root\n");
   process.exit(2);

@@ -234,6 +234,7 @@ export async function checkProviderUsage(
 ): Promise<UsageStatus> {
   switch (provider) {
     case "claude-code":
+    case "claude-code-cached":
       return checkClaudeCodeUsage();
     case "script":
       return { canProcess: true };
@@ -254,8 +255,9 @@ const WRITE_THROTTLE_MS = 30_000;
 const ACTIVE_PROVIDERS: Provider[] = ["claude-code"];
 
 let lastEvalAt = 0;
+let lastEvalKey = "";
 let lastEvalDecision: { blocked: boolean; reason?: string } = { blocked: false };
-let inFlightEval: Promise<{ blocked: boolean; reason?: string }> | null = null;
+let inFlightEval = new Map<string, Promise<{ blocked: boolean; reason?: string }>>();
 
 /**
  * Test-only reset: clears evaluator throttle + fetch cache. Not exported
@@ -269,11 +271,22 @@ export function __resetUsageGateStateForTest(): void {
   lastFetched = null;
   lastFetchedAt = 0;
   lastEvalAt = 0;
+  lastEvalKey = "";
   lastEvalDecision = { blocked: false };
-  inFlightEval = null;
+  inFlightEval = new Map();
 }
 
-async function doEvaluate(): Promise<{ blocked: boolean; reason?: string }> {
+function usageProvidersFor(providers: Provider[]): Provider[] {
+  const out = new Set<Provider>();
+  for (const provider of providers) {
+    if (provider === "claude-code" || provider === "claude-code-cached") {
+      out.add("claude-code");
+    }
+  }
+  return [...out].sort();
+}
+
+async function doEvaluate(providers: Provider[]): Promise<{ blocked: boolean; reason?: string }> {
   // Quiet bypass for environments without Claude Code OAuth (self-hosted
   // providers, tests, dev sandboxes). When set, all calls return "not
   // blocked" without ever touching the network or reading credentials.
@@ -292,7 +305,7 @@ async function doEvaluate(): Promise<{ blocked: boolean; reason?: string }> {
 
   let decision: { blocked: boolean; reason?: string } = { blocked: false };
 
-  for (const provider of ACTIVE_PROVIDERS) {
+  for (const provider of providers) {
     try {
       if (provider === "claude-code") {
         const { buckets, raw } = await fetchClaudeCodeUsage();
@@ -334,13 +347,26 @@ async function doEvaluate(): Promise<{ blocked: boolean; reason?: string }> {
  * evaluations are latched so concurrent callers share a single fetch.
  */
 export function evaluateAndSnapshot(): Promise<{ blocked: boolean; reason?: string }> {
+  return evaluateAndSnapshotForProviders(ACTIVE_PROVIDERS);
+}
+
+export function evaluateAndSnapshotForProviders(
+  providers: Provider[] = ACTIVE_PROVIDERS
+): Promise<{ blocked: boolean; reason?: string }> {
+  const activeProviders = usageProvidersFor(providers);
+  const evalKey = activeProviders.join(",") || "none";
   const now = Date.now();
-  if (lastEvalAt > 0 && now - lastEvalAt < WRITE_THROTTLE_MS) {
+  if (lastEvalAt > 0 && lastEvalKey === evalKey && now - lastEvalAt < WRITE_THROTTLE_MS) {
     return Promise.resolve(lastEvalDecision);
   }
-  if (inFlightEval) return inFlightEval;
-  inFlightEval = doEvaluate().finally(() => {
-    inFlightEval = null;
+  const existing = inFlightEval.get(evalKey);
+  if (existing) return existing;
+  const current = doEvaluate(activeProviders).then((decision) => {
+    lastEvalKey = evalKey;
+    return decision;
+  }).finally(() => {
+    inFlightEval.delete(evalKey);
   });
-  return inFlightEval;
+  inFlightEval.set(evalKey, current);
+  return current;
 }

@@ -6,6 +6,9 @@
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join as joinPath } from "path";
 import {
   resolveModelForProvider,
   resolveCodexSandbox,
@@ -116,6 +119,72 @@ describe("mergeCodexEnv", () => {
     const env = mergeCodexEnv();
     expect(env["BIN"]).toBeUndefined();
     expect(env["ASSEMBLY_CODEX_BIN"]).toBeUndefined();
+  });
+
+  it("falls back to the host ~/.codex login when inherited CODEX_HOME has no auth", () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "assembly-codex-env-"));
+    try {
+      const home = joinPath(root, "home");
+      const inheritedCodexHome = joinPath(root, "agent-codex-home");
+      const hostCodexHome = joinPath(home, ".codex");
+      mkdirSync(inheritedCodexHome, { recursive: true });
+      mkdirSync(hostCodexHome, { recursive: true });
+      writeFileSync(joinPath(hostCodexHome, "auth.json"), "{}");
+
+      const env = mergeCodexEnv(undefined, undefined, {
+        HOME: home,
+        CODEX_HOME: inheritedCodexHome,
+      });
+
+      expect(env["CODEX_HOME"]).toBe(hostCodexHome);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an inherited CODEX_HOME that already has auth", () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "assembly-codex-env-"));
+    try {
+      const home = joinPath(root, "home");
+      const inheritedCodexHome = joinPath(root, "agent-codex-home");
+      const hostCodexHome = joinPath(home, ".codex");
+      mkdirSync(inheritedCodexHome, { recursive: true });
+      mkdirSync(hostCodexHome, { recursive: true });
+      writeFileSync(joinPath(inheritedCodexHome, "auth.json"), "{}");
+      writeFileSync(joinPath(hostCodexHome, "auth.json"), "{}");
+
+      const env = mergeCodexEnv(undefined, undefined, {
+        HOME: home,
+        CODEX_HOME: inheritedCodexHome,
+      });
+
+      expect(env["CODEX_HOME"]).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("lets ASSEMBLY_CODEX_CODEX_HOME override the fallback", () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "assembly-codex-env-"));
+    try {
+      const home = joinPath(root, "home");
+      const inheritedCodexHome = joinPath(root, "agent-codex-home");
+      const hostCodexHome = joinPath(home, ".codex");
+      const explicitCodexHome = joinPath(root, "explicit-codex-home");
+      mkdirSync(inheritedCodexHome, { recursive: true });
+      mkdirSync(hostCodexHome, { recursive: true });
+      writeFileSync(joinPath(hostCodexHome, "auth.json"), "{}");
+
+      const env = mergeCodexEnv(undefined, undefined, {
+        HOME: home,
+        CODEX_HOME: inheritedCodexHome,
+        ASSEMBLY_CODEX_CODEX_HOME: explicitCodexHome,
+      });
+
+      expect(env["CODEX_HOME"]).toBe(explicitCodexHome);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
