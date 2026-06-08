@@ -460,6 +460,15 @@ export function resolveCodexSandbox(stationTools?: string[]): {
 }
 
 /**
+ * Resolve the `codex` executable. Defaults to "codex" (found via PATH), but an
+ * explicit ASSEMBLY_CODEX_BIN wins — needed because daemonized/systemd contexts
+ * often run with a narrow PATH that omits ~/.local/bin where codex installs.
+ */
+export function resolveCodexBin(): string {
+  return process.env.ASSEMBLY_CODEX_BIN || "codex";
+}
+
+/**
  * Build the env for a spawned `codex` subprocess. Mirrors mergeClaudeEnv:
  * ASSEMBLY_CODEX_*-prefixed process vars are forwarded (with the prefix
  * stripped) so operators can tune codex without touching code.
@@ -471,6 +480,9 @@ export function mergeCodexEnv(
   const processOverrides: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (k.startsWith("ASSEMBLY_CODEX_") && v !== undefined) {
+      // ASSEMBLY_CODEX_BIN selects the executable (handled by resolveCodexBin);
+      // it is not a codex env var, so don't forward it into the subprocess.
+      if (k === "ASSEMBLY_CODEX_BIN") continue;
       processOverrides[k.replace("ASSEMBLY_CODEX_", "")] = v;
     }
   }
@@ -1255,7 +1267,7 @@ async function callCodex(
     openSessionLog(sessionLogPath, { model: `codex:${model}`, prompt_bytes: promptBytes, args });
   }
 
-  const proc = Bun.spawn(["codex", ...args], {
+  const proc = Bun.spawn([resolveCodexBin(), ...args], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",

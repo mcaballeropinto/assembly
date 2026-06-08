@@ -10,6 +10,7 @@ import {
   resolveModelForProvider,
   resolveCodexSandbox,
   mergeCodexEnv,
+  resolveCodexBin,
   summarizeCodexItem,
   buildEnvelopeInstruction,
   DEFAULT_CODEX_MODEL,
@@ -108,6 +109,27 @@ describe("mergeCodexEnv", () => {
   it("lets station env override line env", () => {
     const env = mergeCodexEnv({ X: "line" }, { X: "station" });
     expect(env["X"]).toBe("station");
+  });
+
+  it("does not forward ASSEMBLY_CODEX_BIN into the subprocess env", () => {
+    setProcessEnv("ASSEMBLY_CODEX_BIN", "/root/.local/bin/codex");
+    const env = mergeCodexEnv();
+    expect(env["BIN"]).toBeUndefined();
+    expect(env["ASSEMBLY_CODEX_BIN"]).toBeUndefined();
+  });
+});
+
+// ─── resolveCodexBin ────────────────────────────────────────────────
+
+describe("resolveCodexBin", () => {
+  it("defaults to bare 'codex' (PATH lookup)", () => {
+    delete process.env.ASSEMBLY_CODEX_BIN;
+    expect(resolveCodexBin()).toBe("codex");
+  });
+
+  it("honours ASSEMBLY_CODEX_BIN for narrow-PATH daemon contexts", () => {
+    setProcessEnv("ASSEMBLY_CODEX_BIN", "/root/.local/bin/codex");
+    expect(resolveCodexBin()).toBe("/root/.local/bin/codex");
   });
 });
 
