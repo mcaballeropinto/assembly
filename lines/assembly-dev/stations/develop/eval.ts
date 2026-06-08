@@ -92,6 +92,9 @@ if (dev.gate_failure && typeof dev.gate_failure === 'object') {
 
 // ── Re-run tests in the worktree (belt-and-suspenders + catches order-
 //    sensitivity regressions that develop's own run didn't hit). ────
+// passCount is referenced below in the success message (outside this block),
+// so it must be declared at function scope, not inside the if.
+let passCount = 0;
 // Skip test re-run when a gate failure occurred — no commit was made,
 // worktree state is from the rejected attempt.
 if (!dev.gate_failure) {
@@ -108,7 +111,7 @@ const errorMatch = testOut.match(/(\d+)\s+errors?\b/);
 const passMatch = testOut.match(/(\d+)\s+pass\b/);
 const failCount = failMatch ? parseInt(failMatch[1], 10) : 0;
 const errorCount = errorMatch ? parseInt(errorMatch[1], 10) : 0;
-const passCount = passMatch ? parseInt(passMatch[1], 10) : 0;
+passCount = passMatch ? parseInt(passMatch[1], 10) : 0;
 const testsOk = testR.status === 0 && failCount === 0 && errorCount === 0;
 
 if (!testsOk) {
