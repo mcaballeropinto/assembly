@@ -27,6 +27,19 @@ const orchestrators: OrchestratorHandle[] = [];
 const tempDirs: string[] = [];
 const sleepingWorkers: number[] = [];
 
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs: number,
+  intervalMs = 100
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  expect(predicate()).toBe(true);
+}
+
 beforeEach(() => {
   globalThis.fetch = (async (url: string | URL | Request) => {
     const urlStr = typeof url === "string" ? url : String(url);
@@ -237,14 +250,13 @@ describe("worker adoption", () => {
     // No live worker → activeWorkerHandles empty → known pids empty.
     expect(orch.getKnownWorkerPids().size).toBe(0);
 
-    // Standard recovery picks up the orphaned processing/ file → requeues to
-    // inbox/, which drainInbox then spawns. The ok.ts script writes "ok" and
-    // moves the workpiece to output/. Give it a moment.
-    await new Promise((r) => setTimeout(r, 1_500));
-
-    // After the script worker finishes, the workpiece should land in done/.
+    // Standard recovery picks up the orphaned processing/ file, requeues it to
+    // inbox, and drainInbox spawns the script worker. Under full-suite load this
+    // can take longer than a fixed sleep, so poll for the terminal state.
     const doneDir = resolve(linePath, "queues", "done");
-    const doneFiles = readdirSync(doneDir).filter((f) => f.endsWith(".json"));
-    expect(doneFiles.length).toBe(1);
-  }, 15_000);
+    await waitFor(
+      () => readdirSync(doneDir).filter((f) => f.endsWith(".json")).length === 1,
+      20_000
+    );
+  }, 30_000);
 });

@@ -19,10 +19,16 @@ import { resolve as resolvePath } from "path";
 import { spawnSync } from "child_process";
 import { callLLM } from "../../../../src/llm";
 import type { LLMMessage, ProgressCallback } from "../../../../src/types";
+import { bootstrapStationEnv, resolveAssemblyRepoRoot } from "../../../../src/assembly-dev-station-utils";
 
-const REPO = process.env.ASSEMBLY_REPO_ROOT || resolvePath(import.meta.dir, "../../../..");
-if (!REPO) {
-  process.stderr.write("[develop] ASSEMBLY_REPO_ROOT must point at the cloned assembly repo root\n");
+bootstrapStationEnv();
+
+let REPO: string;
+try {
+  REPO = resolveAssemblyRepoRoot(import.meta.dir);
+  process.env.ASSEMBLY_REPO_ROOT = REPO;
+} catch (e) {
+  process.stderr.write(`[develop] ${(e as Error).message}\n`);
   process.exit(2);
 }
 const MODEL = process.env.ASSEMBLY_DEV_MODEL ?? "reasoning";
@@ -366,6 +372,35 @@ try {
   );
 }
 
+function worktreeHasChanges(): boolean {
+  const statusR = spawnSync("git", ["-C", wtRoot, "status", "--porcelain"], { encoding: "utf-8" });
+  const porcelain = (statusR.stdout ?? "").trim();
+  const logR = spawnSync("git", ["-C", wtRoot, "log", `${BASE}..HEAD`, "--oneline"], { encoding: "utf-8" });
+  const aheadOfBase = (logR.stdout ?? "").trim();
+  return Boolean(porcelain || aheadOfBase);
+}
+
+if (!worktreeHasChanges()) {
+  log("codex returned a clean worktree for a non-no-op plan — running one repair pass");
+  try { unlinkSync(envelopePath); } catch {}
+  const repairMsg = [
+    userMsg,
+    "",
+    "# Repair feedback",
+    "Your previous attempt exited without changing any files or creating a commit.",
+    "This plan is not marked no-op. Re-read the implementation steps and make the requested edits now.",
+    "If the requested work is already present, write .envelope.json with data.no_op=true and a no_op_reason explaining the exact existing implementation.",
+  ].join("\n");
+  try {
+    await runCodexAgent("codex-repair", systemPrompt, repairMsg, wt, envelopePath);
+  } catch (e) {
+    hardFail(
+      "codex repair exited non-zero",
+      `branch=${branch} worktree=${wtRoot}\n${String((e as Error).message ?? e).slice(-2000)}`
+    );
+  }
+}
+
 // ─── Load agent envelope — prefer file, fall back to git synthesis ────
 //
 // The system prompt asks the agent to Write ${envelopePath} as its final
@@ -499,6 +534,27 @@ if (envelopeSource !== "file") {
 
 log(`envelope source=${envelopeSource} files_changed=${(agentEnv.data.files_changed as string[]).length} files_created=${(agentEnv.data.files_created as string[]).length}`);
 
+if (agentEnv?.data?.no_op === true && !worktreeHasChanges()) {
+  const reason = typeof agentEnv.data.no_op_reason === "string"
+    ? agentEnv.data.no_op_reason
+    : "agent reported no-op after inspecting the worktree";
+  log(`no-op from agent: ${reason}`);
+  emit({
+    summary: `No-op: ${reason.slice(0, 140)}`,
+    content: `Develop skipped after agent inspection.\n\nReason: ${reason}\n\nNo commit was created.`,
+    data: {
+      no_op: true,
+      no_op_reason: reason,
+      branch_name: "",
+      worktree_path: "",
+      commit_sha: "",
+      files_changed: [],
+      files_created: [],
+      tests_passed: true,
+    },
+  });
+}
+
 const agentSummary: string = agentEnv.summary;
 const agentContent: string = agentEnv.content;
 const agentData = agentEnv.data as Record<string, unknown>;
@@ -526,7 +582,7 @@ const aheadOfBase = (logR.stdout ?? "").trim();
 if (!porcelain && !aheadOfBase) {
   hardFail(
     "no changes in worktree",
-    `agent produced no file changes and no new commits. cwd=${wt} branch=${branch}\nagent_summary=${agentSummary}`
+    `agent produced no file changes and no new commits after the repair pass. cwd=${wt} branch=${branch}\nagent_summary=${agentSummary}`
   );
 }
 
