@@ -32,10 +32,16 @@ import { resolve as resolvePath } from "path";
 import { spawnSync } from "child_process";
 import { callLLM } from "../../../../src/llm";
 import type { LLMMessage, ProgressCallback } from "../../../../src/types";
+import { bootstrapStationEnv, resolveAssemblyRepoRoot } from "../../../../src/assembly-dev-station-utils";
 
-const REPO = process.env.ASSEMBLY_REPO_ROOT || resolvePath(import.meta.dir, "../../../..");
-if (!REPO) {
-  process.stderr.write("[deploy] ASSEMBLY_REPO_ROOT must point at the cloned assembly repo root\n");
+bootstrapStationEnv();
+
+let REPO: string;
+try {
+  REPO = resolveAssemblyRepoRoot(import.meta.dir);
+  process.env.ASSEMBLY_REPO_ROOT = REPO;
+} catch (e) {
+  process.stderr.write(`[deploy] ${(e as Error).message}\n`);
   process.exit(2);
 }
 
