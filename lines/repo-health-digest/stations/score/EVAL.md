@@ -1,5 +1,5 @@
 ---
-provider: claude-code
+provider: codex
 model: cheap
 on_fail: retry
 max_retries: 2
