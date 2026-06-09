@@ -1,7 +1,7 @@
 ---
 reads: [discover, fetch, analyze]
 description: "Scores repository health on multiple dimensions and identifies priority issues."
-provider: claude-code
+provider: codex
 model: cheap
 tools: []
 guardrails:

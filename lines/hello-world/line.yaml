@@ -15,6 +15,6 @@ sequence:
   - record
 
 defaults:
-  provider: claude-code-cached
+  provider: codex
   model: cheap
   max_tokens: 4096

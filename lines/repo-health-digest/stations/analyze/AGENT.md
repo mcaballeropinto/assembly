@@ -1,7 +1,7 @@
 ---
 reads: [discover, fetch]
 description: "Analyzes repository health metrics, activity patterns, and code quality indicators."
-provider: claude-code
+provider: codex
 model: cheap
 tools: []
 guardrails:
