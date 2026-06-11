@@ -85,8 +85,8 @@ if (dev.gate_failure && typeof dev.gate_failure === 'object') {
     `## Safety gate failed: ${gate}\n\n` +
     `Previous attempt was rejected by safety gate '${gate}'.\n\n` +
     `Details:\n${details}\n\n` +
-    `Fix the issue and retry. Do NOT touch the files/lines that caused the gate to fire. ` +
-    `Restrict your changes to ONLY the files listed in the plan's files_to_change and files_to_create.`
+    `Fix the issue and retry. Keep changes within the plan's files_to_change and files_to_create. ` +
+    `If a planned directory or generated artifact was rejected, preserve the intended change and adjust the file list rather than removing required output.`
   );
 }
 

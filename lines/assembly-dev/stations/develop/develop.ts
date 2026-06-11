@@ -785,7 +785,21 @@ if (!gateFailed) {
 // the no-op short-circuit earlier in develop.ts.
 const planChange: string[] = Array.isArray(plan.files_to_change) ? plan.files_to_change.filter((s: unknown) => typeof s === "string") : [];
 const planCreate: string[] = Array.isArray(plan.files_to_create) ? plan.files_to_create.filter((s: unknown) => typeof s === "string") : [];
-const planSet = new Set<string>([...planChange, ...planCreate]);
+function normalizePlanPath(path: string): string | null {
+  const trimmed = path.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "")
+    .replace(/\/+/g, "/");
+  if (!normalized || normalized === "." || normalized.startsWith("/") || normalized.includes("\0")) return null;
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.some((segment) => segment === "." || segment === "..")) return null;
+  return normalized;
+}
+
+const planSpecs = [...planChange, ...planCreate].map(normalizePlanPath).filter((s): s is string => s !== null);
+const planSet = new Set<string>(planSpecs);
 
 if (planSet.size > 0) {
   // Whether the plan touches anything under src/ — if it does, tests in
@@ -797,7 +811,19 @@ if (planSet.size > 0) {
   const planTouchesSrc = [...planSet].some((p) => /^src\//.test(p));
 
   function isAllowed(path: string): boolean {
-    if (planSet.has(path)) return true;
+    const normalizedPath = normalizePlanPath(path);
+    if (!normalizedPath) return false;
+    if (planSet.has(normalizedPath)) return true;
+
+    for (const planned of planSet) {
+      if (planned.endsWith("/**")) {
+        const prefix = planned.slice(0, -2);
+        if (normalizedPath.startsWith(prefix) && normalizedPath.length > prefix.length) return true;
+      }
+      if (planned.endsWith("/")) {
+        if (normalizedPath.startsWith(planned) && normalizedPath.length > planned.length) return true;
+      }
+    }
 
     // Direct stem pair: src/foo.{ts,js} → src/__tests__/foo.test.ts
     const stemPairFor = (p: string) => {

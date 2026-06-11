@@ -93,6 +93,51 @@ describe("Gate soft-fail logic", () => {
     expect(offPlan).toEqual(["src/b.ts"]);
   });
 
+  test("Gate 3 logic: planned directories allow generated descendants", () => {
+    const planSet = new Set(["web/dist/index.html", "web/dist/assets/"]);
+    const changedFiles = [
+      "web/dist/index.html",
+      "web/dist/assets/index-BCA4gQB8.css",
+      "web/dist/assets/index-Bqk0OJ2c.js",
+      "web/dist2/assets/index.js",
+    ];
+
+    function normalizePlanPath(path: string): string | null {
+      const trimmed = path.trim();
+      if (!trimmed) return null;
+      const normalized = trimmed
+        .replace(/\\/g, "/")
+        .replace(/^\.\/+/, "")
+        .replace(/\/+/g, "/");
+      if (!normalized || normalized === "." || normalized.startsWith("/") || normalized.includes("\0")) return null;
+      const segments = normalized.split("/").filter(Boolean);
+      if (segments.some((segment) => segment === "." || segment === "..")) return null;
+      return normalized;
+    }
+
+    function isAllowed(path: string): boolean {
+      const normalizedPath = normalizePlanPath(path);
+      if (!normalizedPath) return false;
+      if (planSet.has(normalizedPath)) return true;
+
+      for (const planned of planSet) {
+        if (planned.endsWith("/**")) {
+          const prefix = planned.slice(0, -2);
+          if (normalizedPath.startsWith(prefix) && normalizedPath.length > prefix.length) return true;
+        }
+        if (planned.endsWith("/")) {
+          if (normalizedPath.startsWith(planned) && normalizedPath.length > planned.length) return true;
+        }
+      }
+
+      return false;
+    }
+
+    const offPlan = changedFiles.filter((f) => !isAllowed(f));
+    expect(offPlan).toEqual(["web/dist2/assets/index.js"]);
+    expect(isAllowed("web/dist/assets/../secret.js")).toBe(false);
+  });
+
   test("Gate 3 logic: test files paired with planned src files are allowed", () => {
     const planSet = new Set(["src/a.ts"]);
     const changedFiles = ["src/a.ts", "src/__tests__/a.test.ts"];
@@ -163,15 +208,15 @@ describe("Eval feedback formatting", () => {
         `## Safety gate failed: ${gate}\n\n` +
           `Previous attempt was rejected by safety gate '${gate}'.\n\n` +
           `Details:\n${details}\n\n` +
-          `Fix the issue and retry. Do NOT touch the files/lines that caused the gate to fire. ` +
-          `Restrict your changes to ONLY the files listed in the plan's files_to_change and files_to_create.`
+          `Fix the issue and retry. Keep changes within the plan's files_to_change and files_to_create. ` +
+          `If a planned directory or generated artifact was rejected, preserve the intended change and adjust the file list rather than removing required output.`
       );
     }
 
     expect(feedbackParts.length).toBe(1);
     expect(feedbackParts[0]).toContain("Safety gate failed: plan-alignment");
     expect(feedbackParts[0]).toContain("off-plan files: src/b.ts");
-    expect(feedbackParts[0]).toContain("Do NOT touch the files/lines that caused the gate to fire");
+    expect(feedbackParts[0]).toContain("Keep changes within the plan's files_to_change and files_to_create");
   });
 
   test("eval handles missing gate_failure gracefully", () => {
