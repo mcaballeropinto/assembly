@@ -32,8 +32,8 @@ beforeAll(async () => {
   process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = WEB_DIST_DIR;
 
   const { startGlobalDashboard } = await import("../global-dashboard");
-  for (let attempt = 0; attempt < 20 && !server; attempt++) {
-    testPort = 20000 + Math.floor(Math.random() * 30000);
+  for (let attempt = 0; attempt < 50 && !server; attempt++) {
+    testPort = 20000 + Math.floor(Math.random() * 40000);
     try {
       server = startGlobalDashboard({ port: testPort });
     } catch (err) {
@@ -87,7 +87,7 @@ describe("dashboard static bundle serving", () => {
     const missing = await fetch(`http://localhost:${testPort}/assets/nope.css`);
     expect(missing.status).toBe(404);
 
-    const traversal = await fetch(`http://localhost:${testPort}/assets/%2e%2e/index.html`);
+    const traversal = await fetch(`http://localhost:${testPort}/assets/%2e%2e%2findex.html`);
     expect(traversal.status).toBe(404);
   });
 
