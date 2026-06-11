@@ -186,6 +186,7 @@ function getRawPathname(requestUrl: string): string {
 export function startGlobalDashboard(options: GlobalDashboardOptions): {
   stop: () => void;
   port: number;
+  fetch?: (req: Request) => Promise<Response>;
 } {
   const webDistDir = resolve(process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
   const webDistIndex = resolve(webDistDir, "index.html");
@@ -206,9 +207,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
   // Re-discover lines every 30 seconds
   const refreshInterval = setInterval(refreshLines, 30000);
 
-  const server = Bun.serve({
-    port: options.port,
-    async fetch(req) {
+  const handleRequest = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       const rawPathname = getRawPathname(req.url);
 
@@ -555,7 +554,19 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
       return new Response(GLOBAL_DASHBOARD_HTML, {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
-    },
+  };
+
+  if (options.port === 0) {
+    return {
+      stop: () => clearInterval(refreshInterval),
+      port: 0,
+      fetch: handleRequest,
+    };
+  }
+
+  const server = Bun.serve({
+    port: options.port,
+    fetch: handleRequest,
   });
 
   console.log(`\n  Dashboard: http://localhost:${server.port}\n`);
@@ -565,7 +576,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
       clearInterval(refreshInterval);
       server.stop();
     },
-    port: server.port ?? options.port,
+    port: server.port,
   };
 }
 

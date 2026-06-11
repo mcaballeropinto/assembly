@@ -16,7 +16,11 @@ const LINE_DIR = resolve(TEMP_DIR, "lines", "drawer-test-line");
 // We need to set ASSEMBLY_LINE_DIRS so discoverLines finds our test line
 const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 
-let server: { stop: () => void; port: number } | null = null;
+let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
+
+function request(path: string): Promise<Response> {
+  return server!.fetch!(new Request(`http://localhost${path}`));
+}
 
 beforeAll(async () => {
   // Create line directory structure
@@ -139,9 +143,8 @@ beforeAll(async () => {
   // Dynamic import to pick up the env var
   const { startGlobalDashboard } = await import("../global-dashboard");
 
-  // Use a random high port
-  const port = 14000 + Math.floor(Math.random() * 1000);
-  server = startGlobalDashboard({ port });
+  // Use an OS-assigned port to avoid parallel test collisions.
+  server = startGlobalDashboard({ port: 0 });
 
   // Wait for server to be ready and lines to be discovered
   // The refreshLines() call is async, give it time to complete
@@ -206,9 +209,7 @@ describe("Drawer prior attempts rendering", () => {
       JSON.stringify(wpWithRetries)
     );
 
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/workpiece/drawer-test-line/drawer-wp-retries.json`
-    );
+    const res = await request("/api/workpiece/drawer-test-line/drawer-wp-retries.json");
     expect(res.status).toBe(200);
 
     const data = await res.json();
@@ -220,7 +221,7 @@ describe("Drawer prior attempts rendering", () => {
   });
 
   test("dashboard HTML includes prior attempts rendering logic", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("timeline-prior-attempts");
@@ -230,9 +231,7 @@ describe("Drawer prior attempts rendering", () => {
 
   test("workpiece without previous_attempts returns cleanly", async () => {
     // The original drawer-wp-1 has no previous_attempts
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/workpiece/drawer-test-line/drawer-wp-1.json`
-    );
+    const res = await request("/api/workpiece/drawer-test-line/drawer-wp-1.json");
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.stations.plan.previous_attempts).toBeUndefined();
@@ -241,9 +240,7 @@ describe("Drawer prior attempts rendering", () => {
 
 describe("Workpiece API with _activity", () => {
   test("returns workpiece with _activity field", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/workpiece/drawer-test-line/drawer-wp-1.json`
-    );
+    const res = await request("/api/workpiece/drawer-test-line/drawer-wp-1.json");
     expect(res.status).toBe(200);
 
     const data = await res.json();
@@ -263,9 +260,7 @@ describe("Workpiece API with _activity", () => {
   });
 
   test("_activity is in reverse chronological order", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/workpiece/drawer-test-line/drawer-wp-1.json`
-    );
+    const res = await request("/api/workpiece/drawer-test-line/drawer-wp-1.json");
     const data = await res.json();
 
     // Should be reversed: task_done (10:03) first, routed to plan (10:00) last
@@ -275,9 +270,7 @@ describe("Workpiece API with _activity", () => {
   });
 
   test("returns 404 for unknown workpiece", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/workpiece/drawer-test-line/ghost.json`
-    );
+    const res = await request("/api/workpiece/drawer-test-line/ghost.json");
     expect(res.status).toBe(404);
 
     const data = await res.json();
@@ -285,9 +278,7 @@ describe("Workpiece API with _activity", () => {
   });
 
   test("returns 404 for unknown line", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/workpiece/nonexistent-line/drawer-wp-1.json`
-    );
+    const res = await request("/api/workpiece/nonexistent-line/drawer-wp-1.json");
     expect(res.status).toBe(404);
 
     const data = await res.json();
@@ -295,9 +286,7 @@ describe("Workpiece API with _activity", () => {
   });
 
   test("workpiece with previous_attempts serves the retry history", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/workpiece/drawer-test-line/drawer-wp-retries.json`
-    );
+    const res = await request("/api/workpiece/drawer-test-line/drawer-wp-retries.json");
     expect(res.status).toBe(200);
 
     const data = await res.json();
@@ -309,9 +298,7 @@ describe("Workpiece API with _activity", () => {
   });
 
   test("workpiece without previous_attempts has no field", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/workpiece/drawer-test-line/drawer-wp-1.json`
-    );
+    const res = await request("/api/workpiece/drawer-test-line/drawer-wp-1.json");
     expect(res.status).toBe(200);
 
     const data = await res.json();
@@ -334,9 +321,7 @@ describe("Task events API", () => {
   });
 
   test("/api/task-events/:line/:wpId returns station list", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/task-events/drawer-test-line/drawer-wp-1`
-    );
+    const res = await request("/api/task-events/drawer-test-line/drawer-wp-1");
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.stations).toBeDefined();
@@ -348,9 +333,7 @@ describe("Task events API", () => {
   });
 
   test("/api/task-events/:line/:wpId/:station returns events", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/task-events/drawer-test-line/drawer-wp-1/plan`
-    );
+    const res = await request("/api/task-events/drawer-test-line/drawer-wp-1/plan");
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.events).toBeDefined();
@@ -367,33 +350,25 @@ describe("Task events API", () => {
   });
 
   test("/api/task-events/:line/:wpId/:station supports after= cursor", async () => {
-    const firstRes = await fetch(
-      `http://localhost:${server!.port}/api/task-events/drawer-test-line/drawer-wp-1/plan?limit=2`
-    );
+    const firstRes = await request("/api/task-events/drawer-test-line/drawer-wp-1/plan?limit=2");
     const firstPage = await firstRes.json();
     const cursor = firstPage.next_cursor;
 
-    const nextRes = await fetch(
-      `http://localhost:${server!.port}/api/task-events/drawer-test-line/drawer-wp-1/plan?after=${cursor}`
-    );
+    const nextRes = await request(`/api/task-events/drawer-test-line/drawer-wp-1/plan?after=${cursor}`);
     expect(nextRes.status).toBe(200);
     const nextPage = await nextRes.json();
     expect(nextPage.events.every((e: any) => e.seq > cursor)).toBe(true);
   });
 
   test("/api/task-events returns empty stations for unknown workpiece", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/task-events/drawer-test-line/wp-does-not-exist`
-    );
+    const res = await request("/api/task-events/drawer-test-line/wp-does-not-exist");
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.stations).toEqual([]);
   });
 
   test("/api/task-events/:line/:wpId/:station returns empty for unknown station", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/task-events/drawer-test-line/drawer-wp-1/no-such-station`
-    );
+    const res = await request("/api/task-events/drawer-test-line/drawer-wp-1/no-such-station");
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.events).toEqual([]);
@@ -401,9 +376,7 @@ describe("Task events API", () => {
   });
 
   test("/api/workpiece includes _taskEventStations in response", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/workpiece/drawer-test-line/drawer-wp-1.json`
-    );
+    const res = await request("/api/workpiece/drawer-test-line/drawer-wp-1.json");
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data._taskEventStations).toBeDefined();
