@@ -25,6 +25,11 @@ export interface UsageSnapshot {
       raw?: Record<string, unknown>;
       error?: string;
     };
+    codex?: {
+      buckets: BucketSnapshot[];
+      raw?: Record<string, unknown>;
+      error?: string;
+    };
   };
 }
 

@@ -1,10 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { existsSync, unlinkSync, writeFileSync, mkdtempSync, mkdirSync } from "fs";
+import { existsSync, unlinkSync, writeFileSync, mkdtempSync, mkdirSync, renameSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join as joinPath } from "path";
 import type { LLMMessage, LLMResult, Provider, ModelTier, ProgressCallback, OnEventCallback } from "./types";
 import { openSessionLog, appendSessionLogRaw, closeSessionLog } from "./session-log";
 import { calculateCostWithCache } from "./pricing";
+import { CODEX_USAGE_FILE } from "./paths";
 
 export const DEFAULT_REPAIR_MODEL = "claude-haiku-4-5-20251001";
 export const REPAIR_MAX_TOKENS = 64000;
@@ -1191,6 +1192,112 @@ async function callClaudeCode(
 
 // ─── Codex Provider (CLI, streaming) ────────────────────────────────
 
+export interface CodexRateLimitWindow {
+  used_percent: number;
+  window_minutes: number;
+  resets_at: number;
+}
+
+export interface CodexUsageSnapshot {
+  checkedAt: string;
+  primary?: CodexRateLimitWindow;
+  secondary?: CodexRateLimitWindow;
+  plan_type?: string;
+}
+
+interface CodexRateLimitsPayload {
+  primary?: unknown;
+  secondary?: unknown;
+  plan_type?: unknown;
+  [key: string]: unknown;
+}
+
+function normalizeCodexRateLimitWindow(input: unknown): CodexRateLimitWindow | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as Record<string, unknown>;
+  const used = raw.used_percent;
+  const window = raw.window_minutes;
+  const resets = raw.resets_at;
+  if (
+    typeof used !== "number" ||
+    typeof window !== "number" ||
+    typeof resets !== "number" ||
+    !Number.isFinite(used) ||
+    !Number.isFinite(window) ||
+    !Number.isFinite(resets)
+  ) return null;
+  return {
+    used_percent: used,
+    window_minutes: window,
+    resets_at: resets,
+  };
+}
+
+export function normalizeCodexUsageSnapshot(
+  rateLimits: CodexRateLimitsPayload,
+  now = new Date()
+): CodexUsageSnapshot | null {
+  if (!rateLimits || typeof rateLimits !== "object") return null;
+  const primary = normalizeCodexRateLimitWindow(rateLimits.primary);
+  const secondary = normalizeCodexRateLimitWindow(rateLimits.secondary);
+  if (!primary && !secondary) return null;
+  return {
+    checkedAt: now.toISOString(),
+    ...(primary ? { primary } : {}),
+    ...(secondary ? { secondary } : {}),
+    ...(typeof rateLimits.plan_type === "string" ? { plan_type: rateLimits.plan_type } : {}),
+  };
+}
+
+function getCodexUsageTarget(target?: string): string {
+  return target || process.env.ASSEMBLY_CODEX_USAGE_FILE || CODEX_USAGE_FILE;
+}
+
+export function writeCodexUsageSnapshot(snapshot: CodexUsageSnapshot, target?: string): void {
+  const out = getCodexUsageTarget(target);
+  mkdirSync(dirname(out), { recursive: true });
+  const tmp = `${out}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  writeFileSync(tmp, JSON.stringify(snapshot, null, 2));
+  renameSync(tmp, out);
+}
+
+function parseCodexResetSeconds(message: string, now: Date): number | null {
+  const match = message.match(/try again at\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const meridiem = match[3].toUpperCase();
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 1 || hour > 12 || minute < 0 || minute > 59) {
+    return null;
+  }
+  if (meridiem === "PM" && hour !== 12) hour += 12;
+  if (meridiem === "AM" && hour === 12) hour = 0;
+  const reset = new Date(now);
+  reset.setHours(hour, minute, 0, 0);
+  if (reset.getTime() <= now.getTime()) {
+    reset.setDate(reset.getDate() + 1);
+  }
+  return Math.floor(reset.getTime() / 1000);
+}
+
+export function buildSyntheticCodexUsageSnapshotFromError(
+  message: string,
+  now = new Date()
+): CodexUsageSnapshot | null {
+  if (!/usage limit/i.test(message)) return null;
+  const windowMinutes = 300;
+  const parsedReset = parseCodexResetSeconds(message, now);
+  const resetsAt = parsedReset ?? Math.floor((now.getTime() + windowMinutes * 60_000) / 1000);
+  return {
+    checkedAt: now.toISOString(),
+    primary: {
+      used_percent: 100,
+      window_minutes: windowMinutes,
+      resets_at: resetsAt,
+    },
+  };
+}
+
 /**
  * Run a station via the `codex exec` CLI. Structurally a sibling of
  * callClaudeCode: same invocation-scoped envelope-file contract, same watcher
@@ -1359,6 +1466,19 @@ async function callCodex(
           let event: any;
           try { event = JSON.parse(line); } catch { continue; }
 
+          if (event && event.rate_limits) {
+            try {
+              const snapshot = normalizeCodexUsageSnapshot(event.rate_limits);
+              if (snapshot) writeCodexUsageSnapshot(snapshot);
+            } catch (err) {
+              try {
+                logger?.("codex_usage_snapshot_write_failed", {
+                  error: (err as Error).message,
+                });
+              } catch {}
+            }
+          }
+
           // Terminal-message + tool-use items.
           if (event.type === "item.started" || event.type === "item.completed") {
             const item = event.item ?? {};
@@ -1420,6 +1540,16 @@ async function callCodex(
           if (event.type === "turn.failed" || event.type === "error") {
             const msg = event.error?.message ?? event.message ?? "unknown";
             try { logger?.("codex_result_error", { error: String(msg).slice(0, 500), model }); } catch {}
+            try {
+              const synthetic = buildSyntheticCodexUsageSnapshotFromError(String(msg));
+              if (synthetic) writeCodexUsageSnapshot(synthetic);
+            } catch (err) {
+              try {
+                logger?.("codex_usage_snapshot_write_failed", {
+                  error: (err as Error).message,
+                });
+              } catch {}
+            }
             // Don't throw from inside the consumer — let the watcher race
             // decide; a written envelope still wins over a later error.
             streamResultError = new Error(`Codex error: ${String(msg).slice(0, 300)}`);

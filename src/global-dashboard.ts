@@ -2570,7 +2570,8 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       if (!data || data.state === 'unknown') return 'unknown';
       if (data.ageMs != null && data.ageMs > USAGE_STALE_MS) return 'unknown';
       if (data.paused === true) return 'paused';
-      var buckets = (data.providers && data.providers['claude-code'] && data.providers['claude-code'].buckets) || [];
+      var provider = data.providers && data.providers['codex'];
+      var buckets = (provider && provider.buckets) || [];
       var maxUtil = 0;
       for (var i = 0; i < buckets.length; i++) { if (buckets[i].utilization > maxUtil) maxUtil = buckets[i].utilization; }
       if (maxUtil >= 50) return 'warn';
@@ -2629,6 +2630,8 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       parts.push('<div class="usage-panel state-' + state + '">');
       parts.push('<div class="usage-header">');
       parts.push('<span class="usage-chip state-' + state + '">' + usageStateLabel(state) + '</span>');
+      parts.push('<span class="usage-meta">Codex</span>');
+      parts.push('<span class="usage-meta-sep">\\u00b7</span>');
       parts.push('<span class="usage-meta">' + esc(formatCheckedAgo(data.ageMs)) + '</span>');
       parts.push('<span class="usage-meta-sep">\\u00b7</span>');
       parts.push('<span class="usage-meta">threshold ' + threshold + '%</span>');
@@ -2636,7 +2639,8 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
       if (state === 'paused' && data.pauseReason) {
         parts.push('<div class="usage-reason">Reason: ' + esc(data.pauseReason) + '</div>');
       }
-      var buckets = (data.providers && data.providers['claude-code'] && data.providers['claude-code'].buckets) || [];
+      var provider = data.providers && data.providers['codex'];
+      var buckets = (provider && provider.buckets) || [];
       if (buckets.length > 0) {
         parts.push('<div class="usage-buckets">');
         for (var i = 0; i < buckets.length; i++) {
@@ -2655,8 +2659,8 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
           parts.push('</div>');
         }
         parts.push('</div>');
-      } else if (data.providers && data.providers['claude-code'] && data.providers['claude-code'].error) {
-        parts.push('<div class="usage-reason">Fetch error: ' + esc(data.providers['claude-code'].error) + '</div>');
+      } else if (provider && provider.error) {
+        parts.push('<div class="usage-reason">Fetch error: ' + esc(provider.error) + '</div>');
       }
       parts.push('</div>');
       return parts.join('');
@@ -2690,7 +2694,8 @@ const GLOBAL_DASHBOARD_HTML = `<!DOCTYPE html>
         return parts.join('');
       }
       var threshold = (data && typeof data.threshold === 'number') ? data.threshold : 75;
-      var buckets = (data.providers && data.providers['claude-code'] && data.providers['claude-code'].buckets) || [];
+      var provider = data.providers && data.providers['codex'];
+      var buckets = (provider && provider.buckets) || [];
       var labelText = state === 'paused' ? 'Paused' : state === 'warn' ? 'Elevated' : 'Active';
       parts.push('<div class="usage-compact state-' + state + '" tabindex="0" role="button" aria-expanded="false" aria-label="Usage details"');
       parts.push(' onclick="toggleUsagePopover(event, this)" onkeydown="handleUsagePopoverKey(event, this)">');

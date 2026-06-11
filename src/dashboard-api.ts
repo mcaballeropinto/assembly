@@ -174,6 +174,11 @@ export interface ApiUsageResponse {
       raw?: Record<string, unknown>;
       error?: string;
     };
+    codex?: {
+      buckets: ApiUsageBucket[];
+      raw?: Record<string, unknown>;
+      error?: string;
+    };
   };
   ageMs?: number | null;
   state?: string;

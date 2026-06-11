@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { CODEX_USAGE_FILE } from "./paths";
 import type { Provider } from "./types";
 import {
   writeUsageSnapshot,
@@ -227,6 +229,112 @@ async function checkClaudeCodeUsage(): Promise<UsageStatus> {
   return status;
 }
 
+// ─── Codex (CLI-emitted rate limits) ─────────────────────────────────
+
+interface CodexRateLimitWindow {
+  used_percent: number;
+  window_minutes: number;
+  resets_at: number;
+}
+
+interface CodexUsageSnapshot {
+  checkedAt?: string;
+  primary?: CodexRateLimitWindow;
+  secondary?: CodexRateLimitWindow;
+  plan_type?: string;
+  [key: string]: unknown;
+}
+
+function getCodexUsageFile(): string {
+  return process.env.ASSEMBLY_CODEX_USAGE_FILE || CODEX_USAGE_FILE;
+}
+
+function codexWindowLabel(windowMinutes: number): string {
+  if (windowMinutes === 300) return "5h session";
+  if (windowMinutes === 10080) return "7d";
+  return `${windowMinutes}m`;
+}
+
+function isCodexWindow(value: unknown): value is CodexRateLimitWindow {
+  if (!value || typeof value !== "object") return false;
+  const w = value as Record<string, unknown>;
+  return (
+    typeof w.used_percent === "number" &&
+    typeof w.window_minutes === "number" &&
+    typeof w.resets_at === "number" &&
+    Number.isFinite(w.used_percent) &&
+    Number.isFinite(w.window_minutes) &&
+    Number.isFinite(w.resets_at)
+  );
+}
+
+function codexWindows(snapshot: CodexUsageSnapshot): CodexRateLimitWindow[] {
+  const windows: CodexRateLimitWindow[] = [];
+  if (isCodexWindow(snapshot.primary)) windows.push(snapshot.primary);
+  if (isCodexWindow(snapshot.secondary)) windows.push(snapshot.secondary);
+  return windows;
+}
+
+function readCodexUsageSnapshot(): CodexUsageSnapshot | null {
+  try {
+    const raw = readFileSync(getCodexUsageFile(), "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed as CodexUsageSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+function codexBucketsFromSnapshot(snapshot: CodexUsageSnapshot): BucketSnapshot[] {
+  return codexWindows(snapshot).map((window) => ({
+    label: codexWindowLabel(window.window_minutes),
+    utilization: window.used_percent,
+    resets_at: new Date(window.resets_at * 1000).toISOString(),
+  }));
+}
+
+export async function fetchCodexUsage(): Promise<{
+  buckets: BucketSnapshot[];
+  raw: Record<string, unknown>;
+}> {
+  const snapshot = readCodexUsageSnapshot();
+  if (!snapshot) return { buckets: [], raw: {} };
+  return {
+    buckets: codexBucketsFromSnapshot(snapshot),
+    raw: snapshot as Record<string, unknown>,
+  };
+}
+
+async function checkCodexUsage(): Promise<UsageStatus> {
+  const snapshot = readCodexUsageSnapshot();
+  if (!snapshot) return { canProcess: true };
+
+  const limit = getEffectiveThreshold();
+  let worst: { label: string; utilization: number; resetAt: Date } | null = null;
+  for (const window of codexWindows(snapshot)) {
+    if (window.used_percent >= limit) {
+      const resetAt = new Date(window.resets_at * 1000);
+      if (!Number.isFinite(resetAt.getTime())) continue;
+      if (!worst || resetAt.getTime() < worst.resetAt.getTime()) {
+        worst = {
+          label: codexWindowLabel(window.window_minutes),
+          utilization: window.used_percent,
+          resetAt,
+        };
+      }
+    }
+  }
+
+  return worst
+    ? {
+        canProcess: false,
+        resetAt: worst.resetAt,
+        reason: `${worst.label} at ${worst.utilization.toFixed(1)}% (>= ${limit}%), resets ${worst.resetAt.toISOString()}`,
+      }
+    : { canProcess: true };
+}
+
 // ─── Dispatch ────────────────────────────────────────────────────────
 
 export async function checkProviderUsage(
@@ -236,6 +344,8 @@ export async function checkProviderUsage(
     case "claude-code":
     case "claude-code-cached":
       return checkClaudeCodeUsage();
+    case "codex":
+      return checkCodexUsage();
     case "script":
       return { canProcess: true };
     default:
@@ -252,7 +362,7 @@ export async function checkProviderUsage(
 // returned verbatim.
 
 const WRITE_THROTTLE_MS = 30_000;
-const ACTIVE_PROVIDERS: Provider[] = ["claude-code"];
+const ACTIVE_PROVIDERS: Provider[] = ["codex"];
 
 let lastEvalAt = 0;
 let lastEvalKey = "";
@@ -281,6 +391,8 @@ function usageProvidersFor(providers: Provider[]): Provider[] {
   for (const provider of providers) {
     if (provider === "claude-code" || provider === "claude-code-cached") {
       out.add("claude-code");
+    } else if (provider === "codex") {
+      out.add("codex");
     }
   }
   return [...out].sort();
@@ -310,6 +422,9 @@ async function doEvaluate(providers: Provider[]): Promise<{ blocked: boolean; re
       if (provider === "claude-code") {
         const { buckets, raw } = await fetchClaudeCodeUsage();
         snapshot.providers["claude-code"] = { buckets, raw };
+      } else if (provider === "codex") {
+        const { buckets, raw } = await fetchCodexUsage();
+        snapshot.providers.codex = { buckets, raw };
       }
       const status = await checkProviderUsage(provider);
       if (!status.canProcess) {
@@ -324,6 +439,8 @@ async function doEvaluate(providers: Provider[]): Promise<{ blocked: boolean; re
       snapshot.pauseReason = `${provider} usage check failed: ${msg}`;
       if (provider === "claude-code") {
         snapshot.providers["claude-code"] = { buckets: [], error: msg };
+      } else if (provider === "codex") {
+        snapshot.providers.codex = { buckets: [], error: msg };
       }
       decision = { blocked: true, reason: snapshot.pauseReason };
       break;

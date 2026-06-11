@@ -34,6 +34,7 @@ export const GLOBAL_ENV = resolve(ASSEMBLY_HOME, ".env");
 export const ORCHESTRATOR_PID_FILE = resolve(ASSEMBLY_HOME, "orchestrator.pid");
 export const DASHBOARD_PID_FILE = resolve(ASSEMBLY_HOME, "dashboard.pid");
 export const USAGE_SNAPSHOT_FILE = resolve(ASSEMBLY_HOME, "usage-status.json");
+export const CODEX_USAGE_FILE = resolve(ASSEMBLY_HOME, "codex-usage.json");
 /**
  * `daemon reload` flow uses a ready file written by the successor daemon to
  * signal that it has fully adopted state from the predecessor's handoff
