@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { validateGuardrails, buildGuardrailRepairPrompt, GuardrailError } from "../envelope";
-import { buildGuardrailRepairPlan } from "../section-worker";
+import { buildGuardrailRepairPlan, classifyError } from "../section-worker";
 import type { StationConfig, StationEnvelope, LLMMessage } from "../types";
 import { StationName } from "../ids";
 
@@ -95,6 +95,34 @@ describe("validateGuardrails — schema type checks", () => {
     const s = station({ output: { schema: { "data.optional": "string" } } });
     const env: StationEnvelope = { summary: "ok", data: {} };
     expect(validateGuardrails(env, s)).toEqual([]);
+  });
+});
+
+describe("validateGuardrails — score station scored_companies contract", () => {
+  const s = station({
+    output: {
+      required: ["data.scored_companies"],
+      schema: { "data.scored_companies": "array" },
+    },
+  });
+
+  it("accepts an empty scored_companies array", () => {
+    const env: StationEnvelope = { summary: "ok", data: { scored_companies: [] } };
+    expect(validateGuardrails(env, s)).toEqual([]);
+  });
+
+  it("rejects a missing scored_companies key", () => {
+    const env: StationEnvelope = { summary: "ok", data: {} };
+    const errors = validateGuardrails(env, s);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("Missing required field: data.scored_companies");
+  });
+
+  it("rejects a non-array scored_companies value", () => {
+    const env: StationEnvelope = { summary: "ok", data: { scored_companies: "none" } };
+    const errors = validateGuardrails(env, s);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("expected array");
   });
 });
 
@@ -264,5 +292,9 @@ describe("GuardrailError", () => {
     expect(err.message).toContain("data.x");
     expect(err.message).toContain("data.y");
     expect(err.name).toBe("GuardrailError");
+  });
+
+  it("is classified as a guardrail failure", () => {
+    expect(classifyError(new GuardrailError(["Missing required field: data.scored_companies"]))).toBe("guardrail");
   });
 });

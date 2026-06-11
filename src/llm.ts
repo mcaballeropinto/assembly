@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { existsSync, unlinkSync, writeFileSync, mkdtempSync } from "fs";
+import { existsSync, unlinkSync, writeFileSync, mkdtempSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
-import { join as joinPath } from "path";
+import { dirname, join as joinPath } from "path";
 import type { LLMMessage, LLMResult, Provider, ModelTier, ProgressCallback, OnEventCallback } from "./types";
 import { openSessionLog, appendSessionLogRaw, closeSessionLog } from "./session-log";
 import { calculateCostWithCache } from "./pricing";
@@ -174,6 +174,7 @@ export async function callScript(
   // the script land in a disposable, gitignored location instead of polluting
   // the assembly tree. The script still receives an absolute `workpiecePath`,
   // so cwd does not affect correctness.
+  ensureProviderWorkspace(scratchCwd, undefined);
   const proc = Bun.spawn(["bun", "run", scriptPath, workpiecePath], {
     stdout: "pipe",
     stderr: "pipe",
@@ -468,6 +469,16 @@ export function resolveCodexBin(): string {
   return process.env.ASSEMBLY_CODEX_BIN || "codex";
 }
 
+export function ensureProviderWorkspace(scratchCwd?: string, envelopePath?: string): void {
+  try {
+    if (scratchCwd) mkdirSync(scratchCwd, { recursive: true });
+    if (envelopePath) mkdirSync(dirname(envelopePath), { recursive: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Unable to prepare provider workspace for sandbox: ${msg}`);
+  }
+}
+
 function resolveCodexHomeFallback(sourceEnv: Record<string, string | undefined>): string | undefined {
   if (sourceEnv.ASSEMBLY_CODEX_CODEX_HOME) return undefined;
 
@@ -565,6 +576,8 @@ async function callClaudeCode(
     ? envelopePath
     : `/tmp/assembly-envelope-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
   const usingWatcher = Boolean(envelopePath);
+
+  ensureProviderWorkspace(scratchCwd, usingWatcher ? outputFile : undefined);
 
   // Clean slate: loops and retries can reuse the same envelopePath. An old
   // file from a prior attempt would race-win the watcher and return stale
@@ -1214,6 +1227,8 @@ async function callCodex(
     ? envelopePath
     : `/tmp/assembly-envelope-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
   const usingWatcher = Boolean(envelopePath);
+
+  ensureProviderWorkspace(scratchCwd, usingWatcher ? outputFile : undefined);
 
   // Clean slate — a stale file from a prior attempt would race-win the watcher.
   if (usingWatcher) {
