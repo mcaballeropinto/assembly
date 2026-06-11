@@ -13,6 +13,7 @@ import {
 import { startOrchestrator } from "./orchestrator";
 import { getFullState } from "./dashboard-data";
 import { startOrphanReaper } from "./reaper";
+import { startImproverWatcher } from "./improver/watcher";
 import type { LineConfig } from "./types";
 import type { LineName } from "./ids";
 import {
@@ -291,6 +292,19 @@ export async function startGlobalOrchestrator(
     },
   });
 
+  // 5c. Start the improver watcher — the self-improvement loop. No-ops
+  // unless `improver.enabled: true` in ~/.assembly/config.yaml. Reads line
+  // membership lazily from managedLines so hot-reloaded lines are covered.
+  const improver = startImproverWatcher({
+    getLines: () =>
+      [...managedLines.values()]
+        .filter((ml) => ml.status === "running")
+        .map((ml) => ({ linePath: ml.linePath, lineName: String(ml.lineName) })),
+  });
+  if (improver.enabled) {
+    console.log("[daemon] Improver watcher started");
+  }
+
   // 6. Cleanup handler
   // Only unlink the PID file if it still points at us. Without this guard,
   // a leaked successor daemon that exits later would wipe the canonical
@@ -332,6 +346,9 @@ export async function startGlobalOrchestrator(
           }
         }
       }
+
+      // Keep the improver's queue watchers in step with line membership.
+      try { improver.syncLines(); } catch {}
     } catch (err) {
       console.error(
         `[daemon] Hot-reload error: ${(err as Error).message}`
@@ -366,6 +383,7 @@ export async function startGlobalOrchestrator(
   return {
     stop: async (stopOpts) => {
       reaper.stop();
+      try { improver.stop(); } catch {}
       clearInterval(scanInterval);
       // Stop all managed lines in parallel so the slowest flush_grace bounds
       // total daemon shutdown time, not the sum of them. In handoff mode the
