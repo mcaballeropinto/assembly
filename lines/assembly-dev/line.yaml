@@ -19,3 +19,8 @@ defaults:
   max_tokens: 32768
   repair:
     enabled: false
+
+on_success:
+  script: ../../shared/notify-discord.ts
+on_failure:
+  script: ../../shared/notify-discord.ts

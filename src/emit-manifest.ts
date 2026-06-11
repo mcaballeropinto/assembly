@@ -30,7 +30,8 @@ export type EmitSource =
   | "release"           // held → inbox release
   | "transition"        // internal section transition (claimFile/moveFile to inbox)
   | "bootstrap"         // pre-existing file at first daemon start with this code
-  | "recovery";         // stale recovery picked up
+  | "recovery"          // stale recovery picked up
+  | "improver";         // improver watcher (dev-line proposals + requeues)
 
 export interface EmitRecord {
   filename: string;
