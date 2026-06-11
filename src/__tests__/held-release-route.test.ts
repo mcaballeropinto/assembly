@@ -11,7 +11,7 @@ const LINE_DIR = resolve(TEMP_DIR, "lines", LINE_NAME);
 const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
-let server: { stop: () => void; port: number } | null = null;
+let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
 let testPort: number;
 
 function writeHeldFile(name: string, task: string) {
@@ -21,11 +21,15 @@ function writeHeldFile(name: string, task: string) {
 }
 
 async function post(path: string, body: unknown) {
-  return fetch(`http://localhost:${testPort}${path}`, {
+  return server!.fetch!(new Request(`http://localhost${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }));
+}
+
+function request(path: string): Promise<Response> {
+  return server!.fetch!(new Request(`http://localhost${path}`));
 }
 
 beforeAll(async () => {
@@ -50,17 +54,10 @@ beforeAll(async () => {
   process.env.ASSEMBLY_LINE_DIRS = resolve(TEMP_DIR, "lines");
   process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
 
-  // Start dashboard server on a random port
+  // Start dashboard server on an OS-assigned port to avoid parallel test collisions.
   const { startGlobalDashboard } = await import("../global-dashboard");
-  for (let attempt = 0; attempt < 20 && !server; attempt++) {
-    testPort = 20000 + Math.floor(Math.random() * 30000);
-    try {
-      server = startGlobalDashboard({ port: testPort });
-    } catch (err) {
-      if (!String((err as Error).message).includes("port")) throw err;
-    }
-  }
-  if (!server) throw new Error("Unable to start dashboard test server");
+  server = startGlobalDashboard({ port: 0 });
+  testPort = server.port;
 
   // Wait for server to discover lines
   await new Promise((r) => setTimeout(r, 1500));
@@ -150,7 +147,7 @@ describe("POST /api/line/:name/release", () => {
 
 describe("Dashboard HTML contains held release JS and CSS", () => {
   test("Dashboard HTML contains releaseCard function", async () => {
-    const res = await fetch(`http://localhost:${testPort}/`);
+    const res = await request("/");
     const html = await res.text();
     expect(html).toContain("releaseCard");
     expect(html).toContain("releaseAllHeld");
@@ -158,7 +155,7 @@ describe("Dashboard HTML contains held release JS and CSS", () => {
   });
 
   test("Dashboard HTML contains held CSS rules", async () => {
-    const res = await fetch(`http://localhost:${testPort}/`);
+    const res = await request("/");
     const html = await res.text();
     expect(html).toContain("held-card");
     expect(html).toContain("release-btn");

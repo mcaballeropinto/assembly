@@ -19,6 +19,12 @@ const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 
 let server: { stop: () => void; port: number } | null = null;
 
+function request(path: string): Promise<Response> {
+  return (server as { fetch?: (req: Request) => Promise<Response> })!.fetch!(
+    new Request(`http://localhost${path}`)
+  );
+}
+
 const activityEntries = [
   { ts: "2026-04-01T10:00:00Z", event: "task_received", workpiece: "wp-test-1", task: "test task" },
   { ts: "2026-04-01T10:00:01Z", event: "station_start", station: "plan", workpiece: "wp-test-1" },
@@ -93,10 +99,9 @@ beforeAll(async () => {
   // Set env for line discovery
   process.env.ASSEMBLY_LINE_DIRS = resolve(TEMP_DIR, "lines");
 
-  // Start dashboard server
+  // Start dashboard server on an OS-assigned port to avoid parallel test collisions.
   const { startGlobalDashboard } = await import("../global-dashboard");
-  const port = 14100 + Math.floor(Math.random() * 1000);
-  server = startGlobalDashboard({ port });
+  server = startGlobalDashboard({ port: 0 });
 
   // Wait for server to be ready and lines discovered
   await new Promise((r) => setTimeout(r, 1500));
@@ -115,7 +120,7 @@ afterAll(() => {
 
 describe("Activity Log - Filter Toggle Buttons", () => {
   test("Dashboard HTML contains 8 filter toggle buttons with correct labels", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // The filter buttons are embedded in the JS template string of the dashboard
@@ -134,14 +139,14 @@ describe("Activity Log - Filter Toggle Buttons", () => {
   });
 
   test("Dashboard HTML contains toggleActivityFilter function", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     expect(html).toContain("function toggleActivityFilter(eventType)");
   });
 
   test("Dashboard HTML contains toggleRetryGroup function", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     expect(html).toContain("function toggleRetryGroup(groupId)");
@@ -150,9 +155,7 @@ describe("Activity Log - Filter Toggle Buttons", () => {
 
 describe("Activity Log - API Data", () => {
   test("Activity API returns retry events with correct fields", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/line/activity-test-line`
-    );
+    const res = await request("/api/line/activity-test-line");
     expect(res.status).toBe(200);
 
     const data = await res.json();
@@ -174,9 +177,7 @@ describe("Activity Log - API Data", () => {
   });
 
   test("Activity data includes all event types", async () => {
-    const res = await fetch(
-      `http://localhost:${server!.port}/api/line/activity-test-line`
-    );
+    const res = await request("/api/line/activity-test-line");
     const data = await res.json();
 
     const events = data.activity.map((a: any) => a.event);
@@ -191,7 +192,7 @@ describe("Activity Log - API Data", () => {
 
 describe("Activity Log - Detail View Rendering", () => {
   test("Detail view contains activity-filters container for filter buttons", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // The activity-filters container holds the toggle buttons
@@ -201,7 +202,7 @@ describe("Activity Log - Detail View Rendering", () => {
   });
 
   test("Detail view renders retry group elements", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // Check for retry-group related CSS and HTML structure
@@ -211,7 +212,7 @@ describe("Activity Log - Detail View Rendering", () => {
   });
 
   test("Detail view renders wp-id-link elements for clickable workpiece IDs", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // Check for wp-id-link class in CSS and JS template
@@ -220,7 +221,7 @@ describe("Activity Log - Detail View Rendering", () => {
   });
 
   test("Detail view filters entries based on activityFilters state", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // The filtering logic uses activityFilters object
@@ -229,7 +230,7 @@ describe("Activity Log - Detail View Rendering", () => {
   });
 
   test("Detail view groups consecutive retry entries", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // The grouping logic creates retry_group objects
@@ -241,7 +242,7 @@ describe("Activity Log - Detail View Rendering", () => {
 
 describe("Activity Log - Overview page unchanged", () => {
   test("Overview page activity rendering does NOT contain filter buttons", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // The overview's activity section uses class="activity" and class="line-tag"
@@ -259,7 +260,7 @@ describe("Activity Log - Overview page unchanged", () => {
 
 describe("Activity Log - Filter reset on navigation", () => {
   test("selectLine resets activityFilters to empty object", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // Check that selectLine function contains activityFilters reset
@@ -271,7 +272,7 @@ describe("Activity Log - Filter reset on navigation", () => {
   });
 
   test("goBack resets activityFilters to empty object", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // Check that goBack function contains activityFilters reset
@@ -285,7 +286,7 @@ describe("Activity Log - Filter reset on navigation", () => {
 
 describe("Activity Log - No post-DOM filter re-application needed", () => {
   test("renderDetail does filtering during render, not after DOM rebuild", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // The new implementation filters during rendering, so there's no
@@ -301,7 +302,7 @@ describe("Activity Log - No post-DOM filter re-application needed", () => {
 
 describe("Activity Log - CSS classes present", () => {
   test("CSS contains activity-filters styles", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     expect(html).toContain(".activity-filters");
@@ -310,7 +311,7 @@ describe("Activity Log - CSS classes present", () => {
   });
 
   test("CSS contains retry-group-header and retry-group-entries styles", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     expect(html).toContain(".retry-group-header");
@@ -320,7 +321,7 @@ describe("Activity Log - CSS classes present", () => {
   });
 
   test("CSS contains wp-id-link styles", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     expect(html).toContain(".wp-id-link");
@@ -368,7 +369,7 @@ describe("Activity Log - Backward compatibility", () => {
 
 describe("Activity Log - Retry grouping in rendered output", () => {
   test("Consecutive retry events produce retry_group in JS rendering code", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // Verify that the grouping logic handles consecutive retries
@@ -377,7 +378,7 @@ describe("Activity Log - Retry grouping in rendered output", () => {
   });
 
   test("Retry grouping checks workpiece match for consecutive entries", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // The grouping logic checks workpiece identity for consecutive retries
@@ -387,7 +388,7 @@ describe("Activity Log - Retry grouping in rendered output", () => {
 
 describe("Activity Log - Filter logic verification", () => {
   test("Filter logic maps event types to filter keys correctly", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // Verify the filter mapping logic is present for key event types
@@ -468,7 +469,7 @@ describe("Activity Log - Edge cases", () => {
   });
 
   test("Single retry is not collapsed (via code verification)", async () => {
-    const res = await fetch(`http://localhost:${server!.port}/`);
+    const res = await request("/");
     const html = await res.text();
 
     // The grouping only collapses when retryRun.length >= 2

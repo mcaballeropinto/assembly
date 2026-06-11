@@ -21,6 +21,10 @@ function removeSnapshot() {
   if (existsSync(SNAP_PATH)) unlinkSync(SNAP_PATH);
 }
 
+function request(path: string): Promise<Response> {
+  return server!.fetch!(new Request(`http://localhost${path}`));
+}
+
 beforeAll(async () => {
   mkdirSync(LINE_DIR, { recursive: true });
   process.env.ASSEMBLY_LINE_DIRS = LINE_DIR;
@@ -28,15 +32,8 @@ beforeAll(async () => {
   process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
 
   const { startGlobalDashboard } = await import("../global-dashboard");
-  for (let attempt = 0; attempt < 20 && !server; attempt++) {
-    testPort = 20000 + Math.floor(Math.random() * 30000);
-    try {
-      server = startGlobalDashboard({ port: testPort });
-    } catch (err) {
-      if (!String((err as Error).message).includes("port")) throw err;
-    }
-  }
-  if (!server) throw new Error("Unable to start dashboard test server");
+  server = startGlobalDashboard({ port: 0 });
+  testPort = server.port;
   await new Promise((r) => setTimeout(r, 300));
 });
 
@@ -73,7 +70,7 @@ describe("GET /api/usage", () => {
         },
       },
     });
-    const res = await fetch(`http://localhost:${testPort}/api/usage`);
+    const res = await request("/api/usage");
     expect(res.status).toBe(200);
     const body = await res.json() as {
       checkedAt: string;
@@ -105,7 +102,7 @@ describe("GET /api/usage", () => {
         },
       },
     });
-    const res = await fetch(`http://localhost:${testPort}/api/usage`);
+    const res = await request("/api/usage");
     expect(res.status).toBe(200);
     const body = await res.json() as { paused: boolean; pauseReason: string };
     expect(body.paused).toBe(true);
@@ -114,7 +111,7 @@ describe("GET /api/usage", () => {
 
   test("returns { state: 'unknown' } when snapshot missing (200, not 500)", async () => {
     removeSnapshot();
-    const res = await fetch(`http://localhost:${testPort}/api/usage`);
+    const res = await request("/api/usage");
     expect(res.status).toBe(200);
     const body = await res.json() as { state: string; reason?: string };
     expect(body.state).toBe("unknown");
@@ -123,7 +120,7 @@ describe("GET /api/usage", () => {
 
   test("malformed JSON snapshot is treated as unknown (200, not 500)", async () => {
     writeSnapshot("{not valid json]]]");
-    const res = await fetch(`http://localhost:${testPort}/api/usage`);
+    const res = await request("/api/usage");
     expect(res.status).toBe(200);
     const body = await res.json() as { state: string };
     expect(body.state).toBe("unknown");
@@ -136,7 +133,7 @@ describe("GET /api/usage", () => {
       paused: false,
       providers: { codex: { buckets: [] } },
     });
-    const res = await fetch(`http://localhost:${testPort}/api/usage`);
+    const res = await request("/api/usage");
     expect(res.status).toBe(200);
     const body = await res.json() as { checkedAt: string; ageMs: number | null };
     expect(body.checkedAt).toBe("not-a-date");
@@ -146,7 +143,7 @@ describe("GET /api/usage", () => {
 
 describe("Dashboard HTML exposes usage panel mount + client JS", () => {
   test("HTML contains usage-panel-mount and loadUsage", async () => {
-    const res = await fetch(`http://localhost:${testPort}/`);
+    const res = await request("/");
     const html = await res.text();
     expect(html).toContain("usage-panel-mount");
     expect(html).toContain("loadUsage");
@@ -155,7 +152,7 @@ describe("Dashboard HTML exposes usage panel mount + client JS", () => {
   });
 
   test("HTML contains compact usage indicator mount + popover plumbing", async () => {
-    const res = await fetch(`http://localhost:${testPort}/`);
+    const res = await request("/");
     const html = await res.text();
     // Compact mount lives inside the subtitle header row.
     expect(html).toContain('id="usage-compact-mount"');
