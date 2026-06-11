@@ -50,7 +50,7 @@ If tests fail, include the full error output in your feedback.
 
 ### 3. Verify All Planned Files Were Changed
 
-Cross-reference `plan.data.files_to_change` and `plan.data.files_to_create` against `develop.data.files_changed` and `develop.data.files_created`.
+Cross-reference `plan.data.files_to_change` and `plan.data.files_to_create` against `develop.data.files_changed` and `develop.data.files_created`. Treat planned entries ending in `/` as directory specs that allow generated descendants.
 
 Check the git diff to see actual changes:
 ```bash
