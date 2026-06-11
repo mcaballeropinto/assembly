@@ -9,6 +9,7 @@ const LINE_NAME = "held-route-test-line";
 const LINE_DIR = resolve(TEMP_DIR, "lines", LINE_NAME);
 
 const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
+const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number } | null = null;
 let testPort: number;
@@ -47,11 +48,19 @@ beforeAll(async () => {
 
   // Set env so the dashboard discovers our temp line
   process.env.ASSEMBLY_LINE_DIRS = resolve(TEMP_DIR, "lines");
+  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
 
   // Start dashboard server on a random port
   const { startGlobalDashboard } = await import("../global-dashboard");
-  testPort = 14200 + Math.floor(Math.random() * 800);
-  server = startGlobalDashboard({ port: testPort });
+  for (let attempt = 0; attempt < 20 && !server; attempt++) {
+    testPort = 20000 + Math.floor(Math.random() * 30000);
+    try {
+      server = startGlobalDashboard({ port: testPort });
+    } catch (err) {
+      if (!String((err as Error).message).includes("port")) throw err;
+    }
+  }
+  if (!server) throw new Error("Unable to start dashboard test server");
 
   // Wait for server to discover lines
   await new Promise((r) => setTimeout(r, 1500));
@@ -64,6 +73,8 @@ afterAll(() => {
   } else {
     delete process.env.ASSEMBLY_LINE_DIRS;
   }
+  if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
+  else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
   try {
     rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}

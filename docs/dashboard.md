@@ -3,10 +3,11 @@
 The dashboard is a Bun HTTP server that reads the file system and renders a live view of every line. It's **independent of the daemon** — it can run without the orchestrator (you'll just see static state) and the orchestrator can run without it (it's an observation layer).
 
 Implementations:
-- [`../src/global-dashboard.ts`](../src/global-dashboard.ts) — HTTP server, routing, SPA shell
+- [`../src/global-dashboard.ts`](../src/global-dashboard.ts) — HTTP API server plus built SPA / legacy fallback shell
 - [`../src/dashboard-server.ts`](../src/dashboard-server.ts) — process wrapper (PID file, signal handlers)
 - [`../src/dashboard-data.ts`](../src/dashboard-data.ts) — state aggregation
-- [`../src/dashboard-client.js`](../src/dashboard-client.js) — browser client (3-second poll + morphdom diff)
+- [`../web/`](../web/) — React/Vite dashboard frontend, built to committed `web/dist/`
+- [`../src/dashboard-client.js`](../src/dashboard-client.js) — legacy fallback browser client (3-second poll + morphdom diff)
 - [`../src/task-events.ts`](../src/task-events.ts) — per-station event stream
 - [`../src/retry-manual.ts`](../src/retry-manual.ts) — human-triggered retry endpoint
 - [`../src/error-dismiss.ts`](../src/error-dismiss.ts) — error suppression endpoint
@@ -28,6 +29,19 @@ assembly dashboard stop
 ```
 
 Browse at `http://localhost:4111`.
+
+When `web/dist/index.html` is present, the Bun server serves the built Vite SPA and static assets from `web/dist/assets/`. If that bundle is absent, it falls back to the embedded legacy dashboard shell in `global-dashboard.ts`; the legacy client remains in place for compatibility.
+
+For frontend development, run the backend and Vite dev server in separate terminals:
+
+```bash
+assembly dashboard --port 4111
+bun run dashboard:web
+```
+
+The Vite app proxies `/api` to `http://localhost:4111`, so frontend requests hit the running dashboard API while Vite serves the React app.
+
+Before publishing, `prepublishOnly` runs `bun run build:web`. The generated `web/dist/` directory is intentionally committed so global installs can serve the SPA without requiring a local frontend build.
 
 ---
 
@@ -203,7 +217,7 @@ POST /api/line/<line>/errors/dismiss        → dismiss errors
 GET  /api/lines/<line>/workpieces/<id>      → single workpiece JSON
 ```
 
-Static assets (the client JS bundle and morphdom UMD) are served inline.
+Static assets for the built React app are served from `web/dist/assets/`. The legacy client JS bundle and morphdom UMD remain served inline by the fallback shell.
 
 ---
 
