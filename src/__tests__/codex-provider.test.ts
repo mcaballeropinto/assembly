@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join as joinPath } from "path";
 import {
@@ -18,6 +18,9 @@ import {
   buildEnvelopeInstruction,
   DEFAULT_CODEX_MODEL,
   ensureProviderWorkspace,
+  normalizeCodexUsageSnapshot,
+  writeCodexUsageSnapshot,
+  buildSyntheticCodexUsageSnapshotFromError,
 } from "../llm";
 import { calculateCost, calculateCostWithCache } from "../pricing";
 
@@ -31,6 +34,67 @@ afterEach(() => {
     if (original === undefined) delete process.env[key];
     else process.env[key] = original;
   }
+});
+
+// ─── Codex usage snapshots ──────────────────────────────────────────
+
+describe("codex usage snapshots", () => {
+  it("normalizes documented rate_limits payloads", () => {
+    const now = new Date("2026-06-11T10:00:00Z");
+    const snapshot = normalizeCodexUsageSnapshot({
+      limit_id: "codex",
+      primary: { used_percent: 12.5, window_minutes: 300, resets_at: 1780898307 },
+      secondary: { used_percent: 34, window_minutes: 10080, resets_at: 1781485107 },
+      plan_type: "prolite",
+    }, now);
+
+    expect(snapshot).toEqual({
+      checkedAt: now.toISOString(),
+      primary: { used_percent: 12.5, window_minutes: 300, resets_at: 1780898307 },
+      secondary: { used_percent: 34, window_minutes: 10080, resets_at: 1781485107 },
+      plan_type: "prolite",
+    });
+  });
+
+  it("writes codex usage snapshots atomically", () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "assembly-codex-usage-"));
+    try {
+      const target = joinPath(root, "codex-usage.json");
+      writeCodexUsageSnapshot({
+        checkedAt: "2026-06-11T10:00:00Z",
+        primary: { used_percent: 20, window_minutes: 300, resets_at: 1780898307 },
+      }, target);
+      expect(existsSync(target)).toBe(true);
+      expect(JSON.parse(readFileSync(target, "utf8")).primary.used_percent).toBe(20);
+      expect(readdirSync(root).filter((f) => f.includes(".tmp.")).length).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("builds synthetic 100% usage snapshots from usage-limit errors", () => {
+    const now = new Date("2026-06-11T03:30:00");
+    const snapshot = buildSyntheticCodexUsageSnapshotFromError(
+      "You've hit your usage limit, try again at 4:57 AM",
+      now
+    );
+    const expected = new Date(now);
+    expected.setHours(4, 57, 0, 0);
+
+    expect(snapshot?.primary?.used_percent).toBe(100);
+    expect(snapshot?.primary?.window_minutes).toBe(300);
+    expect(snapshot?.primary?.resets_at).toBe(Math.floor(expected.getTime() / 1000));
+  });
+
+  it("falls back to now plus 300 minutes for usage-limit errors without reset text", () => {
+    const now = new Date("2026-06-11T03:30:00Z");
+    const snapshot = buildSyntheticCodexUsageSnapshotFromError("Codex error: usage limit reached", now);
+    expect(snapshot?.primary?.resets_at).toBe(Math.floor((now.getTime() + 300 * 60_000) / 1000));
+  });
+
+  it("ignores non-usage-limit errors", () => {
+    expect(buildSyntheticCodexUsageSnapshotFromError("network failed")).toBeNull();
+  });
 });
 
 // ─── resolveModelForProvider ────────────────────────────────────────

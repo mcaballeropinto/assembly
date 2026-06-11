@@ -15,9 +15,11 @@ import { join } from "path";
 
 const TMP_DIR = resolve("/tmp", `assembly-usage-test-${Date.now()}-${process.pid}`);
 const SNAP_PATH = resolve(TMP_DIR, "usage-status.json");
+const CODEX_USAGE_PATH = resolve(TMP_DIR, "codex-usage.json");
 
 const originalFetch = globalThis.fetch;
 const originalSnapEnv = process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
+const originalCodexUsageEnv = process.env.ASSEMBLY_CODEX_USAGE_FILE;
 const originalThresholdEnv = process.env.ASSEMBLY_USAGE_THRESHOLD;
 
 let fetchCallCount = 0;
@@ -54,9 +56,14 @@ function stubFetch(payload: unknown, status = 200) {
   }) as typeof fetch;
 }
 
+function writeCodexUsage(payload: unknown) {
+  writeFileSync(CODEX_USAGE_PATH, JSON.stringify(payload));
+}
+
 beforeEach(() => {
   mkdirSync(TMP_DIR, { recursive: true });
   process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = SNAP_PATH;
+  process.env.ASSEMBLY_CODEX_USAGE_FILE = CODEX_USAGE_PATH;
   delete process.env.ASSEMBLY_USAGE_THRESHOLD;
   __resetUsageGateStateForTest();
   seedFakeToken();
@@ -66,6 +73,8 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   if (originalSnapEnv === undefined) delete process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
   else process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = originalSnapEnv;
+  if (originalCodexUsageEnv === undefined) delete process.env.ASSEMBLY_CODEX_USAGE_FILE;
+  else process.env.ASSEMBLY_CODEX_USAGE_FILE = originalCodexUsageEnv;
   if (originalThresholdEnv === undefined) delete process.env.ASSEMBLY_USAGE_THRESHOLD;
   else process.env.ASSEMBLY_USAGE_THRESHOLD = originalThresholdEnv;
   __resetUsageGateStateForTest();
@@ -166,13 +175,45 @@ describe("checkProviderUsage (claude-code)", () => {
   });
 });
 
+describe("checkProviderUsage (codex)", () => {
+  test("allows cold start when codex usage file is missing", async () => {
+    const status = await checkProviderUsage("codex");
+    expect(status.canProcess).toBe(true);
+  });
+
+  test("canProcess true when codex windows are under threshold", async () => {
+    writeCodexUsage({
+      checkedAt: "2026-06-11T10:00:00Z",
+      primary: { used_percent: 20, window_minutes: 300, resets_at: 1780898307 },
+      secondary: { used_percent: 30, window_minutes: 10080, resets_at: 1781485107 },
+      plan_type: "prolite",
+    });
+    const status = await checkProviderUsage("codex");
+    expect(status.canProcess).toBe(true);
+  });
+
+  test("canProcess false when codex window crosses threshold", async () => {
+    process.env.ASSEMBLY_USAGE_THRESHOLD = "75";
+    writeCodexUsage({
+      checkedAt: "2026-06-11T10:00:00Z",
+      primary: { used_percent: 92, window_minutes: 300, resets_at: 1780898307 },
+      secondary: { used_percent: 10, window_minutes: 10080, resets_at: 1781485107 },
+    });
+    const status = await checkProviderUsage("codex");
+    expect(status.canProcess).toBe(false);
+    expect(status.reason).toMatch(/5h session at 92\.0%/);
+    expect(status.reason).toMatch(/>= 75%/);
+    expect(status.resetAt?.toISOString()).toBe(new Date(1780898307 * 1000).toISOString());
+  });
+});
+
 describe("evaluateAndSnapshot", () => {
-  test("writes healthy snapshot when under threshold", async () => {
+  test("writes healthy claude snapshot when under threshold", async () => {
     stubFetch({
       five_hour: { utilization: 17, resets_at: "2026-04-20T15:00:00Z" },
       seven_day: { utilization: 28, resets_at: "2026-04-24T16:00:00Z" },
     });
-    const decision = await evaluateAndSnapshot();
+    const decision = await evaluateAndSnapshotForProviders(["claude-code"]);
     expect(decision.blocked).toBe(false);
     const snap = readUsageSnapshot();
     expect(snap).not.toBeNull();
@@ -180,12 +221,12 @@ describe("evaluateAndSnapshot", () => {
     expect(snap?.providers["claude-code"]?.buckets.length).toBe(2);
   });
 
-  test("writes paused snapshot when a bucket crosses the threshold", async () => {
+  test("writes paused claude snapshot when a bucket crosses the threshold", async () => {
     process.env.ASSEMBLY_USAGE_THRESHOLD = "10";
     stubFetch({
       five_hour: { utilization: 17, resets_at: "2026-04-20T15:00:00Z" },
     });
-    const decision = await evaluateAndSnapshot();
+    const decision = await evaluateAndSnapshotForProviders(["claude-code"]);
     expect(decision.blocked).toBe(true);
     const snap = readUsageSnapshot();
     expect(snap?.paused).toBe(true);
@@ -195,7 +236,7 @@ describe("evaluateAndSnapshot", () => {
 
   test("fail-closed on fetch error — snapshot records it", async () => {
     stubFetch({}, 500);
-    const decision = await evaluateAndSnapshot();
+    const decision = await evaluateAndSnapshotForProviders(["claude-code"]);
     expect(decision.blocked).toBe(true);
     const snap = readUsageSnapshot();
     expect(snap?.paused).toBe(true);
@@ -204,20 +245,60 @@ describe("evaluateAndSnapshot", () => {
 
   test("throttles writes within 30s window", async () => {
     stubFetch({ five_hour: { utilization: 10, resets_at: null } });
-    await evaluateAndSnapshot();
+    await evaluateAndSnapshotForProviders(["claude-code"]);
     const firstFetchCount = fetchCallCount;
     // Immediate second call — must not re-fetch or re-write.
-    await evaluateAndSnapshot();
+    await evaluateAndSnapshotForProviders(["claude-code"]);
     expect(fetchCallCount).toBe(firstFetchCount);
   });
 
-  test("skips Claude usage fetch for codex/script-only providers", async () => {
+  test("evaluates codex from codex usage file without fetching Claude OAuth", async () => {
     stubFetch({ five_hour: { utilization: 99, resets_at: null } });
+    writeCodexUsage({
+      checkedAt: "2026-06-11T10:00:00Z",
+      primary: { used_percent: 20, window_minutes: 300, resets_at: 1780898307 },
+      secondary: { used_percent: 30, window_minutes: 10080, resets_at: 1781485107 },
+      plan_type: "prolite",
+    });
     const decision = await evaluateAndSnapshotForProviders(["codex", "script"]);
     expect(decision.blocked).toBe(false);
     expect(fetchCallCount).toBe(0);
     const snap = readUsageSnapshot();
     expect(snap?.paused).toBe(false);
-    expect(Object.keys(snap?.providers ?? {})).toEqual([]);
+    expect(snap?.providers.codex?.buckets.map((b) => b.label)).toEqual(["5h session", "7d"]);
+  });
+
+  test("writes paused codex snapshot when codex crosses threshold", async () => {
+    process.env.ASSEMBLY_USAGE_THRESHOLD = "70";
+    writeCodexUsage({
+      checkedAt: "2026-06-11T10:00:00Z",
+      primary: { used_percent: 50, window_minutes: 300, resets_at: 1781485107 },
+      secondary: { used_percent: 80, window_minutes: 10080, resets_at: 1780898307 },
+    });
+    const decision = await evaluateAndSnapshotForProviders(["codex"]);
+    expect(decision.blocked).toBe(true);
+    expect(decision.reason).toMatch(/codex: 7d at 80\.0%/);
+    const snap = readUsageSnapshot();
+    expect(snap?.paused).toBe(true);
+    expect(snap?.providers.codex?.buckets.length).toBe(2);
+  });
+
+  test("default evaluateAndSnapshot uses codex provider", async () => {
+    writeCodexUsage({
+      checkedAt: "2026-06-11T10:00:00Z",
+      primary: { used_percent: 10, window_minutes: 300, resets_at: 1780898307 },
+    });
+    const decision = await evaluateAndSnapshot();
+    expect(decision.blocked).toBe(false);
+    const snap = readUsageSnapshot();
+    expect(snap?.providers.codex?.buckets[0].label).toBe("5h session");
+  });
+
+  test("missing codex usage file writes empty codex buckets and does not block", async () => {
+    const decision = await evaluateAndSnapshotForProviders(["codex"]);
+    expect(decision.blocked).toBe(false);
+    const snap = readUsageSnapshot();
+    expect(snap?.paused).toBe(false);
+    expect(snap?.providers.codex?.buckets).toEqual([]);
   });
 });

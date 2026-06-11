@@ -1595,7 +1595,7 @@ export async function startOrchestrator(
     });
   }
 
-  // --- Usage gate (account-wide Claude Code plan limits) ---
+  // --- Usage gate (account-wide provider plan limits) ---
   // evaluateAndSnapshot() writes ~/.assembly/usage-status.json for the
   // dashboard panel and returns blocked/not. Throttled at the source
   // (30s write window + 60s fetch cache), so calling it on every
@@ -1605,8 +1605,11 @@ export async function startOrchestrator(
 
   function startUsageResumePoll() {
     if (usageResumeTimer) return;
+    const resumeProviders = Array.from(
+      new Set(sections.map((section) => section.provider ?? "claude-code"))
+    );
     usageResumeTimer = setInterval(() => {
-      evaluateAndSnapshotForProviders(["claude-code"]).then((decision) => {
+      evaluateAndSnapshotForProviders(resumeProviders).then((decision) => {
         if (!decision.blocked) {
           stopUsageResumePoll();
           if (usagePaused) {

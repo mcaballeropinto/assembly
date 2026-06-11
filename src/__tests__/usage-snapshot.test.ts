@@ -34,9 +34,9 @@ function paused(): UsageSnapshot {
     checkedAt: "2026-04-20T10:00:00Z",
     threshold: 75,
     paused: true,
-    pauseReason: "claude-code: 5h session at 81.2% (>= 75%), resets 2026-04-20T15:00:00Z",
+    pauseReason: "codex: 5h session at 81.2% (>= 75%), resets 2026-04-20T15:00:00Z",
     providers: {
-      "claude-code": {
+      codex: {
         buckets: [
           { label: "5h session", utilization: 81.2, resets_at: "2026-04-20T15:00:00Z" },
         ],
@@ -76,6 +76,7 @@ describe("writeUsageSnapshot / readUsageSnapshot", () => {
     const back = readUsageSnapshot();
     expect(back?.paused).toBe(true);
     expect(back?.pauseReason).toMatch(/5h session at 81\.2%/);
+    expect(back?.providers.codex?.buckets[0].label).toBe("5h session");
   });
 
   test("returns null when file missing", () => {

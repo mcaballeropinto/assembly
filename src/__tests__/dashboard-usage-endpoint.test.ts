@@ -65,10 +65,10 @@ describe("GET /api/usage", () => {
       threshold: 75,
       paused: false,
       providers: {
-        "claude-code": {
+        codex: {
           buckets: [
             { label: "5h session", utilization: 17, resets_at: "2026-04-20T15:00:00Z" },
-            { label: "7d combined", utilization: 28, resets_at: "2026-04-24T16:00:00Z" },
+            { label: "7d", utilization: 28, resets_at: "2026-04-24T16:00:00Z" },
           ],
         },
       },
@@ -85,8 +85,8 @@ describe("GET /api/usage", () => {
     expect(body.checkedAt).toBe(checkedAt);
     expect(body.threshold).toBe(75);
     expect(body.paused).toBe(false);
-    expect(body.providers["claude-code"].buckets.length).toBe(2);
-    expect(body.providers["claude-code"].buckets[0].label).toBe("5h session");
+    expect(body.providers.codex.buckets.length).toBe(2);
+    expect(body.providers.codex.buckets[0].label).toBe("5h session");
     expect(typeof body.ageMs).toBe("number");
     expect(body.ageMs).toBeGreaterThanOrEqual(0);
   });
@@ -96,9 +96,9 @@ describe("GET /api/usage", () => {
       checkedAt: new Date().toISOString(),
       threshold: 75,
       paused: true,
-      pauseReason: "claude-code: 5h session at 81.2% (>= 75%), resets 2026-04-20T15:00:00Z",
+      pauseReason: "codex: 5h session at 81.2% (>= 75%), resets 2026-04-20T15:00:00Z",
       providers: {
-        "claude-code": {
+        codex: {
           buckets: [
             { label: "5h session", utilization: 81.2, resets_at: "2026-04-20T15:00:00Z" },
           ],
@@ -134,7 +134,7 @@ describe("GET /api/usage", () => {
       checkedAt: "not-a-date",
       threshold: 75,
       paused: false,
-      providers: { "claude-code": { buckets: [] } },
+      providers: { codex: { buckets: [] } },
     });
     const res = await fetch(`http://localhost:${testPort}/api/usage`);
     expect(res.status).toBe(200);
@@ -150,6 +150,8 @@ describe("Dashboard HTML exposes usage panel mount + client JS", () => {
     const html = await res.text();
     expect(html).toContain("usage-panel-mount");
     expect(html).toContain("loadUsage");
+    expect(html).toContain("providers['codex']");
+    expect(html).not.toContain("providers['claude-code']");
   });
 
   test("HTML contains compact usage indicator mount + popover plumbing", async () => {
