@@ -19,6 +19,7 @@ import {
   validateGuardrails,
   buildRepairPrompt,
   EnvelopeError,
+  GuardrailError,
 } from "./envelope";
 import { runStationEval } from "./station-eval";
 import { Logger } from "./logger";
@@ -132,6 +133,7 @@ export async function run(options: RunOptions): Promise<Workpiece> {
     logger.stationStart(stationName, `${stationProvider}:${stationModel}`);
 
     const stationStarted = new Date().toISOString();
+    let stationFailed = false;
 
     try {
       const effectiveContextMode =
@@ -190,7 +192,7 @@ export async function run(options: RunOptions): Promise<Workpiece> {
           // Validate guardrails
           const guardrailErrors = validateGuardrails(envelope, station);
           if (guardrailErrors.length > 0) {
-            console.log(`  ⚠ Guardrail warnings: ${guardrailErrors.join(", ")}`);
+            throw new GuardrailError(guardrailErrors);
           }
 
           if (!station.eval) break;
@@ -391,9 +393,7 @@ export async function run(options: RunOptions): Promise<Workpiece> {
           // Validate guardrails
           const guardrailErrors = validateGuardrails(envelope, station);
           if (guardrailErrors.length > 0) {
-            console.log(
-              `  ⚠ Guardrail warnings: ${guardrailErrors.join(", ")}`
-            );
+            throw new GuardrailError(guardrailErrors);
           }
 
           // Run eval if configured
@@ -598,6 +598,7 @@ export async function run(options: RunOptions): Promise<Workpiece> {
       }, failureClass);
 
       logger.stationEnd(stationName, "failed", { in: 0, out: 0 });
+      stationFailed = true;
 
       try {
         appendFileSync(activityLogPath, JSON.stringify({
@@ -613,6 +614,7 @@ export async function run(options: RunOptions): Promise<Workpiece> {
 
     // Checkpoint — save after every station
     await saveWorkpiece(workpiece, runDir);
+    if (stationFailed) break;
   }
 
   // Save totals to workpiece

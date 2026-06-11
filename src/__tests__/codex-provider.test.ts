@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join as joinPath } from "path";
 import {
@@ -17,6 +17,7 @@ import {
   summarizeCodexItem,
   buildEnvelopeInstruction,
   DEFAULT_CODEX_MODEL,
+  ensureProviderWorkspace,
 } from "../llm";
 import { calculateCost, calculateCostWithCache } from "../pricing";
 
@@ -262,5 +263,28 @@ describe("buildEnvelopeInstruction", () => {
     expect(shell).toContain("via your shell");
     expect(shell).not.toContain("Write tool");
     expect(shell).not.toContain("Bash tool");
+  });
+});
+
+// ─── provider workspace preflight ───────────────────────────────────
+
+describe("ensureProviderWorkspace", () => {
+  it("creates a missing scratch cwd and envelope parent directory", () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "assembly-provider-workspace-"));
+    try {
+      const scratchCwd = joinPath(root, "scratch", "nested");
+      const envelopePath = joinPath(root, "run", "stations", "score", "envelope.json");
+
+      ensureProviderWorkspace(scratchCwd, envelopePath);
+
+      expect(existsSync(scratchCwd)).toBe(true);
+      expect(existsSync(joinPath(root, "run", "stations", "score"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("is a no-op when no workspace paths are provided", () => {
+    expect(() => ensureProviderWorkspace(undefined, undefined)).not.toThrow();
   });
 });
