@@ -8,14 +8,15 @@ import {
   ErrorFileNotFoundError,
 } from "./retry-manual";
 import { loadLine } from "./line";
-import { basename, resolve } from "path";
+import { basename, extname, normalize, resolve, sep } from "path";
 import { LineName } from "./ids";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "fs";
 import { readUsageSnapshot } from "./usage-snapshot";
 import { createRequire } from "module";
 const _require = createRequire(import.meta.url);
 const MORPHDOM_UMD = readFileSync(_require.resolve("morphdom/dist/morphdom-umd.min.js"), "utf-8");
 const DASHBOARD_CLIENT_JS = readFileSync(resolve(import.meta.dir, "dashboard-client.js"), "utf-8");
+const DEFAULT_WEB_DIST_DIR = resolve(import.meta.dir, "..", "web", "dist");
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -115,6 +116,69 @@ async function buildGlobalState(lines: DiscoveredLine[]): Promise<GlobalState> {
 
 // ─── Dashboard Server ──────────────────────────────────────────────
 
+function getDashboardMimeType(file: ReturnType<typeof Bun.file>, filePath: string): string {
+  if (file.type) return file.type;
+
+  switch (extname(filePath).toLowerCase()) {
+    case ".js":
+    case ".mjs":
+      return "text/javascript; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".ico":
+      return "image/x-icon";
+    case ".woff":
+      return "font/woff";
+    case ".woff2":
+      return "font/woff2";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function resolveDashboardAssetPath(pathname: string, webDistAssetsDir: string): string | null {
+  const assetPrefix = "/assets/";
+  if (!pathname.startsWith(assetPrefix)) return null;
+
+  let assetName: string;
+  try {
+    assetName = decodeURIComponent(pathname.slice(assetPrefix.length));
+  } catch {
+    return null;
+  }
+
+  if (!assetName || assetName.includes("\0")) return null;
+
+  const normalizedAssetPath = normalize(resolve(webDistAssetsDir, assetName));
+  const normalizedAssetDir = normalize(webDistAssetsDir);
+  if (!normalizedAssetPath.startsWith(`${normalizedAssetDir}${sep}`)) return null;
+
+  try {
+    if (!statSync(normalizedAssetPath).isFile()) return null;
+  } catch {
+    return null;
+  }
+
+  return normalizedAssetPath;
+}
+
+function getRawPathname(requestUrl: string): string {
+  const withoutOrigin = requestUrl.replace(/^[a-z]+:\/\/[^/]+/i, "");
+  const path = withoutOrigin.split(/[?#]/, 1)[0];
+  return path || "/";
+}
+
 /**
  * Start the unified multi-line dashboard HTTP server.
  * Discovers lines independently and reads all state from the filesystem.
@@ -123,6 +187,10 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
   stop: () => void;
   port: number;
 } {
+  const webDistDir = resolve(process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
+  const webDistIndex = resolve(webDistDir, "index.html");
+  const webDistAssetsDir = resolve(webDistDir, "assets");
+
   // Discover lines on startup and refresh periodically
   let discoveredLines: DiscoveredLine[] = [];
   let linesByName: Map<string, DiscoveredLine> = new Map();
@@ -142,6 +210,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
     port: options.port,
     async fetch(req) {
       const url = new URL(req.url);
+      const rawPathname = getRawPathname(req.url);
 
       // Global state API
       if (url.pathname === "/api/state") {
@@ -458,21 +527,45 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
         return Response.json({ error: "Invalid path" }, { status: 400 });
       }
 
-      // SPA catch-all: serve dashboard HTML for any non-API path
+      // Built SPA assets, served only from web/dist/assets.
+      if (rawPathname.startsWith("/assets/") || url.pathname.startsWith("/assets/")) {
+        const assetPath = resolveDashboardAssetPath(
+          rawPathname.startsWith("/assets/") ? rawPathname : url.pathname,
+          webDistAssetsDir
+        );
+        if (!assetPath) return new Response("Not found", { status: 404 });
+
+        const file = Bun.file(assetPath);
+        return new Response(file, {
+          headers: {
+            "Content-Type": getDashboardMimeType(file, assetPath),
+            "Cache-Control": "public, max-age=31536000, immutable",
+          },
+        });
+      }
+
+      // SPA catch-all: serve built dashboard when available, then legacy fallback.
+      const indexFile = Bun.file(webDistIndex);
+      if (await indexFile.exists()) {
+        return new Response(indexFile, {
+          headers: { "Content-Type": getDashboardMimeType(indexFile, webDistIndex) },
+        });
+      }
+
       return new Response(GLOBAL_DASHBOARD_HTML, {
-        headers: { "Content-Type": "text/html" },
+        headers: { "Content-Type": "text/html; charset=utf-8" },
       });
     },
   });
 
-  console.log(`\n  Dashboard: http://localhost:${options.port}\n`);
+  console.log(`\n  Dashboard: http://localhost:${server.port}\n`);
 
   return {
     stop: () => {
       clearInterval(refreshInterval);
       server.stop();
     },
-    port: options.port,
+    port: server.port,
   };
 }
 

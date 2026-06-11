@@ -8,6 +8,7 @@ const LINE_DIR = resolve(TEMP_DIR, "lines");
 
 const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalSnapEnv = process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
+const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number } | null = null;
 let testPort: number;
@@ -24,10 +25,18 @@ beforeAll(async () => {
   mkdirSync(LINE_DIR, { recursive: true });
   process.env.ASSEMBLY_LINE_DIRS = LINE_DIR;
   process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = SNAP_PATH;
+  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
 
   const { startGlobalDashboard } = await import("../global-dashboard");
-  testPort = 15200 + Math.floor(Math.random() * 800);
-  server = startGlobalDashboard({ port: testPort });
+  for (let attempt = 0; attempt < 20 && !server; attempt++) {
+    testPort = 20000 + Math.floor(Math.random() * 30000);
+    try {
+      server = startGlobalDashboard({ port: testPort });
+    } catch (err) {
+      if (!String((err as Error).message).includes("port")) throw err;
+    }
+  }
+  if (!server) throw new Error("Unable to start dashboard test server");
   await new Promise((r) => setTimeout(r, 300));
 });
 
@@ -37,6 +46,8 @@ afterAll(() => {
   else process.env.ASSEMBLY_LINE_DIRS = originalLineDirs;
   if (originalSnapEnv === undefined) delete process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
   else process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = originalSnapEnv;
+  if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
+  else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
   try {
     rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}
