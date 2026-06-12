@@ -950,10 +950,25 @@ if (!lintPassed) {
 
 // ─── Run tests ────────────────────────────────────────────────────────
 
+const REQUIRED_TESTS = ["src/__tests__/improver.test.ts"];
+log(`running bun test ${REQUIRED_TESTS.join(" ")}`);
+const targetedTestR = spawnSync("bun", ["test", ...REQUIRED_TESTS], {
+  cwd: wt,
+  encoding: "utf-8",
+  timeout: 300_000,
+});
+const targetedTestOut = (targetedTestR.stdout ?? "") + "\n" + (targetedTestR.stderr ?? "");
+if (targetedTestR.status !== 0) {
+  testsPassed = false;
+  testOut = targetedTestOut.slice(-4000);
+  log(`required improver tests failed (exit ${targetedTestR.status})`);
+}
+
 log(`running bun test`);
 const testR = spawnSync("bun", ["test"], { cwd: wt, encoding: "utf-8", timeout: 180_000 });
-testOut = ((testR.stdout ?? "") + "\n" + (testR.stderr ?? "")).slice(-4000);
-testsPassed = testR.status === 0;
+const fullTestOut = (testR.stdout ?? "") + "\n" + (testR.stderr ?? "");
+testOut = (targetedTestR.status === 0 ? fullTestOut : `${targetedTestOut}\n\n${fullTestOut}`).slice(-4000);
+testsPassed = targetedTestR.status === 0 && testR.status === 0;
 if (!testsPassed) {
   log(`tests failed (exit ${testR.status})`);
 }

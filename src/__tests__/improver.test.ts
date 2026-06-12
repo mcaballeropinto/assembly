@@ -9,6 +9,7 @@ import {
   normalizeSlug,
   parseVerdict,
   buildAssessmentMessages,
+  guardedDownstreamSuccessVerdict,
   VerdictParseError,
   type AssessmentVerdict,
 } from "../improver/assess";
@@ -41,6 +42,39 @@ function makeLine(name: string): string {
   for (const sub of ["inbox", "processing", "output"]) {
     mkdirSync(resolve(stationDir, "queue", sub), { recursive: true });
   }
+  return linePath;
+}
+
+function makeGuardedProspectorLine(name: string): string {
+  const linePath = resolve(tempDir, "lines", name);
+  for (const bucket of ["inbox", "held", "done", "error", "review"]) {
+    mkdirSync(resolve(linePath, "queues", bucket), { recursive: true });
+  }
+  writeFileSync(
+    resolve(linePath, "line.yaml"),
+    `name: ${name}\nsequence:\n  - score\n  - push-to-attio\n`
+  );
+  for (const station of ["score", "push-to-attio"]) {
+    const stationDir = resolve(linePath, "stations", station);
+    mkdirSync(stationDir, { recursive: true });
+    for (const sub of ["inbox", "processing", "output"]) {
+      mkdirSync(resolve(stationDir, "queue", sub), { recursive: true });
+    }
+  }
+  writeFileSync(
+    resolve(linePath, "stations", "score", "AGENT.md"),
+    [
+      "---",
+      "guardrails:",
+      "  output:",
+      "    required:",
+      "      - data.scored_companies",
+      "---",
+      "",
+      "Score companies.",
+    ].join("\n")
+  );
+  writeFileSync(resolve(linePath, "stations", "push-to-attio", "AGENT.md"), "---\n---\n\nPush to Attio.\n");
   return linePath;
 }
 
@@ -132,6 +166,7 @@ describe("loadImproverConfig", () => {
         "  dev_line: my-dev",
         "  exclude_lines: [hello-world, 42]",
         "  max_open_proposals: 5",
+        "  max_dev_task_retries: 3",
         "  sweep_interval_minutes: -3",
       ].join("\n")
     );
@@ -141,6 +176,7 @@ describe("loadImproverConfig", () => {
     expect(cfg.devLine).toBe("my-dev");
     expect(cfg.excludeLines).toEqual(["hello-world"]);
     expect(cfg.maxOpenProposals).toBe(5);
+    expect(cfg.maxDevTaskRetries).toBe(3);
     // negative interval falls back to the default
     expect(cfg.sweepIntervalMs).toBe(IMPROVER_DEFAULTS.sweepIntervalMs);
   });
@@ -252,6 +288,42 @@ describe("ImproverState", () => {
     });
     expect(s.openProposals().length).toBe(0);
     // Lifetime count survives resolution — feeds the per-issue cap.
+    expect(s.proposalCountForIssue("a/work/slow-fetch")).toBe(1);
+  });
+
+  test("dev_retry retargets an open proposal without increasing lifetime proposal count", () => {
+    const s = ImproverState.load(resolve(tempDir, "state"));
+    s.appendEvent({
+      type: "proposed",
+      proposal_id: "imp_1",
+      issue_key: "a/work/slow-fetch",
+      source_line: "a",
+      source_line_path: "/lines/a",
+      issue_slug: "slow-fetch",
+      target_station: "work",
+      title: "Fix slow fetch",
+      dev_task_key: "old-task",
+      dev_task_file: "old-task.json",
+      requeue: [{ line_path: "/lines/a", line: "a", bucket: "error", file_name: "r1.json", wp_id: "r1" }],
+      at: new Date().toISOString(),
+    });
+    s.appendEvent({
+      type: "dev_retry",
+      proposal_id: "imp_1",
+      issue_key: "a/work/slow-fetch",
+      previous_dev_task_key: "old-task",
+      dev_task_key: "new-task",
+      dev_task_file: "new-task.json",
+      dev_wp_id: "run_dev1",
+      reason: "tests failed",
+      at: new Date().toISOString(),
+    });
+
+    const open = s.openProposals();
+    expect(open.length).toBe(1);
+    expect(open[0].dev_task_key).toBe("new-task");
+    expect(open[0].dev_retry_count).toBe(1);
+    expect(open[0].requeue.map((r) => r.file_name)).toEqual(["r1.json"]);
     expect(s.proposalCountForIssue("a/work/slow-fetch")).toBe(1);
   });
 });
@@ -406,6 +478,71 @@ describe("buildAssessmentMessages", () => {
     expect(user).toContain("Do the work for ctx-line");
     expect(user).toContain("slow-fetch");
     expect(messages.find((m) => m.role === "system")!.content).toContain("fabrication is not");
+  });
+});
+
+describe("guardedDownstreamSuccessVerdict", () => {
+  test("returns no-action when guarded data exists and downstream station succeeded", () => {
+    const linePath = makeGuardedProspectorLine("em-prospector");
+    const verdict = guardedDownstreamSuccessVerdict({
+      workpiece: {
+        id: "run_ok",
+        task: "score",
+        stations: {
+          score: {
+            status: "done",
+            summary: "Unable to write the envelope file because of a bind-mount issue.",
+            data: { scored_companies: [{ name: "Platphorm", score: 84 }] },
+          },
+          "push-to-attio": { status: "done", summary: "Created Platphorm in Attio" },
+        },
+      },
+      lineName: "em-prospector",
+      linePath,
+      bucket: "done",
+      recentSlugs: [],
+      openTitles: [],
+    });
+    expect(verdict?.should_improve).toBe(false);
+    expect(verdict?.issue_slug).toBe("guarded-success");
+  });
+
+  test("returns null when guarded data is missing or downstream failed", () => {
+    const linePath = makeGuardedProspectorLine("em-prospector");
+    const base = {
+      id: "run_bad",
+      task: "score",
+      stations: {
+        score: { status: "done", summary: "scary summary", data: {} },
+        "push-to-attio": { status: "done", summary: "ok" },
+      },
+    };
+    expect(
+      guardedDownstreamSuccessVerdict({
+        workpiece: base,
+        lineName: "em-prospector",
+        linePath,
+        bucket: "done",
+        recentSlugs: [],
+        openTitles: [],
+      })
+    ).toBeNull();
+    expect(
+      guardedDownstreamSuccessVerdict({
+        workpiece: {
+          ...base,
+          stations: {
+            score: { status: "done", data: { scored_companies: [] } },
+            "push-to-attio": { status: "failed", summary: "Attio failed" },
+          },
+        },
+        lineName: "em-prospector",
+        linePath,
+        bucket: "done",
+        recentSlugs: [],
+        openTitles: [],
+      })
+    ).toBeNull();
   });
 });
 
@@ -570,6 +707,34 @@ describe("startImproverWatcher", () => {
     expect(calls.length).toBe(1);
   });
 
+  test("guarded downstream success bypasses assessment despite scary station summary", async () => {
+    const linePath = makeGuardedProspectorLine("em-prospector");
+    const devPath = makeLine("assembly-dev");
+    const { calls, handle: h } = startWatcher({
+      lines: [
+        { linePath, lineName: "em-prospector" },
+        { linePath: devPath, lineName: "assembly-dev" },
+      ],
+      verdicts: () => {
+        throw new Error("assessor should not run");
+      },
+    });
+    await h.sweep();
+    writeWorkpiece(linePath, "done", "run_guarded", {
+      stations: {
+        score: {
+          status: "done",
+          summary: "Unable to write the envelope file because the bind-mount path was unavailable.",
+          data: { scored_companies: [{ name: "Platphorm", score: 84 }] },
+        },
+        "push-to-attio": { status: "done", summary: "Platphorm was created in Attio" },
+      },
+    });
+    await h.sweep();
+    expect(calls.length).toBe(0);
+    expect(readdirSync(resolve(devPath, "queues", "inbox")).filter((f) => f.endsWith(".json"))).toEqual([]);
+  });
+
   test("high-confidence failure queues a dev task, duplicates become recurrences, fix completion requeues", async () => {
     const linePath = makeLine("line-a");
     const devPath = makeLine("assembly-dev");
@@ -646,6 +811,99 @@ describe("startImproverWatcher", () => {
     writeWorkpiece(linePath, "error", "run_f2");
     await h.sweep();
     expect(readdirSync(devInbox).filter((f) => f.endsWith(".json")).length).toBe(2);
+  });
+
+  test("recoverable failed dev task queues one repair without requeueing source tasks", async () => {
+    const linePath = makeLine("line-a");
+    const devPath = makeLine("assembly-dev");
+    const { notifications, handle: h } = startWatcher({
+      lines: [
+        { linePath, lineName: "line-a" },
+        { linePath: devPath, lineName: "assembly-dev" },
+      ],
+      verdicts: () => proposeVerdict("fetch-timeout"),
+    });
+    await h.sweep();
+    writeWorkpiece(linePath, "error", "run_f1");
+    await h.sweep();
+    const devInbox = resolve(devPath, "queues", "inbox");
+    const firstDevFile = readdirSync(devInbox).filter((f) => f.endsWith(".json"))[0];
+    const firstDevTask = JSON.parse(readFileSync(resolve(devInbox, firstDevFile), "utf-8"));
+
+    writeWorkpiece(devPath, "error", "run_dev_fail1", {
+      input: { improver: firstDevTask.input.improver },
+      stations: {
+        deploy: {
+          status: "failed",
+          summary: "deploy.ts exited with code 1; bun test exited 1; 1 tests failed",
+          data: { error: "startImproverWatcher stale sweep test failed" },
+        },
+      },
+    });
+    await h.sweep();
+
+    const devTasks = readdirSync(devInbox).filter((f) => f.endsWith(".json"));
+    expect(devTasks.length).toBe(2);
+    expect(readdirSync(resolve(linePath, "queues", "inbox")).filter((f) => f.endsWith(".json")).length).toBe(0);
+    expect(notifications.some((n) => n.includes("queued a repair task"))).toBe(true);
+
+    const repairFile = devTasks.find((f) => f !== firstDevFile)!;
+    const repairTask = JSON.parse(readFileSync(resolve(devInbox, repairFile), "utf-8"));
+    expect(repairTask.input.improver.proposal_id).toBe(firstDevTask.input.improver.proposal_id);
+    expect(repairTask.task).toContain("Repair failed improvement");
+
+    writeWorkpiece(devPath, "done", "run_dev_repair_done", {
+      input: { improver: repairTask.input.improver },
+    });
+    await h.sweep();
+    const requeued = readdirSync(resolve(linePath, "queues", "inbox")).filter((f) => f.endsWith(".json"));
+    expect(requeued.length).toBe(1);
+    expect(JSON.parse(readFileSync(resolve(linePath, "queues", "inbox", requeued[0]), "utf-8")).parent_run_id).toBe(
+      "run_f1"
+    );
+  });
+
+  test("recoverable dev failures resolve as fix_failed after retry limit", async () => {
+    const linePath = makeLine("line-a");
+    const devPath = makeLine("assembly-dev");
+    const { notifications, handle: h } = startWatcher({
+      lines: [
+        { linePath, lineName: "line-a" },
+        { linePath: devPath, lineName: "assembly-dev" },
+      ],
+      verdicts: () => proposeVerdict("fetch-timeout"),
+      config: { maxDevTaskRetries: 1 },
+    });
+    await h.sweep();
+    writeWorkpiece(linePath, "error", "run_f1");
+    await h.sweep();
+    const devInbox = resolve(devPath, "queues", "inbox");
+    const firstDevFile = readdirSync(devInbox).filter((f) => f.endsWith(".json"))[0];
+    const firstDevTask = JSON.parse(readFileSync(resolve(devInbox, firstDevFile), "utf-8"));
+    const failureStations = {
+      deploy: {
+        status: "failed",
+        summary: "deploy.ts exited with code 1; bun test exited 1; 1 tests failed",
+      },
+    };
+
+    writeWorkpiece(devPath, "error", "run_dev_fail1", {
+      input: { improver: firstDevTask.input.improver },
+      stations: failureStations,
+    });
+    await h.sweep();
+    expect(readdirSync(devInbox).filter((f) => f.endsWith(".json")).length).toBe(2);
+    const repairFile = readdirSync(devInbox).filter((f) => f.endsWith(".json") && f !== firstDevFile)[0];
+    const repairTask = JSON.parse(readFileSync(resolve(devInbox, repairFile), "utf-8"));
+
+    writeWorkpiece(devPath, "error", "run_dev_fail2", {
+      input: { improver: repairTask.input.improver },
+      stations: failureStations,
+    });
+    await h.sweep();
+    expect(readdirSync(devInbox).filter((f) => f.endsWith(".json")).length).toBe(2);
+    expect(readdirSync(resolve(linePath, "queues", "inbox")).filter((f) => f.endsWith(".json")).length).toBe(0);
+    expect(notifications.some((n) => n.includes("failed in assembly-dev"))).toBe(true);
   });
 
   test("open-proposal cap drops further proposals", async () => {
@@ -932,6 +1190,32 @@ describe("startImproverWatcher", () => {
     await h.sweep();
     expect(notifications.some((n) => n.includes("releasing its slot") || n.includes("disappeared"))).toBe(true);
     // Slot released — a different line/issue can propose again.
+    writeWorkpiece(linePath, "error", "run_f2");
+    await h.sweep();
+    expect(readdirSync(devInbox).filter((f) => f.endsWith(".json")).length).toBe(1);
+  });
+
+  test("stale sweep releases terminal dev tasks whose completion could not resolve", async () => {
+    const linePath = makeLine("line-a");
+    const devPath = makeLine("assembly-dev");
+    const { notifications, handle: h } = startWatcher({
+      lines: [
+        { linePath, lineName: "line-a" },
+        { linePath: devPath, lineName: "assembly-dev" },
+      ],
+      verdicts: () => proposeVerdict("fetch-timeout"),
+      staleProposalMs: 0,
+    });
+    await h.sweep();
+    writeWorkpiece(linePath, "error", "run_f1");
+    await h.sweep();
+    const devInbox = resolve(devPath, "queues", "inbox");
+    const devFile = readdirSync(devInbox).filter((f) => f.endsWith(".json"))[0];
+    rmSync(resolve(devInbox, devFile));
+    writeFileSync(resolve(devPath, "queues", "error", devFile), "{not json");
+
+    await h.sweep();
+    expect(notifications.some((n) => n.includes("finished (error/)"))).toBe(true);
     writeWorkpiece(linePath, "error", "run_f2");
     await h.sweep();
     expect(readdirSync(devInbox).filter((f) => f.endsWith(".json")).length).toBe(1);
