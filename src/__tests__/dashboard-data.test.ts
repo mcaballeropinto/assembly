@@ -1497,6 +1497,31 @@ describe("getKanbanState", () => {
     expect(procA.wipLimit).toBe(3);
   });
 
+  test("includes inactive station lanes with muted status when removed station still has work", async () => {
+    const dir = setupKanbanLine("kanban-inactive-station", {
+      lineYaml: "name: kanban-inactive-station\nsequence:\n  - station-b\n",
+    });
+    writeFileSync(
+      resolve(dir, "stations", "station-a", "queue", "processing", "wp-muted.json"),
+      makeWorkpiece("wp-muted", "orphaned station work")
+    );
+
+    const out = (await getKanbanState(dir)) as KanbanState;
+    const keys = out.columns.map((c) => c.key);
+
+    expect(keys).toContain("station-a:inbox");
+    expect(keys).toContain("station-a:processing");
+    expect(keys).toContain("station-a:output");
+    expect(out.stationStatuses?.["station-a"].state).toBe("muted");
+    expect(out.stationStatuses?.["station-a"].icon).toBe("◯");
+    expect(out.stationStatuses?.["station-a"].label).toContain("not in active sequence");
+    expect(out.stationStatuses?.["station-b"].state).toBe("idle");
+
+    const inactiveProcessing = out.columns.find((c) => c.key === "station-a:processing")!;
+    expect(inactiveProcessing.wipLimit).toBeUndefined();
+    expect(inactiveProcessing.tooltip).toContain("not in the active line sequence");
+  });
+
   test("includes line.yaml station description and positive timeout in stationMeta", async () => {
     const dir = setupKanbanLine("kanban-station-description", {
       lineYaml:
