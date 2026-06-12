@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { resolve } from "path";
+import matter from "gray-matter";
+import YAML from "yaml";
 import { callAnthropicRepair } from "../llm";
 import type { LLMMessage } from "../types";
 
@@ -143,6 +145,90 @@ export function buildWorkpieceDigest(ctx: AssessmentContext): string {
     parts.push(stationDigest(name, s));
   }
   return parts.join("\n\n");
+}
+
+function stationNameFromSequenceStep(step: unknown): string | null {
+  if (typeof step === "string" && step.trim()) return step.trim();
+  if (!step || typeof step !== "object" || Array.isArray(step)) return null;
+  const obj = step as Record<string, unknown>;
+  for (const key of ["station", "name", "id", "use"]) {
+    if (typeof obj[key] === "string" && obj[key].trim()) return obj[key].trim();
+  }
+  const keys = Object.keys(obj);
+  return keys.length === 1 ? keys[0] : null;
+}
+
+function getDottedPath(obj: unknown, path: string): unknown {
+  let cur = obj;
+  for (const part of path.split(".")) {
+    if (!part) return undefined;
+    if (!cur || typeof cur !== "object" || Array.isArray(cur)) return undefined;
+    cur = (cur as Record<string, unknown>)[part];
+  }
+  return cur;
+}
+
+function readStationGuardrails(linePath: string, stationName: string): string[] {
+  const agentPath = resolve(linePath, "stations", stationName, "AGENT.md");
+  if (!existsSync(agentPath)) return [];
+  const parsed = matter(readFileSync(agentPath, "utf-8"));
+  const guardrails = (parsed.data as Record<string, unknown>).guardrails;
+  const output =
+    guardrails && typeof guardrails === "object"
+      ? (guardrails as Record<string, unknown>).output
+      : null;
+  const required =
+    output && typeof output === "object"
+      ? (output as Record<string, unknown>).required
+      : null;
+  return Array.isArray(required)
+    ? required.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+    : [];
+}
+
+function allRequiredPresent(station: Record<string, unknown>, requiredPaths: string[]): boolean {
+  return requiredPaths.every((path) => getDottedPath(station, path) !== undefined && getDottedPath(station, path) !== null);
+}
+
+function lineSequence(linePath: string): string[] {
+  const parsed = YAML.parse(readFileSync(resolve(linePath, "line.yaml"), "utf-8"));
+  const sequence = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).sequence : null;
+  if (!Array.isArray(sequence)) return [];
+  return sequence.map(stationNameFromSequenceStep).filter((x): x is string => x !== null);
+}
+
+export function guardedDownstreamSuccessVerdict(ctx: AssessmentContext): AssessmentVerdict | null {
+  if (ctx.bucket !== "done") return null;
+  try {
+    const sequence = lineSequence(ctx.linePath);
+    if (sequence.length === 0) return null;
+    const stations = (ctx.workpiece.stations ?? {}) as Record<string, Record<string, unknown>>;
+    for (const [stationName, station] of Object.entries(stations)) {
+      if (!station || typeof station !== "object" || station.status !== "done") continue;
+      const required = readStationGuardrails(ctx.linePath, stationName);
+      if (required.length === 0 || !allRequiredPresent(station, required)) continue;
+      const idx = sequence.indexOf(stationName);
+      if (idx === -1) continue;
+      const downstream = sequence.slice(idx + 1).filter((name) => stations[name] !== undefined);
+      if (downstream.length === 0 && idx < sequence.length - 1) continue;
+      if (!downstream.every((name) => stations[name]?.status === "done")) continue;
+      return {
+        outcome: "success",
+        should_improve: false,
+        confidence: "high",
+        target_station: null,
+        issue_slug: "guarded-success",
+        title: "",
+        task_body: "",
+        requeue_after_fix: false,
+        reasoning:
+          `Station ${stationName} has required guarded output (${required.join(", ")}) and downstream stations completed successfully.`,
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function readLineContext(linePath: string): string {

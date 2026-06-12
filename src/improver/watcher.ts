@@ -5,6 +5,7 @@ import { loadImproverConfig, isHardExcluded, type ImproverConfig } from "./confi
 import { ImproverState, assessedKey, type RequeueItem } from "./state";
 import {
   assessWorkpiece,
+  guardedDownstreamSuccessVerdict,
   VerdictParseError,
   type AssessmentContext,
   type AssessmentVerdict,
@@ -231,6 +232,19 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
       openTitles: state.openProposals().map((p) => `[${p.issue_key}] ${p.title}`),
     };
 
+    const deterministicVerdict = guardedDownstreamSuccessVerdict(ctx);
+    if (deterministicVerdict) {
+      mark("no_action", wpId);
+      log("no_action", {
+        line: c.lineName,
+        wp: wpId,
+        outcome: deterministicVerdict.outcome,
+        confidence: deterministicVerdict.confidence,
+        reasoning: deterministicVerdict.reasoning.slice(0, 200),
+      });
+      return;
+    }
+
     assessmentsThisWindow++;
     let verdict: AssessmentVerdict;
     try {
@@ -408,6 +422,62 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
     );
   }
 
+  function clipText(s: string, max: number): string {
+    return s.length <= max ? s : `${s.slice(0, max)}...[truncated]`;
+  }
+
+  function stringifyPart(v: unknown): string {
+    if (v === undefined || v === null) return "";
+    return typeof v === "string" ? v : JSON.stringify(v);
+  }
+
+  function devFailureText(wp: Record<string, unknown>): string {
+    const parts: string[] = [];
+    if (wp.id) parts.push(`id: ${stringifyPart(wp.id)}`);
+    if (wp.summary) parts.push(`summary: ${stringifyPart(wp.summary)}`);
+    const stations = (wp.stations ?? {}) as Record<string, Record<string, unknown>>;
+    for (const [name, station] of Object.entries(stations)) {
+      if (!station || typeof station !== "object") continue;
+      parts.push(`station ${name}: status=${stringifyPart(station.status)} summary=${stringifyPart(station.summary)}`);
+      const data = station.data as Record<string, unknown> | undefined;
+      if (data?.error) parts.push(`station ${name} error: ${stringifyPart(data.error)}`);
+      if (data?.gate_failure) parts.push(`station ${name} gate_failure: ${stringifyPart(data.gate_failure)}`);
+      const evalRes = station.eval as Record<string, unknown> | undefined;
+      if (evalRes?.feedback) parts.push(`station ${name} eval: ${stringifyPart(evalRes.feedback)}`);
+      const attempts = station.previous_attempts as Array<Record<string, unknown>> | undefined;
+      if (Array.isArray(attempts) && attempts.length > 0) {
+        const last = attempts[attempts.length - 1];
+        if (last?.summary) parts.push(`station ${name} last_attempt: ${stringifyPart(last.summary)}`);
+      }
+    }
+    return clipText(parts.join("\n"), 5000);
+  }
+
+  function recoverableDevFailureReason(wp: Record<string, unknown>): string | null {
+    const text = devFailureText(wp);
+    if (
+      /usage limit|api[_ -]?key|unauthorized|authentication|gitleaks|secret|blocked path|systemctl|git push|push rejected/i.test(
+        text
+      )
+    ) {
+      return null;
+    }
+    const patterns: Array<[RegExp, string]> = [
+      [/\btests? failed\b/i, "tests failed"],
+      [/\b\d+\s+tests?\s+failed\b/i, "tests failed"],
+      [/bun test exited/i, "bun test failed"],
+      [/typecheck failed|tsc --noEmit/i, "typecheck failed"],
+      [/lint failed|eslint/i, "lint failed"],
+      [/gate_failure|plan-alignment|envelope-scope/i, "validation gate failed"],
+      [/deploy\.ts exited with code 1|deploy validation/i, "deploy validation failed"],
+      [/rebase conflict|conflict markers/i, "merge conflict repair needed"],
+    ];
+    for (const [pattern, reason] of patterns) {
+      if (pattern.test(text)) return reason;
+    }
+    return null;
+  }
+
   async function handleDevCompletion(c: Candidate, key: string, fileName: string): Promise<void> {
     const mark = () =>
       state.markAssessed({
@@ -454,6 +524,62 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
     );
 
     if (c.bucket === "error") {
+      const retryReason = recoverableDevFailureReason(wp);
+      const dev = devLineRef();
+      if (retryReason && dev && open.dev_retry_count < config.maxDevTaskRetries) {
+        const now = new Date();
+        const failureText = devFailureText(wp);
+        const { fileName: devFile, taskKey } = enqueueDevTask(
+          dev.linePath,
+          {
+            proposalId,
+            issueKey: open.issue_key,
+            issueSlug: open.issue_slug,
+            sourceLine: open.source_line,
+            sourceWorkpieceId: (improverMeta?.source_workpiece_id as string | undefined) ?? open.requeue[0]?.wp_id ?? null,
+            title: `Repair failed improvement: ${open.title}`,
+            taskBody: [
+              `The previous assembly-dev improvement task failed during local validation and appears repairable.`,
+              ``,
+              `Failed dev run: ${devWpId ?? fileName}`,
+              `Previous dev task key: ${open.dev_task_key}`,
+              `Retry reason: ${retryReason}`,
+              ``,
+              `Failure evidence:`,
+              "```",
+              failureText,
+              "```",
+              ``,
+              `Repair the implementation for issue ${open.issue_key}. Do not requeue source tasks; the improver will do that only after this repair task completes successfully.`,
+            ].join("\n"),
+          },
+          now,
+          config.proposalMode
+        );
+        state.appendEvent({
+          type: "dev_retry",
+          proposal_id: proposalId,
+          issue_key: open.issue_key,
+          previous_dev_task_key: open.dev_task_key,
+          dev_task_key: taskKey,
+          dev_task_file: devFile,
+          dev_wp_id: devWpId,
+          reason: retryReason,
+          at: now.toISOString(),
+        });
+        mark();
+        log("fix_retry_queued", {
+          proposal: proposalId,
+          issue: open.issue_key,
+          previous_dev_task: open.dev_task_key,
+          dev_task: taskKey,
+          reason: retryReason,
+        });
+        await notify(
+          `🛠️ **improver** — queued a repair task for \`${open.issue_key}\` after ${config.devLine} failed validation (${retryReason}).\n**${open.title}**\nfailed dev run \`${devWpId ?? fileName}\` — source tasks were NOT requeued.`
+        );
+        return;
+      }
       state.appendEvent({
         type: "resolved",
         proposal_id: proposalId,
@@ -668,7 +794,7 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
     if (dev) {
       for (const open of state.openProposals()) {
         const ageMs = Date.now() - new Date(open.at).getTime();
-        if (ageMs <= staleProposalMs) continue;
+        if (ageMs < staleProposalMs) continue;
         const present = devTaskStillPresent(dev.linePath, open.dev_task_key);
         const terminal = devTaskTerminalBucket(dev.linePath, open.dev_task_key);
         if (present && !terminal) continue; // still working / held / review-watched

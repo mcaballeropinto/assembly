@@ -69,6 +69,17 @@ export type ProposalEvent =
       at: string;
     }
   | {
+      type: "dev_retry";
+      proposal_id: string;
+      issue_key: string;
+      previous_dev_task_key: string;
+      dev_task_key: string;
+      dev_task_file: string;
+      dev_wp_id?: string | null;
+      reason: string;
+      at: string;
+    }
+  | {
       type: "resolved";
       proposal_id: string;
       issue_key: string;
@@ -95,6 +106,8 @@ export interface OpenProposal {
   title: string;
   dev_task_key: string;
   dev_task_file: string;
+  dev_retry_count: number;
+  last_dev_wp_id?: string | null;
   requeue: RequeueItem[];
   at: string;
 }
@@ -229,6 +242,7 @@ export class ImproverState {
           title: ev.title,
           dev_task_key: ev.dev_task_key,
           dev_task_file: ev.dev_task_file,
+          dev_retry_count: 0,
           requeue: [...ev.requeue],
           at: ev.at,
         });
@@ -246,6 +260,13 @@ export class ImproverState {
           if (!dup) p.requeue.push(ev.item);
           break;
         }
+      } else if (ev.type === "dev_retry") {
+        const p = open.get(ev.proposal_id);
+        if (!p) continue;
+        p.dev_task_key = ev.dev_task_key;
+        p.dev_task_file = ev.dev_task_file;
+        p.dev_retry_count++;
+        p.last_dev_wp_id = ev.dev_wp_id;
       }
     }
     return [...open.values()];

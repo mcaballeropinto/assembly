@@ -168,6 +168,21 @@ if (!existsSync(worktreePath)) {
 
 // ─── 1. Run tests — any failure fails the station ─────────────────────
 
+log("running required improver tests");
+const requiredTestR = spawnSync("bun", ["test", "src/__tests__/improver.test.ts"], {
+  cwd: worktreePath,
+  encoding: "utf-8",
+  timeout: 300_000,
+});
+const requiredTestOut = (requiredTestR.stdout ?? "") + "\n" + (requiredTestR.stderr ?? "");
+const requiredFailMatch = requiredTestOut.match(/(\d+)\s+fail\b/);
+const requiredFailCount = requiredFailMatch ? parseInt(requiredFailMatch[1], 10) : 0;
+const requiredErrorMatch = requiredTestOut.match(/(\d+)\s+errors?\b/);
+const requiredErrorCount = requiredErrorMatch ? parseInt(requiredErrorMatch[1], 10) : 0;
+if (requiredTestR.status !== 0 || requiredFailCount > 0 || requiredErrorCount > 0) {
+  fatal("required improver tests failed", requiredTestOut);
+}
+
 log("running bun test");
 const testR = spawnSync("bun", ["test"], {
   cwd: worktreePath,

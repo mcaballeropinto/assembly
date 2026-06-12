@@ -17,6 +17,7 @@ import { GLOBAL_CONFIG } from "../paths";
  *     sweep_interval_minutes: 60    # periodic catch-up sweep
  *     requeue_on_fix: true          # requeue source tasks when a fix deploys
  *     max_proposals_per_issue: 2    # lifetime proposals per issue_key
+ *     max_dev_task_retries: 1       # bounded repair attempts for failed dev tasks
  */
 export interface ImproverConfig {
   enabled: boolean;
@@ -37,6 +38,7 @@ export interface ImproverConfig {
    */
   requeueDoneTasks: boolean;
   maxProposalsPerIssue: number;
+  maxDevTaskRetries: number;
   /**
    * Where improvement tasks land on the dev line: "inbox" auto-runs them
    * (full self-improvement loop); "held" requires a manual release — the
@@ -57,6 +59,7 @@ export const IMPROVER_DEFAULTS: ImproverConfig = {
   requeueOnFix: true,
   requeueDoneTasks: false,
   maxProposalsPerIssue: 2,
+  maxDevTaskRetries: 1,
   proposalMode: "inbox",
 };
 
@@ -107,6 +110,7 @@ export function loadImproverConfig(configPath: string = GLOBAL_CONFIG): Improver
   cfg.requeueOnFix = asBool(section.requeue_on_fix, cfg.requeueOnFix);
   cfg.requeueDoneTasks = asBool(section.requeue_done_tasks, cfg.requeueDoneTasks);
   cfg.maxProposalsPerIssue = asPosInt(section.max_proposals_per_issue, cfg.maxProposalsPerIssue);
+  cfg.maxDevTaskRetries = asPosInt(section.max_dev_task_retries, cfg.maxDevTaskRetries);
   if (section.proposal_mode === "held" || section.proposal_mode === "inbox") {
     cfg.proposalMode = section.proposal_mode;
   }
