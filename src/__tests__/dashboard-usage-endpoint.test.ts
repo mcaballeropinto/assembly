@@ -10,7 +10,7 @@ const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalSnapEnv = process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
-let server: { stop: () => void; port: number } | null = null;
+let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
 let testPort: number;
 
 function writeSnapshot(payload: unknown) {

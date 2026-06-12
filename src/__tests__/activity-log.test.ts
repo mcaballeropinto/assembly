@@ -16,6 +16,7 @@ const TEMP_DIR = resolve("/tmp", `assembly-test-activity-log-${Date.now()}`);
 const LINE_DIR = resolve(TEMP_DIR, "lines", "activity-test-line");
 
 const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
+const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number } | null = null;
 
@@ -98,6 +99,7 @@ beforeAll(async () => {
 
   // Set env for line discovery
   process.env.ASSEMBLY_LINE_DIRS = resolve(TEMP_DIR, "lines");
+  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
 
   // Start dashboard server on an OS-assigned port to avoid parallel test collisions.
   const { startGlobalDashboard } = await import("../global-dashboard");
@@ -111,6 +113,8 @@ afterAll(() => {
   if (server) server.stop();
   if (originalLineDirs) process.env.ASSEMBLY_LINE_DIRS = originalLineDirs;
   else delete process.env.ASSEMBLY_LINE_DIRS;
+  if (originalWebDistDir) process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
+  else delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
   try {
     rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}
