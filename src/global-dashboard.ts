@@ -576,7 +576,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
       clearInterval(refreshInterval);
       server.stop();
     },
-    port: server.port,
+    port: server.port ?? options.port,
   };
 }
 

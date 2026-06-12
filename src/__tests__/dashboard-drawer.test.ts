@@ -15,6 +15,7 @@ const LINE_DIR = resolve(TEMP_DIR, "lines", "drawer-test-line");
 
 // We need to set ASSEMBLY_LINE_DIRS so discoverLines finds our test line
 const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
+const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
 
@@ -139,6 +140,7 @@ beforeAll(async () => {
 
   // Set ASSEMBLY_LINE_DIRS so discoverLines picks up our test line directory
   process.env.ASSEMBLY_LINE_DIRS = resolve(TEMP_DIR, "lines");
+  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
 
   // Dynamic import to pick up the env var
   const { startGlobalDashboard } = await import("../global-dashboard");
@@ -155,6 +157,8 @@ afterAll(() => {
   if (server) server.stop();
   if (originalLineDirs) process.env.ASSEMBLY_LINE_DIRS = originalLineDirs;
   else delete process.env.ASSEMBLY_LINE_DIRS;
+  if (originalWebDistDir) process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
+  else delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
   try {
     rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}
