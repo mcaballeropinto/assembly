@@ -298,6 +298,74 @@ describe("computeStationStatuses", () => {
     expect(result.plan.icon).toBe("✕");
   });
 
+  test("muted state: inactive station with visible work", () => {
+    const columns: KanbanColumn[] = [
+      {
+        key: "removed:inbox",
+        title: "waiting",
+        station: "removed",
+        lane: "inbox",
+        count: 1,
+        cards: [mockCard({ column: "removed:inbox" })],
+      },
+      {
+        key: "removed:processing",
+        title: "processing",
+        station: "removed",
+        lane: "processing",
+        count: 1,
+        cards: [mockCard({ column: "removed:processing" })],
+      },
+      {
+        key: "removed:output",
+        title: "output",
+        station: "removed",
+        lane: "output",
+        count: 0,
+        cards: [],
+      },
+    ];
+
+    const result = computeStationStatuses(columns, ["removed"], [], "/fake/path", {
+      mutedStations: ["removed"],
+    });
+
+    expect(result.removed.state).toBe("muted");
+    expect(result.removed.icon).toBe("◯");
+    expect(result.removed.label).toContain("Muted");
+    expect(result.removed.label).toContain("not in active sequence");
+    expect(result.removed.itemCount).toBe(2);
+  });
+
+  test("priority: errored overrides muted", () => {
+    const errorColumns: KanbanColumn[] = [
+      {
+        key: "error",
+        title: "Error",
+        count: 1,
+        cards: [mockCard({ failedStation: "removed", enteredColumnAt: new Date().toISOString() })],
+      },
+    ];
+    const columns: KanbanColumn[] = [
+      {
+        key: "removed:processing",
+        title: "processing",
+        station: "removed",
+        lane: "processing",
+        count: 1,
+        cards: [mockCard({ column: "removed:processing" })],
+      },
+    ];
+
+    const result = computeStationStatuses(columns, ["removed"], errorColumns, "/fake/path", {
+      mutedStations: ["removed"],
+    });
+
+    expect(result.removed.state).toBe("errored");
+    expect(result.removed.icon).toBe("✕");
+    expect(result.removed.label).toContain("Errored");
+  });
+
   test("all stations in sequence get a status", () => {
     const columns: KanbanColumn[] = [
       {

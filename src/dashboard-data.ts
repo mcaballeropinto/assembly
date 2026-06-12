@@ -1224,14 +1224,44 @@ function applyRetryAggregates(col: KanbanColumn): void {
   if (exhausted > 0) col.exhausted_count = exhausted;
 }
 
+function listInactiveStationNames(linePath: string, activeSequence: string[]): string[] {
+  const stationsDir = resolve(linePath, "stations");
+  const activeStations = new Set(activeSequence);
+
+  try {
+    return readdirSync(stationsDir)
+      .filter((name) => {
+        if (activeStations.has(name)) return false;
+
+        const stationDir = resolve(stationsDir, name);
+        try {
+          if (!statSync(stationDir).isDirectory()) return false;
+        } catch {
+          return false;
+        }
+
+        return (
+          listQueue(resolve(stationDir, "queue", "inbox")).length > 0 ||
+          listQueue(resolve(stationDir, "queue", "processing")).length > 0 ||
+          listQueue(resolve(stationDir, "queue", "output")).length > 0
+        );
+      })
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
 export function computeStationStatuses(
   columns: KanbanColumn[],
-  sequence: string[],
+  stationOrder: string[],
   errorColumns: KanbanColumn[],
   _linePath: string,
+  options?: { mutedStations?: string[] },
 ): Record<string, StationStatus> {
   const statuses: Record<string, StationStatus> = {};
   const now = Date.now();
+  const mutedStations = new Set(options?.mutedStations ?? []);
 
   // Build a set of station names that have errored workpieces
   const errorsByStation = new Map<string, { count: number; newestFinishedAt: string | null }>();
@@ -1263,7 +1293,7 @@ export function computeStationStatuses(
     else if (col.lane === 'output') lanes.output = col.cards;
   }
 
-  for (const stationName of sequence) {
+  for (const stationName of stationOrder) {
     const lanes = stationLanes.get(stationName);
     const errInfo = errorsByStation.get(stationName);
     const totalItems = lanes
@@ -1284,7 +1314,20 @@ export function computeStationStatuses(
       continue;
     }
 
-    // Priority 2: Running
+    // Priority 2: Muted (inactive station still has visible work)
+    if (mutedStations.has(stationName)) {
+      statuses[stationName] = {
+        state: 'muted',
+        label: totalItems > 0
+          ? `Muted · not in active sequence · ${totalItems} item${totalItems !== 1 ? 's' : ''}`
+          : 'Muted · not in active sequence',
+        icon: '◯',
+        itemCount: totalItems,
+      };
+      continue;
+    }
+
+    // Priority 3: Running
     if (lanes && lanes.processing.length > 0) {
       const oldestProcessing = lanes.processing.reduce((oldest, card) => {
         if (!oldest.enteredColumnAt) return card;
@@ -1304,7 +1347,7 @@ export function computeStationStatuses(
       continue;
     }
 
-    // Priority 3: Blocked
+    // Priority 4: Blocked
     if (lanes && lanes.inbox.length > 0) {
       const oldestInbox = lanes.inbox.reduce((oldest, card) => {
         if (!oldest.enteredColumnAt) return card;
@@ -1325,7 +1368,7 @@ export function computeStationStatuses(
       }
     }
 
-    // Priority 4: Idle (has had activity before or has items in output)
+    // Priority 5: Idle (has had activity before or has items in output)
     if (lanes && (lanes.output.length > 0 || totalItems > 0)) {
       statuses[stationName] = {
         state: 'idle',
@@ -1336,7 +1379,7 @@ export function computeStationStatuses(
       continue;
     }
 
-    // Priority 5: Idle (no work, healthy)
+    // Priority 6: Idle (no work, healthy)
     statuses[stationName] = {
       state: 'idle',
       label: 'Idle · no work',
@@ -1505,6 +1548,61 @@ export async function getKanbanState(
     });
   }
 
+  const inactiveStations = listInactiveStationNames(linePath, sequence);
+  const inactiveStationTooltip = "Station is not in the active line sequence; existing work is visible but no new work will start here.";
+  for (const name of inactiveStations) {
+    const stationDir = resolve(linePath, "stations", name);
+    const inbox = collectCards(
+      resolve(stationDir, "queue", "inbox"),
+      `${name}:inbox`,
+      name,
+      "inbox",
+      retriesByWp,
+    );
+    const processing = collectCards(
+      resolve(stationDir, "queue", "processing"),
+      `${name}:processing`,
+      name,
+      "processing",
+      retriesByWp,
+    );
+    const output = collectCards(
+      resolve(stationDir, "queue", "output"),
+      `${name}:output`,
+      name,
+      "output",
+      retriesByWp,
+    );
+    columns.push({
+      key: `${name}:inbox`,
+      title: "waiting",
+      tooltip: inactiveStationTooltip,
+      station: name,
+      lane: "inbox",
+      count: inbox.length,
+      cards: inbox,
+    });
+    columns.push({
+      key: `${name}:processing`,
+      title: "processing",
+      tooltip: inactiveStationTooltip,
+      station: name,
+      lane: "processing",
+      count: processing.length,
+      cards: processing,
+    });
+    columns.push({
+      key: `${name}:output`,
+      title: "output",
+      tooltip: inactiveStationTooltip,
+      station: name,
+      lane: "output",
+      count: output.length,
+      cards: output,
+    });
+  }
+  const stationOrder = [...sequence, ...inactiveStations];
+
   // Error (collect early so we can pin failures in Done)
   const errorDir = resolve(linePath, "queues", "error");
   const errorCards = collectCards(errorDir, "error", undefined, undefined, retriesByWp);
@@ -1572,12 +1670,14 @@ export async function getKanbanState(
   }
 
   // Compute station timings and freshness
-  const stationTimings = getStationTimings(linePath, sequence);
-  const stationFreshness = computeStationFreshness(linePath, sequence, sections, stationTimings);
+  const stationTimings = getStationTimings(linePath, stationOrder);
+  const stationFreshness = computeStationFreshness(linePath, stationOrder, sections, stationTimings);
 
   // Compute per-station health status indicators
   const errorCols = columns.filter(c => c.key === 'error');
-  const stationStatuses = computeStationStatuses(columns, sequence, errorCols, linePath);
+  const stationStatuses = computeStationStatuses(columns, stationOrder, errorCols, linePath, {
+    mutedStations: inactiveStations,
+  });
 
   // Build per-station metadata for tooltips
   const stationMeta: Record<string, StationTooltipMeta> = {};

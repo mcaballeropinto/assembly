@@ -104,4 +104,24 @@ describe("station description tooltip renderer", () => {
     expect(src).not.toContain(".kanban-station-header:hover .station-desc-tooltip");
     expect(src).not.toContain(".kanban-station-header:focus-within .station-desc-tooltip");
   });
+
+  test("renders muted station status dot with keyboard-accessible tooltip text", () => {
+    const label = "Muted · not in active sequence · 1 item";
+    const html = harness.renderKanbanStationGroup(
+      "old-station",
+      [{ key: "old-station:processing", title: "processing", count: 1, cards: [] }],
+      null,
+      { "old-station": { state: "muted", label, icon: "◯", itemCount: 1 } },
+      {}
+    );
+    document.body.innerHTML = html;
+
+    const statusDot = document.querySelector(".station-status-dot") as HTMLElement;
+    expect(statusDot.classList.contains("status-muted")).toBe(true);
+    expect(statusDot.textContent).toBe("◯");
+    expect(statusDot.getAttribute("role")).toBe("img");
+    expect(statusDot.getAttribute("tabindex")).toBe("0");
+    expect(statusDot.getAttribute("title")).toBe(label);
+    expect(statusDot.getAttribute("aria-label")).toBe(label);
+  });
 });
