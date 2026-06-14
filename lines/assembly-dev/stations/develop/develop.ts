@@ -240,22 +240,41 @@ if (stalePath) {
   }
 }
 
-if (!existsSync(wtRoot)) {
-  const branchExists = spawnSync("git", ["-C", REPO, "rev-parse", "--verify", branch]).status === 0;
-  const args = branchExists
-    ? ["-C", REPO, "worktree", "add", wtRoot, branch]
-    : ["-C", REPO, "worktree", "add", wtRoot, "-b", branch, BASE];
-  const r = spawnSync("git", args, { encoding: "utf-8" });
-  if (r.status !== 0) {
-    hardFail("git worktree add failed", `branch=${branch}\n${r.stderr}`);
+if (existsSync(wtRoot)) {
+  log(`removing previous worktree for fresh develop attempt`);
+  const removeR = spawnSync("git", ["-C", REPO, "worktree", "remove", "--force", wtRoot], { encoding: "utf-8" });
+  if (removeR.status !== 0) {
+    hardFail("git worktree remove failed", `worktree=${wtRoot}\n${removeR.stderr}`);
   }
-  log(`worktree created`);
-} else {
-  log(`worktree exists, reusing`);
+  spawnSync("git", ["-C", REPO, "worktree", "prune"], { encoding: "utf-8" });
 }
+
+const branchExists = spawnSync("git", ["-C", REPO, "rev-parse", "--verify", branch]).status === 0;
+const args = branchExists
+  ? ["-C", REPO, "worktree", "add", wtRoot, branch]
+  : ["-C", REPO, "worktree", "add", wtRoot, "-b", branch, BASE];
+const r = spawnSync("git", args, { encoding: "utf-8" });
+if (r.status !== 0) {
+  hardFail("git worktree add failed", `branch=${branch}\n${r.stderr}`);
+}
+log(`fresh worktree created`);
 
 if (!existsSync(wt) || !statSync(wt).isDirectory()) {
   hardFail("worktree missing", `expected ${wt}; branch=${branch}`);
+}
+
+function restoreOffPlanFiles(paths: string[]): void {
+  if (paths.length === 0) return;
+  log(`restoring ${paths.length} off-plan file(s) after plan-alignment failure: ${paths.join(", ")}`);
+  for (const path of paths) {
+    const headHasPath = spawnSync("git", ["-C", wtRoot, "cat-file", "-e", `HEAD:${path}`], { encoding: "utf-8" }).status === 0;
+    if (headHasPath) {
+      spawnSync("git", ["-C", wtRoot, "restore", "--staged", "--worktree", "--", path], { encoding: "utf-8" });
+    } else {
+      spawnSync("git", ["-C", wtRoot, "rm", "-f", "--cached", "--ignore-unmatch", "--", path], { encoding: "utf-8" });
+      spawnSync("git", ["-C", wtRoot, "clean", "-fd", "--", path], { encoding: "utf-8" });
+    }
+  }
 }
 
 // ─── Build the agent prompt ───────────────────────────────────────────
@@ -862,6 +881,7 @@ if (planSet.size > 0) {
       `Changed files extend beyond plan.files_to_change ∪ plan.files_to_create.\n` +
         `Planned:\n${planned}\nOff-plan:\n${off}\n` +
         `Do NOT touch these off-plan files on the next attempt. Restrict edits to the files listed in the plan.`);
+    restoreOffPlanFiles(offPlan);
   }
 }
 }
