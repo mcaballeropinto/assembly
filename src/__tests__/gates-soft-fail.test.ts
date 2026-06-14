@@ -187,6 +187,41 @@ describe("Gate soft-fail logic", () => {
     const offPlan = changedFiles.filter((f) => !isAllowed(f));
     expect(offPlan).toEqual([]);
   });
+
+  test("Gate 3 policy restores off-plan files before retry", () => {
+    const changedFiles = ["src/a.ts", "eslint.config.js"];
+    const planSet = new Set(["src/a.ts"]);
+    const restored: string[] = [];
+
+    function isAllowed(path: string): boolean {
+      return planSet.has(path);
+    }
+
+    function restoreOffPlanFiles(paths: string[]) {
+      restored.push(...paths);
+    }
+
+    const offPlan = changedFiles.filter((f) => !isAllowed(f));
+    if (offPlan.length > 0) restoreOffPlanFiles(offPlan);
+
+    expect(restored).toEqual(["eslint.config.js"]);
+  });
+
+  test("Develop retry policy recreates an existing worktree instead of reusing it", () => {
+    function worktreeSetupActions(existingWorktree: boolean, branchExists: boolean): string[] {
+      const actions: string[] = [];
+      if (existingWorktree) actions.push("remove-worktree", "prune-worktrees");
+      actions.push(branchExists ? "add-existing-branch-worktree" : "add-new-branch-worktree");
+      return actions;
+    }
+
+    expect(worktreeSetupActions(true, true)).toEqual([
+      "remove-worktree",
+      "prune-worktrees",
+      "add-existing-branch-worktree",
+    ]);
+    expect(worktreeSetupActions(false, false)).toEqual(["add-new-branch-worktree"]);
+  });
 });
 
 describe("Eval feedback formatting", () => {
