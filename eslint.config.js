@@ -6,6 +6,7 @@ export default tseslint.config(
   {
     ignores: [
       "dist/**",
+      "web/dist/**",
       "node_modules/**",
       "**/*.d.ts",
       "lines/**",

@@ -11,7 +11,6 @@ const originalSnapEnv = process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
-let testPort: number;
 
 function writeSnapshot(payload: unknown) {
   writeFileSync(SNAP_PATH, typeof payload === "string" ? payload : JSON.stringify(payload));
@@ -33,7 +32,6 @@ beforeAll(async () => {
 
   const { startGlobalDashboard } = await import("../global-dashboard");
   server = startGlobalDashboard({ port: 0 });
-  testPort = server.port;
   await new Promise((r) => setTimeout(r, 300));
 });
 
