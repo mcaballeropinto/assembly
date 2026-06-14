@@ -670,9 +670,11 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
       });
 
     let proposalId: string | null = null;
+    let wp: Record<string, unknown>;
+    let improverMeta: Record<string, unknown> | undefined;
     try {
-      const wp = JSON.parse(readFileSync(c.filePath, "utf-8"));
-      const improverMeta = ((wp.input ?? {}) as Record<string, unknown>).improver as
+      wp = JSON.parse(readFileSync(c.filePath, "utf-8"));
+      improverMeta = ((wp.input ?? {}) as Record<string, unknown>).improver as
         | Record<string, unknown>
         | undefined;
       if (improverMeta && typeof improverMeta.proposal_id === "string") {
@@ -691,6 +693,66 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
       mark();
       return;
     }
+
+    const retryReason = recoverableDevFailureReason(wp);
+    const dev = devLineRef();
+    if (retryReason && dev && open.dev_retry_count < config.maxDevTaskRetries) {
+      const now = new Date();
+      const devWpId = typeof wp.id === "string" ? wp.id : null;
+      const failureText = devFailureText(wp);
+      const { fileName: devFile, taskKey } = enqueueDevTask(
+        dev.linePath,
+        {
+          proposalId,
+          issueKey: open.issue_key,
+          issueSlug: open.issue_slug,
+          sourceLine: open.source_line,
+          sourceWorkpieceId: (improverMeta?.source_workpiece_id as string | undefined) ?? open.requeue[0]?.wp_id ?? null,
+          title: `Repair escalated improvement: ${open.title}`,
+          taskBody: [
+            `The previous assembly-dev improvement task escalated for review, but the failure appears repairable by another dev-line pass.`,
+            ``,
+            `Escalated dev run: ${devWpId ?? fileName}`,
+            `Previous dev task key: ${open.dev_task_key}`,
+            `Retry reason: ${retryReason}`,
+            ``,
+            `Failure evidence:`,
+            "```",
+            failureText,
+            "```",
+            ``,
+            `Repair the implementation for issue ${open.issue_key}. Do not requeue source tasks; the improver will do that only after this repair task completes successfully.`,
+          ].join("\n"),
+        },
+        now,
+        config.proposalMode
+      );
+      state.appendEvent({
+        type: "dev_retry",
+        proposal_id: proposalId,
+        issue_key: open.issue_key,
+        previous_dev_task_key: open.dev_task_key,
+        dev_task_key: taskKey,
+        dev_task_file: devFile,
+        dev_wp_id: devWpId,
+        reason: retryReason,
+        at: now.toISOString(),
+      });
+      mark();
+      log("fix_retry_queued", {
+        proposal: proposalId,
+        issue: open.issue_key,
+        previous_dev_task: open.dev_task_key,
+        dev_task: taskKey,
+        reason: retryReason,
+        bucket: "review",
+      });
+      await notify(
+        `🛠️ **improver** — queued a repair task for \`${open.issue_key}\` after ${config.devLine} escalated with a recoverable validation failure (${retryReason}).\n**${open.title}**\nfailed dev run \`${devWpId ?? fileName}\` — source tasks were NOT requeued.`
+      );
+      return;
+    }
+
     state.appendEvent({
       type: "resolved",
       proposal_id: proposalId,

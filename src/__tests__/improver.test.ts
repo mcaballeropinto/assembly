@@ -80,7 +80,7 @@ function makeGuardedProspectorLine(name: string): string {
 
 function writeWorkpiece(
   linePath: string,
-  bucket: "done" | "error",
+  bucket: "done" | "error" | "review",
   id: string,
   extra: Record<string, unknown> = {}
 ): string {
@@ -93,8 +93,13 @@ function writeWorkpiece(
     input: {},
     stations: {
       work: {
-        status: bucket === "error" ? "failed" : "done",
-        summary: bucket === "error" ? "Failed: fetch timed out" : "Scored 12 listings",
+        status: bucket === "error" ? "failed" : bucket === "review" ? "escalated" : "done",
+        summary:
+          bucket === "error"
+            ? "Failed: fetch timed out"
+            : bucket === "review"
+              ? "Escalated: needs review"
+              : "Scored 12 listings",
         started_at: "2026-06-11T00:00:00.000Z",
         finished_at: "2026-06-11T00:01:00.000Z",
         ...(bucket === "error" ? { failure_class: "timeout" } : {}),
@@ -861,6 +866,79 @@ describe("startImproverWatcher", () => {
     expect(JSON.parse(readFileSync(resolve(linePath, "queues", "inbox", requeued[0]), "utf-8")).parent_run_id).toBe(
       "run_f1"
     );
+  });
+
+  test("recoverable escalated dev task queues one repair without requeueing source tasks", async () => {
+    const linePath = makeLine("line-a");
+    const devPath = makeLine("assembly-dev");
+    const { notifications, handle: h } = startWatcher({
+      lines: [
+        { linePath, lineName: "line-a" },
+        { linePath: devPath, lineName: "assembly-dev" },
+      ],
+      verdicts: () => proposeVerdict("fetch-timeout"),
+    });
+    await h.sweep();
+    writeWorkpiece(linePath, "error", "run_f1");
+    await h.sweep();
+    const devInbox = resolve(devPath, "queues", "inbox");
+    const firstDevFile = readdirSync(devInbox).filter((f) => f.endsWith(".json"))[0];
+    const firstDevTask = JSON.parse(readFileSync(resolve(devInbox, firstDevFile), "utf-8"));
+
+    writeWorkpiece(devPath, "review", "run_dev_review1", {
+      input: { improver: firstDevTask.input.improver },
+      stations: {
+        develop: {
+          status: "escalated",
+          summary: "Max retries exhausted. Safety gate failed: plan-alignment",
+          data: { escalation_reason: "plan-alignment: off-plan eslint.config.js" },
+        },
+      },
+    });
+    await h.sweep();
+
+    const devTasks = readdirSync(devInbox).filter((f) => f.endsWith(".json"));
+    expect(devTasks.length).toBe(2);
+    expect(readdirSync(resolve(linePath, "queues", "inbox")).filter((f) => f.endsWith(".json")).length).toBe(0);
+    expect(notifications.some((n) => n.includes("escalated with a recoverable validation failure"))).toBe(true);
+
+    const repairFile = devTasks.find((f) => f !== firstDevFile)!;
+    const repairTask = JSON.parse(readFileSync(resolve(devInbox, repairFile), "utf-8"));
+    expect(repairTask.input.improver.proposal_id).toBe(firstDevTask.input.improver.proposal_id);
+    expect(repairTask.task).toContain("Repair escalated improvement");
+    expect(repairTask.task).toContain("plan-alignment");
+  });
+
+  test("unsafe escalated dev task stays human-escalated", async () => {
+    const linePath = makeLine("line-a");
+    const devPath = makeLine("assembly-dev");
+    const { notifications, handle: h } = startWatcher({
+      lines: [
+        { linePath, lineName: "line-a" },
+        { linePath: devPath, lineName: "assembly-dev" },
+      ],
+      verdicts: () => proposeVerdict("fetch-timeout"),
+    });
+    await h.sweep();
+    writeWorkpiece(linePath, "error", "run_f1");
+    await h.sweep();
+    const devInbox = resolve(devPath, "queues", "inbox");
+    const firstDevFile = readdirSync(devInbox).filter((f) => f.endsWith(".json"))[0];
+    const firstDevTask = JSON.parse(readFileSync(resolve(devInbox, firstDevFile), "utf-8"));
+
+    writeWorkpiece(devPath, "review", "run_dev_review_secret", {
+      input: { improver: firstDevTask.input.improver },
+      stations: {
+        develop: {
+          status: "escalated",
+          summary: "blocked path in diff; gitleaks detected a secret",
+        },
+      },
+    });
+    await h.sweep();
+
+    expect(readdirSync(devInbox).filter((f) => f.endsWith(".json")).length).toBe(1);
+    expect(notifications.some((n) => n.includes("escalated for human review"))).toBe(true);
   });
 
   test("recoverable dev failures resolve as fix_failed after retry limit", async () => {
