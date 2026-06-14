@@ -17,6 +17,7 @@ lines/*/digests/
 lines/hello-world/greetings.md
 
 # Agent scratch + station leakage
+.tmp/
 FANOUT-*
 *-RESULT.json
 *-SUMMARY.md
