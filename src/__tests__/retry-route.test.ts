@@ -18,7 +18,6 @@ const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
-let testPort: number;
 
 function seedErrorFile(name: string, id: string) {
   const errorDir = resolve(LINE_DIR, "queues", "error");
@@ -74,7 +73,6 @@ beforeAll(async () => {
 
   const { startGlobalDashboard } = await import("../global-dashboard");
   server = startGlobalDashboard({ port: 0 });
-  testPort = server.port;
 
   await new Promise((r) => setTimeout(r, 1500));
 });

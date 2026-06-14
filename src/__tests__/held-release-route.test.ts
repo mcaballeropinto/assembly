@@ -12,7 +12,6 @@ const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
-let testPort: number;
 
 function writeHeldFile(name: string, task: string) {
   const heldDir = resolve(LINE_DIR, "queues", "held");
@@ -57,7 +56,6 @@ beforeAll(async () => {
   // Start dashboard server on an OS-assigned port to avoid parallel test collisions.
   const { startGlobalDashboard } = await import("../global-dashboard");
   server = startGlobalDashboard({ port: 0 });
-  testPort = server.port;
 
   // Wait for server to discover lines
   await new Promise((r) => setTimeout(r, 1500));
