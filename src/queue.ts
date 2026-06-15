@@ -197,10 +197,14 @@ export function filterReadyByDeps(
   return inboxFiles.filter((path) => {
     let deps: string[] | undefined;
     try {
-      const parsed = WorkpieceSchema.safeParse(JSON.parse(readFileSync(path, "utf-8")));
-      if (!parsed.success) return true;
-      const raw = parsed.data.dependsOn;
-      if (Array.isArray(raw)) deps = raw.filter((x): x is string => typeof x === "string");
+      const raw = JSON.parse(readFileSync(path, "utf-8"));
+      const parsed = WorkpieceSchema.safeParse(raw);
+      const rawDeps = parsed.success
+        ? parsed.data.dependsOn
+        : raw && typeof raw === "object" && "dependsOn" in raw
+          ? (raw as { dependsOn?: unknown }).dependsOn
+          : undefined;
+      if (Array.isArray(rawDeps)) deps = rawDeps.filter((x): x is string => typeof x === "string");
     } catch {
       return true;
     }
