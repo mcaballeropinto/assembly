@@ -5,6 +5,13 @@
 // ─── Type re-exports from dashboard-data.ts ────────────────────────────────
 
 export type {
+  Workpiece,
+  StationResult,
+  StationRounds,
+  RetryState,
+} from "./types";
+
+export type {
   HealthState,
   HistoryStationCell,
   HistoryRun,
@@ -30,6 +37,9 @@ export type {
   TaskEventsPage,
   TaskEvent,
 } from "./dashboard-data";
+
+import type { Workpiece } from "./types";
+import type { StationMeta, TaskEventsPage } from "./dashboard-data";
 
 // ─── Constant re-exports ───────────────────────────────────────────────────
 
@@ -183,6 +193,31 @@ export interface ApiUsageResponse {
   ageMs?: number | null;
   state?: string;
   reason?: string;
+}
+
+export interface ApiWorkpieceResponse extends Workpiece {
+  _source?: string;
+  _activity?: unknown[];
+  _taskEventStations?: StationMeta[];
+}
+
+export interface ApiTaskEventStationsResponse {
+  stations: StationMeta[];
+}
+
+export type ApiTaskEventsResponse = TaskEventsPage;
+
+export interface ApiSidecarTail {
+  content: string;
+  exists: boolean;
+  truncated: boolean;
+  bytes: number;
+}
+
+export interface ApiWorkpieceSidecarsResponse {
+  stdout: ApiSidecarTail;
+  stderr: ApiSidecarTail;
+  retry: ApiSidecarTail;
 }
 
 /**
