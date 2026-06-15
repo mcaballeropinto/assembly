@@ -8,6 +8,11 @@ import { ConnectionChipDemo } from "./dev/connection-chip-demo"
 import { ErrorBannerDemo } from "./dev/error-banner-demo"
 import { FetchErrorBannerDemo } from "./dev/fetch-error-banner-demo"
 import { UsageChipDemo } from "./dev/usage-chip-demo"
+import {
+  parseActivitySearch,
+  serializeActivitySearch,
+  type ActivityFilterKey,
+} from "./lib/activity"
 import { Route as rootRoute } from "./routes/__root"
 import { Route as indexRoute } from "./routes/index"
 import { Route as lineRoute } from "./routes/line.$name"
@@ -17,6 +22,7 @@ export interface DashboardSearch {
   wp?: string
   wpline?: string
   line?: string
+  activity?: string
 }
 
 function stringSearchParam(value: unknown): string | undefined {
@@ -28,7 +34,40 @@ export function validateSearch(search: Record<string, unknown>): DashboardSearch
     wp: stringSearchParam(search.wp),
     wpline: stringSearchParam(search.wpline),
     line: stringSearchParam(search.line),
+    activity:
+      typeof search.activity === "string" ? search.activity : undefined,
   }
+}
+
+export interface OverviewSearch {
+  activity?: string
+}
+
+export function readOverviewSearch(): OverviewSearch {
+  const params = new URLSearchParams(window.location.search)
+  const activity = params.has("activity")
+    ? (params.get("activity") ?? "")
+    : undefined
+  return { activity }
+}
+
+export function writeActivitySearch(
+  selectedKeys: Set<ActivityFilterKey>,
+): void {
+  const url = new URL(window.location.href)
+  const nextActivity = serializeActivitySearch(selectedKeys)
+
+  if (nextActivity === undefined) {
+    url.searchParams.delete("activity")
+  } else {
+    url.searchParams.set("activity", nextActivity)
+  }
+
+  window.history.replaceState({}, "", url.toString())
+}
+
+export function readActivityFiltersFromLocation(): Set<ActivityFilterKey> {
+  return parseActivitySearch(readOverviewSearch().activity)
 }
 
 const connectionChipRoute = createRoute({

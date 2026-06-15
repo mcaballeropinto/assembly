@@ -231,6 +231,7 @@ export function fetchApiState(
 }
 
 export const fetchGlobalState = fetchApiState
+export const fetchDashboardState = fetchApiState
 
 export function getLineKanban(lineName: string): Promise<KanbanState> {
   return fetchJson<KanbanState>(`/api/line/${enc(lineName)}/kanban`)

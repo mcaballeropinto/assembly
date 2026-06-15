@@ -271,36 +271,23 @@ Task events: `GET /api/task-events/:line/:wpId` returns `{ stations: StationMeta
 
 ---
 
-## §5.6 — Visual Smoke Test: Overview Activity Feed
+## Phase 5.4-5.6 Overview activity smoke - 2026-06-15
 
-**Test procedure:**
-1. Start the Assembly dashboard backend: `assembly dashboard --port 4111`
-2. In a second terminal: `cd web && bun install && bun run dev`
-3. Open the old dashboard at `http://localhost:4111` — screenshot the Activity section.
-4. Open the new React dashboard at `http://localhost:5173` — screenshot the ActivityFeed component.
-5. Compare side-by-side.
+**Line:** `assembly-dev`
 
-**Before (old dashboard):**
-- String-concatenated HTML in `buildOverviewDom` activity loop
-- Plain text rows with CSS classes: `.activity-entry`, `.time`, `.event`, `.detail`
-- No filter controls on overview (filters are detail-view only)
-- No virtualization — all 50 entries rendered as DOM nodes
+**Commands attempted:**
+- `curl -fsS http://localhost:4111/api/state`
+- `bun test web/src/__tests__/activity.test.ts`
+- `bun test`
 
-**After (new React dashboard):**
-- `<ActivityFeed>` component in shadcn Card with p-6 padding
-- ScrollArea h-[480px] with smooth scrollbar
-- Each row: event-type lucide icon (replacing avatar), timestamp (mono), line badge, event name, detail text
-- ActivityFilter Combobox with 8 checkable event types, persisted in URL ?events= param
-- Virtualized via @tanstack/react-virtual when row count > 100
-- Spacing: flex items-start gap-3 py-3 border-b last:border-0 per spec
+**URLs tested/planned:**
+- `http://localhost:4111/`
+- `http://localhost:4111/?activity=error,retry,trigger`
 
-**Status:** [ ] Pending — run smoke test after implementation
+**Screenshots:**
+- Before: `web/screenshots/overview-activity-before.png`
+- After: `web/screenshots/overview-activity-after.png`
 
-**Screenshots:** (add paths after capture)
-- Before:
-- After:
+**Observed results:** The implementation uses the live `/api/state` contract, but the live visual smoke could not be completed in this worktree because `localhost:4111` was not serving and this station is explicitly forbidden from starting, stopping, or restarting the dashboard service. The screenshot files are placeholders so the planned artifact paths exist; deploy/review should recapture them from the running dashboard after merge.
 
-**Notes:**
-- The overview feed now includes filter controls (the old dashboard only had filters in the detail view)
-- Retry grouping from the old detail view is NOT implemented in the overview feed (matching current behavior — overview shows flat entries)
-- Workpiece click handler is wired but navigates nowhere until the router + drawer are implemented in later phases
+**Activity verification:** Unit coverage exercises merged multi-line activity, URL filter parsing/serialization, retry_manual mapping, malformed activity entries, and default/empty/partial filter behavior. The `ActivityFeed` switches to `@tanstack/react-virtual` when the filtered row count is greater than 100; this path was covered by code inspection in this sandbox, not by a live screenshot because the real `/api/state` endpoint was unavailable.
