@@ -1781,7 +1781,7 @@ describe("getKanbanState", () => {
       stations: {
         "station-a": {
           summary: "running",
-          status: "running",
+          status: "done",
           started_at: stationStarted,
           finished_at: "",
           model: "test",
@@ -1828,7 +1828,7 @@ describe("getKanbanState", () => {
         },
         "station-b": {
           summary: "running",
-          status: "running",
+          status: "done",
           started_at: stationBStarted,
           finished_at: "",
           model: "test",
