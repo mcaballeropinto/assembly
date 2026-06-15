@@ -1,126 +1,328 @@
-// Vendored from shadcn.io timeline-activity-feed block, retrieved 2026-06-09; dashboard-activity-feed was not publicly accessible.
-import { CheckCircle2, CircleDot, GitCommit, MessageSquare } from "lucide-react"
+import { useMemo, useRef, useState, type ComponentType } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import {
+  Activity,
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  ChevronsUpDown,
+  Filter,
+  GitBranch,
+  Inbox,
+  RotateCcw,
+  ShieldAlert,
+  Zap,
+} from "lucide-react"
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
+import { Card } from "@/components/ui/card"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  ACTIVITY_FILTERS,
+  type ActivityFilterKey,
+  type DashboardActivityEvent,
+} from "@/lib/activity"
 import { cn } from "@/lib/utils"
 
-const activityIcons = {
-  comment: MessageSquare,
-  commit: GitCommit,
-  review: CheckCircle2,
-  status: CircleDot,
-}
-
-export type ActivityFeedItem = {
-  id: string
-  actor: {
-    name: string
-    initials: string
-    avatarUrl?: string
-  }
-  action: string
-  subject: string
-  timestamp: string
-  type: keyof typeof activityIcons
-  badge?: string
-  description?: string
-}
-
-const defaultItems: ActivityFeedItem[] = [
-  {
-    id: "activity-1",
-    actor: { name: "Maya Chen", initials: "MC" },
-    action: "commented on",
-    subject: "Dashboard smoke scaffold",
-    timestamp: "12m ago",
-    type: "comment",
-    badge: "Comment",
-    description: "Confirmed the Vite smoke app renders the shadcn Button.",
-  },
-  {
-    id: "activity-2",
-    actor: { name: "Noah Kim", initials: "NK" },
-    action: "updated",
-    subject: "Frontend dependencies",
-    timestamp: "28m ago",
-    type: "status",
-    badge: "Update",
-  },
-  {
-    id: "activity-3",
-    actor: { name: "Ari Patel", initials: "AP" },
-    action: "reviewed",
-    subject: "Phase 1 scaffold",
-    timestamp: "1h ago",
-    type: "review",
-    badge: "Review",
-  },
-]
-
-export type ActivityFeedProps = {
+interface ActivityFeedProps {
+  items: DashboardActivityEvent[]
+  selectedFilters: Set<ActivityFilterKey>
+  onSelectedFiltersChange: (next: Set<ActivityFilterKey>) => void
   className?: string
-  items?: ActivityFeedItem[]
   title?: string
+  totalItems?: number
 }
 
 export function ActivityFeed({
+  items,
+  selectedFilters,
+  onSelectedFiltersChange,
   className,
-  items = defaultItems,
   title = "Activity",
+  totalItems,
 }: ActivityFeedProps) {
-  return (
-    <Card className={cn("w-full", className)}>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base">{title}</CardTitle>
-        <Button size="sm" variant="ghost">
-          View all
-        </Button>
-      </CardHeader>
-      <CardContent>
-        <ol className="relative space-y-0">
-          {items.map((item, index) => {
-            const Icon = activityIcons[item.type]
+  const parentRef = useRef<HTMLDivElement>(null)
+  const shouldVirtualize = items.length > 100
+  const rowVirtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 58,
+    overscan: 8,
+    enabled: shouldVirtualize,
+  })
 
-            return (
-              <li className="relative flex gap-4 pb-6 last:pb-0" key={item.id}>
-                {index < items.length - 1 ? (
-                  <Separator
-                    className="absolute left-5 top-10 h-[calc(100%-2.5rem)] w-px"
-                    orientation="vertical"
-                  />
-                ) : null}
-                <Avatar className="z-10 size-10 border bg-background">
-                  {item.actor.avatarUrl ? (
-                    <AvatarImage alt={item.actor.name} src={item.actor.avatarUrl} />
-                  ) : null}
-                  <AvatarFallback>{item.actor.initials}</AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{item.actor.name}</span>
-                    <span className="text-muted-foreground">{item.action}</span>
-                    <span className="font-medium">{item.subject}</span>
-                    {item.badge ? (
-                      <Badge className="gap-1" variant="secondary">
-                        <Icon className="size-3" />
-                        {item.badge}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <p className="text-sm text-muted-foreground">{item.timestamp}</p>
-                  {item.description ? (
-                    <p className="text-sm text-foreground">{item.description}</p>
-                  ) : null}
-                </div>
+  return (
+    <Card className={cn("w-full p-6", className)}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold">{title}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {totalItems === undefined
+              ? items.length
+              : `${items.length} of ${totalItems}`}
+          </p>
+        </div>
+        <ActivityFilterCombobox
+          selectedFilters={selectedFilters}
+          onSelectedFiltersChange={onSelectedFiltersChange}
+        />
+      </div>
+
+      <ScrollArea className="mt-4 h-[480px]" viewportRef={parentRef}>
+        {items.length === 0 ? (
+          <div className="flex h-[480px] items-center justify-center text-sm text-muted-foreground">
+            No matching activity.
+          </div>
+        ) : shouldVirtualize ? (
+          <ol
+            className="relative"
+            style={{
+              height: `${rowVirtualizer.getTotalSize()}px`,
+            }}
+          >
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const item = items[virtualRow.index]
+              return (
+                <li
+                  key={item.id}
+                  className="absolute left-0 top-0 w-full"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <ActivityRow item={item} />
+                </li>
+              )
+            })}
+          </ol>
+        ) : (
+          <ol>
+            {items.map((item) => (
+              <li key={item.id}>
+                <ActivityRow item={item} />
               </li>
-            )
-          })}
-        </ol>
-      </CardContent>
+            ))}
+          </ol>
+        )}
+      </ScrollArea>
     </Card>
   )
+}
+
+interface ActivityFilterComboboxProps {
+  selectedFilters: Set<ActivityFilterKey>
+  onSelectedFiltersChange: (next: Set<ActivityFilterKey>) => void
+}
+
+function ActivityFilterCombobox({
+  selectedFilters,
+  onSelectedFiltersChange,
+}: ActivityFilterComboboxProps) {
+  const [open, setOpen] = useState(false)
+  const selectedCount = selectedFilters.size
+  const allSelected = selectedCount === ACTIVITY_FILTERS.length
+
+  const label = useMemo(() => {
+    if (allSelected) return "All events"
+    if (selectedCount === 0) return "No events"
+    return `${selectedCount} events`
+  }, [allSelected, selectedCount])
+
+  const toggleFilter = (key: ActivityFilterKey) => {
+    const next = new Set(selectedFilters)
+    if (next.has(key)) {
+      next.delete(key)
+    } else {
+      next.add(key)
+    }
+    onSelectedFiltersChange(next)
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="shrink-0">
+          <Filter className="h-4 w-4" />
+          <span className="max-w-24 truncate">{label}</span>
+          <ChevronsUpDown className="h-3.5 w-3.5 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-0">
+        <Command>
+          <CommandInput placeholder="Filter events..." />
+          <CommandList>
+            <CommandEmpty>No event types found.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value="all"
+                onSelect={() =>
+                  onSelectedFiltersChange(
+                    new Set(ACTIVITY_FILTERS.map((filter) => filter.key)),
+                  )
+                }
+              >
+                <Check
+                  className={cn(
+                    "mr-2 h-4 w-4",
+                    allSelected ? "opacity-100" : "opacity-0",
+                  )}
+                />
+                All
+              </CommandItem>
+              <CommandItem
+                value="clear"
+                onSelect={() => onSelectedFiltersChange(new Set())}
+              >
+                <Check
+                  className={cn(
+                    "mr-2 h-4 w-4",
+                    selectedCount === 0 ? "opacity-100" : "opacity-0",
+                  )}
+                />
+                Clear
+              </CommandItem>
+            </CommandGroup>
+            <CommandGroup>
+              {ACTIVITY_FILTERS.map((filter) => (
+                <CommandItem
+                  key={filter.key}
+                  value={filter.key}
+                  onSelect={() => toggleFilter(filter.key)}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      selectedFilters.has(filter.key)
+                        ? "opacity-100"
+                        : "opacity-0",
+                    )}
+                  />
+                  {filter.label}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function ActivityRow({ item }: { item: DashboardActivityEvent }) {
+  const Icon = iconForEvent(item)
+  const time = formatTime(item.ts)
+
+  return (
+    <div
+      className="flex items-start gap-3 border-b py-3 last:border-0"
+      aria-label={`${item.event} on ${item.line}`}
+    >
+      <div
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-full border bg-background",
+          iconToneClass(item),
+        )}
+      >
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-medium">{item.event}</span>
+          {item.station && (
+            <span className="max-w-36 truncate rounded border px-1.5 py-0.5 text-xs text-muted-foreground">
+              {item.station}
+            </span>
+          )}
+          <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">
+            {item.line}
+          </span>
+          <time
+            className="ml-auto text-xs tabular-nums text-muted-foreground"
+            dateTime={item.ts}
+          >
+            {time}
+          </time>
+        </div>
+        {item.detail && (
+          <p
+            title={item.detailTitle}
+            className="mt-1 truncate text-sm text-muted-foreground"
+          >
+            {item.detail}
+          </p>
+        )}
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+          {item.workpieceFile && (
+            <span className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+              {item.workpieceFile}
+            </span>
+          )}
+          {item.silentSeconds !== undefined && (
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span
+                className={cn(
+                  "h-2 w-2 rounded-full",
+                  silentClass(item.silentSeconds),
+                )}
+              />
+              {item.silentSeconds}s silent
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function iconForEvent(
+  item: DashboardActivityEvent,
+): ComponentType<{ className?: string }> {
+  if (item.event === "routed" || item.event === "queued") return GitBranch
+  if (item.iconKind === "done") return CheckCircle2
+  if (item.iconKind === "retry") return RotateCcw
+  if (item.iconKind === "error") return AlertTriangle
+  if (item.iconKind === "routed") return ArrowRight
+  if (item.iconKind === "escalated") return ShieldAlert
+  if (item.iconKind === "task_received") return Inbox
+  if (item.iconKind === "trigger") return Zap
+  return Activity
+}
+
+function iconToneClass(item: DashboardActivityEvent): string {
+  if (item.tone === "done") return "text-emerald-600"
+  if (item.tone === "retry" || item.tone === "escalated") {
+    return "text-amber-600"
+  }
+  if (item.tone === "error") return "text-destructive"
+  if (item.tone === "routed") return "text-blue-600"
+  if (item.tone === "trigger") return "text-violet-600"
+  return "text-muted-foreground"
+}
+
+function silentClass(silentSeconds: number): string {
+  if (silentSeconds < 90) return "bg-emerald-500"
+  if (silentSeconds < 300) return "bg-amber-500"
+  return "bg-destructive"
+}
+
+function formatTime(ts: string): string {
+  const date = new Date(ts)
+  if (Number.isNaN(date.getTime())) return ts
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
 }
