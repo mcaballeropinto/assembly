@@ -109,8 +109,24 @@ is unchanged.
 ## Discord reporting
 
 The watcher posts to the `#assembly` channel (override with
-`ASSEMBLY_DISCORD_CHANNEL_ID`) via `openclaw message send` when it queues a
-proposal, when a fix deploys (with requeue counts), when a fix fails or
-no-ops, and when caps/exhaustion trip. Per-run reporting for `assembly-dev`
-itself is wired separately through its `line.yaml` `on_success`/`on_failure`
-hooks → `shared/notify-discord.ts`.
+`ASSEMBLY_DISCORD_CHANNEL_ID`) via `openclaw message send`.
+
+It sends two classes of Assembly logs messages:
+
+- Lifecycle notifications: proposal queued, fix deployed with requeue counts,
+  fix failed, no-op, recoverable repair queued, and cap/exhaustion notices.
+- One-shot diagnosis reports for failed source workpieces. Each report names
+  the source line and workpiece/file, failed station and `failure_class`, root
+  cause category, confidence level/score, compact evidence including
+  sidecar/session paths when relevant, recommended next action, and the actual
+  action taken.
+
+Diagnosis reports are deduped durably by source line + workpiece id/file +
+failed station + failure fingerprint in `reports.jsonl`, so repeated sweeps or
+watcher restarts do not spam Discord. Low-confidence or manual-only diagnoses
+still report once, but explicitly state that no automatic repair was taken and
+why. Auto-enqueued repair reports include the new assembly-dev task key/file
+and the source failure fingerprint.
+
+Per-run reporting for `assembly-dev` itself is wired separately through its
+`line.yaml` `on_success`/`on_failure` hooks → `shared/notify-discord.ts`.

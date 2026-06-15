@@ -17,8 +17,13 @@ export interface AssessmentVerdict {
   outcome: "success" | "failure";
   should_improve: boolean;
   confidence: "low" | "medium" | "high";
+  confidence_score?: number;
   target_station: string | null;
   issue_slug: string;
+  root_cause_category?: string;
+  failure_fingerprint?: string;
+  evidence?: string[];
+  recommended_next_action?: string;
   title: string;
   task_body: string;
   requeue_after_fix: boolean;
@@ -97,6 +102,20 @@ export function normalizeSlug(slug: string): string {
     .slice(0, 50)
     .replace(/-+$/, "");
   return s || "unnamed-issue";
+}
+
+function normalizeCategory(category: string): string {
+  const s = category
+    .toLowerCase()
+    .replace(/[^a-z0-9/_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80)
+    .replace(/-+$/g, "");
+  return s || "uncategorized";
+}
+
+function defaultConfidenceScore(confidence: AssessmentVerdict["confidence"]): number {
+  return confidence === "high" ? 0.9 : confidence === "medium" ? 0.6 : 0.3;
 }
 
 function stationDigest(name: string, s: Record<string, unknown>): string {
@@ -275,8 +294,13 @@ Respond with ONLY a JSON object (no markdown fences, no prose):
   "outcome": "success" | "failure",
   "should_improve": boolean,
   "confidence": "low" | "medium" | "high",
+  "confidence_score": number between 0 and 1,
   "target_station": "<station name>" | null,
   "issue_slug": "<kebab-case, 2-4 words>",
+  "root_cause_category": "<concise root-cause category>",
+  "failure_fingerprint": "<stable kebab-case fingerprint for this source failure>",
+  "evidence": ["2-4 compact evidence lines, including relevant sidecar/session paths when known"],
+  "recommended_next_action": "<concise recommended next action>",
   "title": "<one-line proposal title>",
   "task_body": "<full markdown work order, empty string if should_improve is false>",
   "requeue_after_fix": boolean,
@@ -332,16 +356,47 @@ export function parseVerdict(text: string): AssessmentVerdict {
     outcome,
     should_improve: parsed.should_improve,
     confidence,
+    confidence_score:
+      typeof parsed.confidence_score === "number" && Number.isFinite(parsed.confidence_score)
+        ? Math.max(0, Math.min(1, parsed.confidence_score))
+        : defaultConfidenceScore(confidence),
     target_station:
       typeof parsed.target_station === "string" && parsed.target_station.trim()
         ? parsed.target_station.trim()
         : null,
     issue_slug: normalizeSlug(typeof parsed.issue_slug === "string" ? parsed.issue_slug : ""),
+    root_cause_category:
+      typeof parsed.root_cause_category === "string" && parsed.root_cause_category.trim()
+        ? normalizeCategory(parsed.root_cause_category)
+        : undefined,
+    failure_fingerprint:
+      typeof parsed.failure_fingerprint === "string" && parsed.failure_fingerprint.trim()
+        ? normalizeSlug(parsed.failure_fingerprint)
+        : undefined,
+    evidence: Array.isArray(parsed.evidence)
+      ? parsed.evidence
+          .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+          .slice(0, 4)
+          .map((x) => clip(x.trim(), 240))
+      : undefined,
+    recommended_next_action:
+      typeof parsed.recommended_next_action === "string" && parsed.recommended_next_action.trim()
+        ? clip(parsed.recommended_next_action.trim(), 240)
+        : undefined,
     title: sanitizeNeutral(clip(parsed.title ?? "", 200)),
     task_body: sanitizeNeutral(typeof parsed.task_body === "string" ? parsed.task_body : ""),
     requeue_after_fix: parsed.requeue_after_fix === true,
     reasoning: clip(parsed.reasoning ?? "", 600),
   };
+  verdict.root_cause_category ??= verdict.issue_slug;
+  verdict.failure_fingerprint ??= verdict.issue_slug;
+  if (!verdict.evidence || verdict.evidence.length === 0) {
+    verdict.evidence = verdict.reasoning.trim() ? [verdict.reasoning] : [`issue: ${verdict.issue_slug}`];
+  }
+  verdict.recommended_next_action ??=
+    verdict.should_improve && verdict.confidence === "high"
+      ? verdict.title || "queue an improvement task"
+      : "manual review; no automatic repair";
 
   if (verdict.should_improve && (!verdict.title.trim() || !verdict.task_body.trim())) {
     throw new VerdictParseError("should_improve=true requires title and task_body");

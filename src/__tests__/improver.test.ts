@@ -13,7 +13,12 @@ import {
   VerdictParseError,
   type AssessmentVerdict,
 } from "../improver/assess";
-import { normalizeDiscordTarget, truncateForDiscord } from "../improver/discord";
+import {
+  buildDiagnosisReportMessage,
+  normalizeDiscordTarget,
+  truncateForDiscord,
+  type DiagnosisReport,
+} from "../improver/discord";
 import {
   enqueueDevTask,
   devTaskStillPresent,
@@ -231,6 +236,23 @@ describe("ImproverState", () => {
     expect(ImproverState.load(dir).hasNotice("exhausted", "a/work/x")).toBe(true);
   });
 
+  test("diagnosis report markers persist across loads", () => {
+    const dir = resolve(tempDir, "state");
+    const s1 = ImproverState.load(dir);
+    expect(s1.hasReport("line-a:run-1:work:timeout")).toBe(false);
+    s1.markReport({
+      key: "line-a:run-1:work:timeout",
+      line: "line-a",
+      wp_id: "run-1",
+      file_name: "run-1.json",
+      station: "work",
+      fingerprint: "timeout",
+      at: new Date().toISOString(),
+    });
+    expect(s1.hasReport("line-a:run-1:work:timeout")).toBe(true);
+    expect(ImproverState.load(dir).hasReport("line-a:run-1:work:timeout")).toBe(true);
+  });
+
   test("recurrence with no open proposal is a safe no-op in the fold", () => {
     const s = ImproverState.load(resolve(tempDir, "state"));
     s.appendEvent({
@@ -400,6 +422,48 @@ describe("parseVerdict", () => {
     expect(v2.title).toBe("Fix it");
   });
 
+  test("parses and bounds diagnosis report metadata while old fields stay optional", () => {
+    const v = parseVerdict(
+      JSON.stringify({
+        outcome: "failure",
+        should_improve: false,
+        confidence: "medium",
+        target_station: "work",
+        issue_slug: "Slow Fetch",
+        confidence_score: 3,
+        root_cause_category: "Malformed Sidecar/Fallback Missing Content!",
+        failure_fingerprint: "Fetch Timeout $$",
+        evidence: ["one", "", "two", "three", "four", "five"],
+        recommended_next_action: "inspect sidecars",
+        title: "",
+        task_body: "",
+        requeue_after_fix: false,
+        reasoning: "fallback evidence",
+      })
+    );
+    expect(v.confidence_score).toBe(1);
+    expect(v.root_cause_category).toBe("malformed-sidecar/fallback-missing-content");
+    expect(v.failure_fingerprint).toBe("fetch-timeout");
+    expect(v.evidence).toEqual(["one", "two", "three", "four"]);
+    expect(v.recommended_next_action).toBe("inspect sidecars");
+
+    const old = parseVerdict(
+      JSON.stringify({
+        outcome: "success",
+        should_improve: false,
+        confidence: "low",
+        target_station: null,
+        issue_slug: "x",
+        title: "",
+        task_body: "",
+        requeue_after_fix: false,
+        reasoning: "legacy",
+      })
+    );
+    expect(old.confidence_score).toBe(0.3);
+    expect(old.evidence).toEqual(["legacy"]);
+  });
+
   test("rejects garbage and inconsistent verdicts", () => {
     expect(() => parseVerdict("no json here")).toThrow(VerdictParseError);
     expect(() =>
@@ -458,6 +522,38 @@ describe("discord helpers", () => {
     expect(out.length).toBeLessThanOrEqual(1900);
     expect(out.endsWith("…")).toBe(true);
     expect(truncateForDiscord("short")).toBe("short");
+  });
+
+  test("buildDiagnosisReportMessage renders compact diagnosis fields", () => {
+    const report: DiagnosisReport = {
+      sourceLine: "line-a",
+      workpieceId: "run_f1",
+      fileName: "run_f1.json",
+      sourceFile: "lines/line-a/queues/error/run_f1.json",
+      failedStation: "work",
+      failureClass: "timeout",
+      rootCauseCategory: "fetch-timeout",
+      confidenceLevel: "high",
+      confidenceScore: 0.94,
+      evidence: ["fetch timed out", "sidecar: lines/line-a/queues/error/run_f1.json.stderr.log"],
+      recommendedNextAction: "harden fetch timeout handling",
+      action: {
+        text: "auto-enqueued repair task improver-line-a-fetch-timeout (task.json)",
+        devTaskKey: "improver-line-a-fetch-timeout",
+        devTaskFile: "task.json",
+        fingerprint: "fetch-timeout",
+      },
+    };
+    const msg = buildDiagnosisReportMessage(report);
+    expect(msg).toContain("improver diagnosis");
+    expect(msg).toContain("line-a / run_f1");
+    expect(msg).toContain("failure_class timeout");
+    expect(msg).toContain("confidence high/0.94");
+    expect(msg).toContain("auto-enqueued repair task");
+    expect(msg).toContain("dev task improver-line-a-fetch-timeout (task.json)");
+    expect(msg).toContain("fingerprint fetch-timeout");
+    expect(msg).not.toContain("|");
+    expect(msg.length).toBeLessThanOrEqual(1900);
   });
 });
 
@@ -648,6 +744,7 @@ describe("startImproverWatcher", () => {
       | ((ctx: { lineName: string; bucket: string }) => AssessmentVerdict | Promise<AssessmentVerdict>);
     config?: Record<string, unknown>;
     staleProposalMs?: number;
+    stateDir?: string;
   }) {
     const calls: Array<{ lineName: string; bucket: string }> = [];
     const notifications: string[] = [];
@@ -655,7 +752,7 @@ describe("startImproverWatcher", () => {
     let i = 0;
     handle = startImproverWatcher({
       getLines: () => opts.lines,
-      stateDir: resolve(tempDir, "improver-state"),
+      stateDir: opts.stateDir ?? resolve(tempDir, "improver-state"),
       configPath: resolve(tempDir, "no-config.yaml"),
       config: { enabled: true, devLine: "assembly-dev", ...(opts.config ?? {}) },
       staleProposalMs: opts.staleProposalMs,
@@ -785,6 +882,156 @@ describe("startImproverWatcher", () => {
     // Original error files were used for the requeue copies.
     expect(errFile1).toBe("run_f1.json");
     expect(errFile2).toBe("run_f2.json");
+  });
+
+  test("high-confidence source failure posts a diagnosis report with auto-action details", async () => {
+    const linePath = makeLine("line-a");
+    const devPath = makeLine("assembly-dev");
+    const { notifications, handle: h } = startWatcher({
+      lines: [
+        { linePath, lineName: "line-a" },
+        { linePath: devPath, lineName: "assembly-dev" },
+      ],
+      verdicts: () =>
+        proposeVerdict("fetch-timeout", {
+          confidence_score: 0.96,
+          root_cause_category: "source-timeout",
+          failure_fingerprint: "source-timeout-work",
+          evidence: ["work station timed out", "fetch retry budget exhausted"],
+          recommended_next_action: "harden fetch timeout handling",
+        }),
+    });
+    await h.sweep();
+    writeWorkpiece(linePath, "error", "run_diag1");
+    await h.sweep();
+
+    const report = notifications.find((n) => n.includes("improver diagnosis"))!;
+    expect(report).toContain("line-a / run_diag1");
+    expect(report).toContain("run_diag1.json");
+    expect(report).toContain("failed: work");
+    expect(report).toContain("failure_class timeout");
+    expect(report).toContain("root cause: source-timeout");
+    expect(report).toContain("confidence high/0.96");
+    expect(report).toContain("work station timed out");
+    expect(report).toContain("next: harden fetch timeout handling");
+    expect(report).toContain("auto-enqueued repair task");
+    expect(report).toContain("dev task");
+    expect(report).toContain("fingerprint source-timeout-work");
+    expect(notifications.some((n) => n.includes("queued improvement"))).toBe(true);
+    expect(readdirSync(resolve(devPath, "queues", "inbox")).filter((f) => f.endsWith(".json")).length).toBe(1);
+  });
+
+  test("low-confidence source failure reports once and does not auto-repair", async () => {
+    const linePath = makeLine("line-a");
+    const devPath = makeLine("assembly-dev");
+    const { notifications, handle: h } = startWatcher({
+      lines: [
+        { linePath, lineName: "line-a" },
+        { linePath: devPath, lineName: "assembly-dev" },
+      ],
+      verdicts: () =>
+        proposeVerdict("unclear-timeout", {
+          should_improve: true,
+          confidence: "low",
+          confidence_score: 0.24,
+          root_cause_category: "unclear-timeout",
+          failure_fingerprint: "unclear-timeout-work",
+          evidence: ["single timeout with no recurrence"],
+          recommended_next_action: "manual review before changing prompts",
+        }),
+    });
+    await h.sweep();
+    writeWorkpiece(linePath, "error", "run_low1");
+    await h.sweep();
+    await h.sweep();
+
+    const reports = notifications.filter((n) => n.includes("improver diagnosis"));
+    expect(reports.length).toBe(1);
+    expect(reports[0]).toContain("confidence low/0.24");
+    expect(reports[0]).toContain("deferred due to low confidence");
+    expect(reports[0]).toContain("no automatic action taken");
+    expect(readdirSync(resolve(devPath, "queues", "inbox")).filter((f) => f.endsWith(".json"))).toEqual([]);
+  });
+
+  test("diagnosis report dedupe survives repeated scans and watcher restart", async () => {
+    const linePath = makeLine("line-a");
+    const devPath = makeLine("assembly-dev");
+    const stateDir = resolve(tempDir, "shared-state");
+    const lines = [
+      { linePath, lineName: "line-a" },
+      { linePath: devPath, lineName: "assembly-dev" },
+    ];
+    const verdict = () =>
+      proposeVerdict("cap-timeout", {
+        confidence_score: 0.88,
+        root_cause_category: "cap-timeout",
+        failure_fingerprint: "same-fingerprint",
+        evidence: ["same failure evidence"],
+      });
+    const first = startWatcher({
+      lines,
+      verdicts: verdict,
+      config: { maxOpenProposals: 0 },
+      stateDir,
+    });
+    await first.handle.sweep();
+    writeWorkpiece(linePath, "error", "run_dedupe1");
+    await first.handle.sweep();
+    await first.handle.sweep();
+    expect(first.notifications.filter((n) => n.includes("improver diagnosis")).length).toBe(1);
+    first.handle.stop();
+
+    const second = startWatcher({
+      lines,
+      verdicts: verdict,
+      config: { maxOpenProposals: 0 },
+      stateDir,
+    });
+    await second.handle.sweep();
+    expect(second.notifications.filter((n) => n.includes("improver diagnosis")).length).toBe(0);
+  });
+
+  test("t10 malformed-envelope diagnosis report names sidecars and repair task", async () => {
+    const linePath = makeLine("operator");
+    const devPath = makeLine("assembly-dev");
+    const { notifications, handle: h } = startWatcher({
+      lines: [
+        { linePath, lineName: "operator" },
+        { linePath: devPath, lineName: "assembly-dev" },
+      ],
+      verdicts: () =>
+        proposeVerdict("malformed-envelope", {
+          confidence_score: 0.97,
+          root_cause_category: "malformed-sidecar/fallback-missing-content",
+          failure_fingerprint: "malformed-sidecar-fallback-missing-content",
+          evidence: ["fallback produced missing content", "malformed envelope blocked deploy"],
+          recommended_next_action: "repair malformed-envelope fallback handling",
+        }),
+    });
+    await h.sweep();
+    const fileName = writeWorkpiece(linePath, "error", "t10-overview-routes", {
+      stations: {
+        work: {
+          status: "failed",
+          failure_class: "malformed_envelope",
+          summary: "Malformed envelope and fallback missing content",
+        },
+      },
+    });
+    const failedPath = resolve(linePath, "queues", "error", fileName);
+    writeFileSync(`${failedPath}.stderr.log`, "malformed envelope");
+    writeFileSync(`${failedPath}.session.jsonl`, "{}\n");
+    await h.sweep();
+
+    const report = notifications.find((n) => n.includes("improver diagnosis"))!;
+    expect(report).toContain("t10-overview-routes.json");
+    expect(report).toContain("failure_class malformed_envelope");
+    expect(report).toContain("malformed-sidecar/fallback-missing-content");
+    expect(report).toContain("sidecar:");
+    expect(report).toContain(".session.jsonl");
+    expect(report).toContain("auto-enqueued repair task");
+    expect(report).toContain("dev task");
+    expect(report).toContain("fingerprint malformed-sidecar-fallback-missing-content");
   });
 
   test("failed dev task resolves the proposal without requeueing", async () => {
