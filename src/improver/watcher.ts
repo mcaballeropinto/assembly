@@ -509,13 +509,16 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
   }
 
   function reportEvidence(c: Candidate, verdict: AssessmentVerdict): string[] {
-    const evidence = [...(verdict.evidence ?? [])].filter((x) => x.trim()).slice(0, 4);
-    for (const path of existingSidecars(c.filePath)) {
-      const line = `sidecar: ${path}`;
-      if (evidence.length >= 4) evidence[evidence.length - 1] = line;
-      else evidence.push(line);
+    const sidecars = existingSidecars(c.filePath).map((path) => `sidecar: ${path}`).slice(0, 2);
+    const evidence = [...(verdict.evidence ?? [])]
+      .filter((x) => x.trim())
+      .slice(0, Math.max(0, 4 - sidecars.length));
+    const combined = [...evidence, ...sidecars].slice(0, 4);
+    if (combined.length === 0) return [verdict.reasoning || `issue: ${verdict.issue_slug}`];
+    if (combined.length === 1) {
+      combined.push(verdict.reasoning ? `reasoning: ${verdict.reasoning}` : `issue: ${verdict.issue_slug}`);
     }
-    return evidence.length > 0 ? evidence : [verdict.reasoning || `issue: ${verdict.issue_slug}`];
+    return combined;
   }
 
   async function postDiagnosisReportOnce(
