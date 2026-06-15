@@ -27,10 +27,6 @@ async function post(path: string, body: unknown) {
   }));
 }
 
-function request(path: string): Promise<Response> {
-  return server!.fetch!(new Request(`http://localhost${path}`));
-}
-
 beforeAll(async () => {
   // Create line directory structure
   const stationDir = resolve(LINE_DIR, "stations", "step-one");
