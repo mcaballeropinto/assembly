@@ -1,5 +1,5 @@
 import { resolve, basename } from "path";
-import { readdirSync, existsSync, readFileSync, statSync } from "fs";
+import { readdirSync, existsSync, readFileSync, statSync, openSync, readSync, closeSync } from "fs";
 import { loadLine } from "./line";
 import {
   listQueue,
@@ -2045,10 +2045,10 @@ export function computeFlowMetrics(linePath: string, sequence: string[]): FlowMe
  * queue it came from so the drawer UI can conditionally render actions
  * (e.g. Retry / Dismiss-forever only for errored workpieces).
  */
-export async function findWorkpiece(
+function findWorkpieceWithPath(
   linePath: string,
   fileName: string
-): Promise<(Workpiece & { _source?: string }) | null> {
+): { workpiece: Workpiece; source: string; path: string } | null {
   const candidates: { dir: string; source: string }[] = [
     { dir: resolve(linePath, "queues", "done"), source: "done" },
     { dir: resolve(linePath, "queues", "error"), source: "error" },
@@ -2075,12 +2075,85 @@ export async function findWorkpiece(
       try {
         const wp = readWorkpieceSafe(path);
         if (!wp) continue;
-        return { ...wp, _source: source };
+        return { workpiece: wp, source, path };
       } catch {}
     }
   }
 
   return null;
+}
+
+export async function findWorkpiece(
+  linePath: string,
+  fileName: string
+): Promise<(Workpiece & { _source?: string }) | null> {
+  const found = findWorkpieceWithPath(linePath, fileName);
+  if (!found) return null;
+  return { ...found.workpiece, _source: found.source };
+}
+
+export interface WorkpieceSidecarTail {
+  content: string;
+  exists: boolean;
+  truncated: boolean;
+  bytes: number;
+}
+
+export interface WorkpieceSidecarTails {
+  stdout: WorkpieceSidecarTail;
+  stderr: WorkpieceSidecarTail;
+  retry: WorkpieceSidecarTail;
+}
+
+function emptySidecarTail(): WorkpieceSidecarTail {
+  return { content: "", exists: false, truncated: false, bytes: 0 };
+}
+
+function readSidecarTail(path: string, limitBytes: number): WorkpieceSidecarTail {
+  try {
+    if (!existsSync(path)) return emptySidecarTail();
+    const size = statSync(path).size;
+    const boundedLimit = Math.max(1, limitBytes);
+    if (size <= boundedLimit) {
+      return {
+        content: readFileSync(path, "utf-8"),
+        exists: true,
+        truncated: false,
+        bytes: size,
+      };
+    }
+
+    const fd = openSync(path, "r");
+    try {
+      const buffer = Buffer.alloc(boundedLimit);
+      readSync(fd, buffer, 0, boundedLimit, size - boundedLimit);
+      return {
+        content: buffer.toString("utf-8"),
+        exists: true,
+        truncated: true,
+        bytes: size,
+      };
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return emptySidecarTail();
+  }
+}
+
+export function getWorkpieceSidecarTails(
+  linePath: string,
+  fileName: string,
+  limitBytes = 40000
+): WorkpieceSidecarTails | null {
+  const found = findWorkpieceWithPath(linePath, fileName);
+  if (!found) return null;
+
+  return {
+    stdout: readSidecarTail(`${found.path}.session.jsonl`, limitBytes),
+    stderr: readSidecarTail(`${found.path}.stderr.log`, limitBytes),
+    retry: readSidecarTail(found.path.replace(/\.json$/, ".retry.json"), limitBytes),
+  };
 }
 
 // ─── Task Events ────────────────────────────────────────────────────

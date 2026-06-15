@@ -1,5 +1,5 @@
 import { discoverLines, type GlobalState } from "./global-orchestrator";
-import { getFullState, findWorkpiece, getWorkpieceActivity, getHistory, getKanbanState, getDoneCards, getTaskEventStations, getTaskEvents, computeFlowMetrics } from "./dashboard-data";
+import { getFullState, findWorkpiece, getWorkpieceActivity, getHistory, getKanbanState, getDoneCards, getTaskEventStations, getTaskEvents, computeFlowMetrics, getWorkpieceSidecarTails } from "./dashboard-data";
 import { dismissFilenames, undismissFilenames } from "./error-dismiss";
 import { releaseHeldTasks, InvalidTaskFileError } from "./held";
 import {
@@ -497,6 +497,18 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
         } catch {
           return Response.json({ events: [], next_cursor: 0, total: 0, has_more: false });
         }
+      }
+
+      // Workpiece sidecar tail API
+      const sidecarsMatch = url.pathname.match(/^\/api\/workpiece\/([^/]+)\/(.+)\/sidecars$/);
+      if (sidecarsMatch && req.method === "GET") {
+        const lineName = decodeURIComponent(sidecarsMatch[1]);
+        const fileName = decodeURIComponent(sidecarsMatch[2]);
+        const dl = linesByName.get(lineName);
+        if (!dl) return Response.json({ error: `Line "${lineName}" not found` }, { status: 404 });
+        const sidecars = getWorkpieceSidecarTails(dl.linePath, fileName);
+        if (!sidecars) return Response.json({ error: "Workpiece not found" }, { status: 404 });
+        return Response.json(sidecars);
       }
 
       // Per-line workpiece API

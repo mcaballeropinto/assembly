@@ -77,6 +77,18 @@ beforeAll(async () => {
     resolve(LINE_DIR, "queues", "done", "drawer-wp-1.json"),
     JSON.stringify(wp)
   );
+  writeFileSync(
+    resolve(LINE_DIR, "queues", "done", "drawer-wp-1.json.session.jsonl"),
+    "session line 1\nsession line 2\n"
+  );
+  writeFileSync(
+    resolve(LINE_DIR, "queues", "done", "drawer-wp-1.json.stderr.log"),
+    "stderr line 1\n"
+  );
+  writeFileSync(
+    resolve(LINE_DIR, "queues", "done", "drawer-wp-1.retry.json"),
+    JSON.stringify({ attempts: 2, reason: "timeout" })
+  );
 
   // Create a workpiece with previous_attempts
   const wpWithRetries = {
@@ -123,6 +135,20 @@ beforeAll(async () => {
   writeFileSync(
     resolve(LINE_DIR, "queues", "done", "drawer-wp-retries.json"),
     JSON.stringify(wpWithRetries)
+  );
+
+  const oversizedWp = {
+    ...wp,
+    id: "drawer-wp-oversized",
+    task: "Test oversized sidecar",
+  };
+  writeFileSync(
+    resolve(LINE_DIR, "queues", "done", "drawer-wp-oversized.json"),
+    JSON.stringify(oversizedWp)
+  );
+  writeFileSync(
+    resolve(LINE_DIR, "queues", "done", "drawer-wp-oversized.json.session.jsonl"),
+    "a".repeat(41000) + "TAIL-END"
   );
 
   // Create activity log with entries for this workpiece and others
@@ -308,6 +334,55 @@ describe("Workpiece API with _activity", () => {
     const data = await res.json();
     expect(data.stations.plan.previous_attempts).toBeUndefined();
     expect(data.stations.develop.previous_attempts).toBeUndefined();
+  });
+});
+
+describe("Workpiece sidecar tails API", () => {
+  test("returns stdout stderr and retry sidecar tails", async () => {
+    const res = await request("/api/workpiece/drawer-test-line/drawer-wp-1.json/sidecars");
+    expect(res.status).toBe(200);
+
+    const data = await res.json();
+    expect(data.stdout.exists).toBe(true);
+    expect(data.stdout.content).toContain("session line 1");
+    expect(data.stderr.exists).toBe(true);
+    expect(data.stderr.content).toContain("stderr line 1");
+    expect(data.retry.exists).toBe(true);
+    expect(data.retry.content).toContain("timeout");
+  });
+
+  test("returns 404 for missing sidecar workpiece", async () => {
+    const res = await request("/api/workpiece/drawer-test-line/ghost.json/sidecars");
+    expect(res.status).toBe(404);
+    const data = await res.json();
+    expect(data.error).toBeDefined();
+  });
+
+  test("truncates oversized sidecars to backend limit", async () => {
+    const res = await request("/api/workpiece/drawer-test-line/drawer-wp-oversized.json/sidecars");
+    expect(res.status).toBe(200);
+
+    const data = await res.json();
+    expect(data.stdout.exists).toBe(true);
+    expect(data.stdout.truncated).toBe(true);
+    expect(data.stdout.bytes).toBeGreaterThan(40000);
+    expect(data.stdout.content.length).toBeLessThanOrEqual(40000);
+    expect(data.stdout.content.endsWith("TAIL-END")).toBe(true);
+  });
+
+  test("keeps original workpiece route separate from sidecars route", async () => {
+    const workpieceRes = await request("/api/workpiece/drawer-test-line/drawer-wp-1.json");
+    expect(workpieceRes.status).toBe(200);
+    const workpiece = await workpieceRes.json();
+    expect(workpiece.id).toBe("drawer-wp-1");
+    expect(workpiece._activity).toBeDefined();
+    expect(workpiece._taskEventStations).toBeDefined();
+
+    const sidecarsRes = await request("/api/workpiece/drawer-test-line/drawer-wp-1.json/sidecars");
+    expect(sidecarsRes.status).toBe(200);
+    const sidecars = await sidecarsRes.json();
+    expect(sidecars.stdout.content).toContain("session line 1");
+    expect(sidecars.id).toBeUndefined();
   });
 });
 
