@@ -2,6 +2,9 @@
 // from dashboard-data.ts and defines typed interfaces for each HTTP endpoint
 // response. See web/PORT-NOTES.md for panel-level documentation.
 
+import type { Workpiece } from "./types";
+import type { StationMeta, TaskEventsPage } from "./dashboard-data";
+
 // ─── Type re-exports from dashboard-data.ts ────────────────────────────────
 
 export type {
@@ -37,9 +40,6 @@ export type {
   TaskEventsPage,
   TaskEvent,
 } from "./dashboard-data";
-
-import type { Workpiece } from "./types";
-import type { StationMeta, TaskEventsPage } from "./dashboard-data";
 
 // ─── Constant re-exports ───────────────────────────────────────────────────
 
@@ -195,11 +195,17 @@ export interface ApiUsageResponse {
   reason?: string;
 }
 
-export interface ApiWorkpieceResponse extends Workpiece {
+export interface ApiWorkpieceData extends Workpiece {
   _source?: string;
   _activity?: unknown[];
   _taskEventStations?: StationMeta[];
 }
+
+export interface ApiErrorResponse {
+  error: string;
+}
+
+export type ApiWorkpieceResponse = ApiWorkpieceData;
 
 export interface ApiTaskEventStationsResponse {
   stations: StationMeta[];
@@ -327,8 +333,4 @@ export interface ApiReleaseHeldResponse {
   released: string[];
   skipped: string[];
   errors: Array<{ file?: string; error: string } | string>;
-}
-
-export interface ApiErrorResponse {
-  error: string;
 }

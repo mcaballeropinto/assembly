@@ -1,3 +1,11 @@
+import type {
+  ApiErrorResponse,
+  ApiTaskEventsResponse,
+  ApiTaskEventStationsResponse,
+  ApiWorkpieceResponse,
+  ApiWorkpieceSidecarsResponse,
+} from "../../../src/dashboard-api"
+
 export type KanbanLane = "inbox" | "processing" | "output"
 
 export type KanbanCardState =
@@ -136,46 +144,11 @@ export interface ApiStateResponse {
   version: string
 }
 
-export interface ApiWorkpieceResponse {
-  id?: string
-  task?: string
-  input?: unknown
-  status?: string
-  stations?: Record<string, unknown>
-  [key: string]: unknown
-  _source?: string
-  _activity?: unknown[]
-  _taskEventStations?: Array<Record<string, unknown>>
-}
-
-export interface ApiTaskEventStationsResponse {
-  stations: Array<Record<string, unknown>>
-}
-
-export interface ApiTaskEventsResponse {
-  events: Array<Record<string, unknown>>
-  nextCursor?: number | null
-  hasMore?: boolean
-}
-
-export interface ApiSidecarTail {
-  content: string
-  exists: boolean
-  truncated: boolean
-  bytes: number
-}
-
-export interface ApiWorkpieceSidecarsResponse {
-  stdout: ApiSidecarTail
-  stderr: ApiSidecarTail
-  retry: ApiSidecarTail
-}
-
-export interface ApiErrorResponse {
+export interface ApiLocalErrorResponse {
   error: string
 }
 
-export type ApiKanbanResponse = KanbanState | ApiErrorResponse
+export type ApiKanbanResponse = KanbanState | ApiLocalErrorResponse
 
 export interface ApiKanbanDoneResponse {
   cards: KanbanCard[]
@@ -190,26 +163,40 @@ export interface ApiReleaseHeldResponse {
   errors: Array<{ file?: string; error: string } | string>
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
-  const json = (await res.json().catch(() => null)) as
-    | T
-    | ApiErrorResponse
-    | null
+type JsonError = {
+  error?: unknown
+  message?: unknown
+}
 
-  if (!res.ok) {
-    const detail =
-      json && typeof json === "object" && "error" in json
-        ? `: ${String(json.error)}`
-        : ""
-    throw new Error(`Request failed (${res.status})${detail}`)
+export type ApiWorkpieceFetchResponse = ApiWorkpieceResponse | ApiErrorResponse
+
+export async function fetchJson<T>(
+  url: string,
+  init?: RequestInit
+): Promise<T> {
+  const response = await fetch(url, init)
+
+  if (!response.ok) {
+    let message = `Request failed with status ${response.status}`
+
+    try {
+      const body = (await response.json()) as JsonError
+      if (typeof body.error === "string" && body.error.trim()) {
+        message = body.error
+      } else if (typeof body.message === "string" && body.message.trim()) {
+        message = body.message
+      }
+    } catch {
+      try {
+        const text = await response.text()
+        if (text.trim()) message = text.trim()
+      } catch {}
+    }
+
+    throw new Error(message)
   }
 
-  if (json && typeof json === "object" && "error" in json) {
-    throw new Error(String(json.error))
-  }
-
-  return json as T
+  return (await response.json()) as T
 }
 
 function enc(value: string): string {
@@ -219,9 +206,20 @@ function enc(value: string): string {
 export function fetchWorkpiece(
   lineName: string,
   fileName: string
-): Promise<ApiWorkpieceResponse> {
-  return fetchJson<ApiWorkpieceResponse>(
+): Promise<ApiWorkpieceFetchResponse> {
+  return fetchJson<ApiWorkpieceFetchResponse>(
     `/api/workpiece/${enc(lineName)}/${enc(fileName)}`
+  )
+}
+
+export function isApiError(
+  value: ApiWorkpieceFetchResponse
+): value is { error: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "error" in value &&
+    typeof value.error === "string"
   )
 }
 
