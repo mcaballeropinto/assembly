@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import type { MouseEvent } from "react";
+import { Archive, RotateCcw, Send } from "lucide-react";
 import type { KanbanCard as ApiKanbanCard, KanbanCardState } from "../../lib/api";
 import { KanbanBoardCard } from "../ui/kanban-board/kanban";
 import { cn } from "../../lib/utils";
@@ -6,6 +8,12 @@ import { cn } from "../../lib/utils";
 interface KanbanCardProps {
   card: ApiKanbanCard;
   onOpen: (fileName: string) => void;
+  onReleaseHeld?: (fileName: string) => void;
+  onRetryWorkpiece?: (fileName: string) => void;
+  onDismissError?: (fileName: string) => void;
+  isReleasing?: boolean;
+  isRetrying?: boolean;
+  isDismissing?: boolean;
   now?: number;
 }
 
@@ -112,11 +120,28 @@ function retryLabel(card: ApiKanbanCard): string | null {
   return String(count);
 }
 
-export function KanbanCard({ card, onOpen, now }: KanbanCardProps) {
+export function KanbanCard({
+  card,
+  onOpen,
+  onReleaseHeld,
+  onRetryWorkpiece,
+  onDismissError,
+  isReleasing,
+  isRetrying,
+  isDismissing,
+  now,
+}: KanbanCardProps) {
   const retry = retryLabel(card);
   const duration = buildCardDurationLabel(card, now);
   const isFailed = card.state === "failed" || card.outcome === "failed" || card.retry?.exhausted;
   const inBackoff = Boolean(card.retry?.in_backoff && !card.retry?.exhausted);
+  const showRelease = card.column === "held" || card.state === "held";
+  const showFailureActions = isFailed || card.column === "error";
+
+  function handleAction(event: MouseEvent, action: () => void) {
+    event.stopPropagation();
+    action();
+  }
 
   return (
     <KanbanBoardCard
@@ -167,6 +192,49 @@ export function KanbanCard({ card, onOpen, now }: KanbanCardProps) {
         )}
         <span>{duration}</span>
       </div>
+      {(showRelease || showFailureActions) && (
+        <div className="flex flex-wrap justify-end gap-1 pt-1">
+          {showRelease ? (
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border text-muted-foreground hover:text-foreground disabled:opacity-50"
+              aria-label={`Release ${card.fileName}`}
+              disabled={isReleasing}
+              onClick={(event) =>
+                handleAction(event, () => onReleaseHeld?.(card.fileName))
+              }
+            >
+              <Send className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {showFailureActions ? (
+            <>
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border text-muted-foreground hover:text-foreground disabled:opacity-50"
+                aria-label={`Retry ${card.fileName}`}
+                disabled={isRetrying}
+                onClick={(event) =>
+                  handleAction(event, () => onRetryWorkpiece?.(card.fileName))
+                }
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border text-muted-foreground hover:text-foreground disabled:opacity-50"
+                aria-label={`Dismiss ${card.fileName}`}
+                disabled={isDismissing}
+                onClick={(event) =>
+                  handleAction(event, () => onDismissError?.(card.fileName))
+                }
+              >
+                <Archive className="h-3.5 w-3.5" />
+              </button>
+            </>
+          ) : null}
+        </div>
+      )}
     </KanbanBoardCard>
   );
 }

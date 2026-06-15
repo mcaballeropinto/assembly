@@ -155,7 +155,14 @@ export interface ApiStateLineEntry {
     completed: unknown[]
     errors: unknown[]
     banner_errors?: unknown[]
+    errors_meta?: {
+      total_active: number
+      in_banner: number
+      oldest_in_banner_age_ms: number
+      max_banner_age_ms: number
+    }
     errorsDismissed: unknown[]
+    reviews: unknown[]
     timestamp: string
   } | null
 }
@@ -201,6 +208,16 @@ export interface ApiWorkpieceSidecarsResponse {
   stdout: ApiSidecarTail
   stderr: ApiSidecarTail
   retry: ApiSidecarTail
+}
+
+export interface ApiDismissErrorsResponse {
+  dismissed: Record<string, { dismissed_at: string }>
+}
+
+export interface ApiRetryWorkpieceResponse {
+  ok: boolean
+  newId: string
+  newFileName: string
 }
 
 export type ApiWorkpieceResponse =

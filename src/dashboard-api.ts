@@ -365,3 +365,19 @@ export interface ApiReleaseHeldResponse {
   skipped: string[];
   errors: Array<{ file?: string; error: string } | string>;
 }
+
+/**
+ * Response from POST /api/line/:name/errors/dismiss and /undismiss.
+ */
+export interface ApiDismissErrorsResponse {
+  dismissed: Record<string, { dismissed_at: string }>;
+}
+
+/**
+ * Response from POST /api/line/:name/retry.
+ */
+export interface ApiRetryWorkpieceResponse {
+  ok: boolean;
+  newId: string;
+  newFileName: string;
+}

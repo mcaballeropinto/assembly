@@ -1,12 +1,17 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchKanbanState, releaseAllHeld, releaseHeldTask } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { fetchKanbanState } from "@/lib/api";
+import {
+  useReleaseAllHeld as useSharedReleaseAllHeld,
+  useReleaseHeld as useSharedReleaseHeld,
+} from "@/hooks/use-dashboard-mutations";
+import { lineKanbanQueryKey } from "@/lib/query";
 
 /**
  * Hook to fetch kanban state with 3-second polling.
  */
 export function useKanbanQuery(lineName: string) {
   return useQuery({
-    queryKey: ["kanban", lineName],
+    queryKey: lineKanbanQueryKey(lineName),
     queryFn: () => fetchKanbanState(lineName),
     refetchInterval: 3000,
     refetchOnWindowFocus: true,
@@ -18,26 +23,12 @@ export function useKanbanQuery(lineName: string) {
  * Mutation hook to release all held tasks.
  */
 export function useReleaseAllHeld(lineName: string) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () => releaseAllHeld(lineName),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["kanban", lineName] });
-    },
-  });
+  return useSharedReleaseAllHeld(lineName);
 }
 
 /**
  * Mutation hook to release a single held task.
  */
 export function useReleaseHeldTask(lineName: string) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (taskFile: string) => releaseHeldTask(lineName, taskFile),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["kanban", lineName] });
-    },
-  });
+  return useSharedReleaseHeld(lineName);
 }

@@ -11,7 +11,12 @@ interface KanbanBoardProps {
   state: KanbanState;
   onOpenCard: (fileName: string) => void;
   onReleaseAllHeld: () => void;
+  onReleaseHeld?: (fileName: string) => void;
+  onRetryWorkpiece?: (fileName: string) => void;
+  onDismissError?: (fileName: string) => void;
   isReleasingHeld?: boolean;
+  isRetryingWorkpiece?: boolean;
+  isDismissingError?: boolean;
   now?: number;
 }
 
@@ -57,7 +62,12 @@ export function KanbanBoard({
   state,
   onOpenCard,
   onReleaseAllHeld,
+  onReleaseHeld,
+  onRetryWorkpiece,
+  onDismissError,
   isReleasingHeld = false,
+  isRetryingWorkpiece = false,
+  isDismissingError = false,
   now,
 }: KanbanBoardProps) {
   const { ordered, stationLanes } = groupColumns(state.columns);
@@ -73,7 +83,12 @@ export function KanbanBoard({
                 column={group.column}
                 onOpenCard={onOpenCard}
                 onReleaseAll={group.column.key === "held" ? onReleaseAllHeld : undefined}
+                onReleaseHeld={onReleaseHeld}
+                onRetryWorkpiece={onRetryWorkpiece}
+                onDismissError={onDismissError}
                 isReleasing={isReleasingHeld}
+                isRetrying={isRetryingWorkpiece}
+                isDismissing={isDismissingError}
                 now={now}
               />
             );
@@ -127,6 +142,12 @@ export function KanbanBoard({
                     key={lane.key}
                     column={lane}
                     onOpenCard={onOpenCard}
+                    onReleaseHeld={onReleaseHeld}
+                    onRetryWorkpiece={onRetryWorkpiece}
+                    onDismissError={onDismissError}
+                    isReleasing={isReleasingHeld}
+                    isRetrying={isRetryingWorkpiece}
+                    isDismissing={isDismissingError}
                     now={now}
                   />
                 ))}

@@ -22,7 +22,12 @@ interface KanbanColumnProps {
   column: ApiKanbanColumn;
   onOpenCard: (fileName: string) => void;
   onReleaseAll?: () => void;
+  onReleaseHeld?: (fileName: string) => void;
+  onRetryWorkpiece?: (fileName: string) => void;
+  onDismissError?: (fileName: string) => void;
   isReleasing?: boolean;
+  isRetrying?: boolean;
+  isDismissing?: boolean;
   now?: number;
 }
 
@@ -55,7 +60,12 @@ export function KanbanColumn({
   column,
   onOpenCard,
   onReleaseAll,
+  onReleaseHeld,
+  onRetryWorkpiece,
+  onDismissError,
   isReleasing = false,
+  isRetrying = false,
+  isDismissing = false,
   now,
 }: KanbanColumnProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -179,7 +189,18 @@ export function KanbanColumn({
           </div>
         ) : (
           column.cards.map((card) => (
-            <KanbanCard key={card.fileName} card={card} onOpen={onOpenCard} now={now} />
+            <KanbanCard
+              key={card.fileName}
+              card={card}
+              onOpen={onOpenCard}
+              onReleaseHeld={onReleaseHeld}
+              onRetryWorkpiece={onRetryWorkpiece}
+              onDismissError={onDismissError}
+              isReleasing={isReleasing}
+              isRetrying={isRetrying}
+              isDismissing={isDismissing}
+              now={now}
+            />
           ))
         )}
       </KanbanBoardColumnList>

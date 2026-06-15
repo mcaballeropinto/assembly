@@ -91,4 +91,41 @@ describe("KanbanColumn", () => {
 
     expect(released).toBe(1);
   });
+
+  test("passes release, retry, and dismiss callbacks to cards", () => {
+    const calls: string[] = [];
+    const { container } = render(
+      <KanbanColumn
+        column={column({
+          key: "error",
+          title: "Error",
+          count: 1,
+          cards: [
+            {
+              id: "wp-failed",
+              fileName: "wp-failed.json",
+              title: "Failed",
+              state: "failed",
+              column: "error",
+            },
+          ],
+        })}
+        onOpenCard={() => {
+          calls.push("open");
+        }}
+        onRetryWorkpiece={(fileName) => calls.push(`retry:${fileName}`)}
+        onDismissError={(fileName) => calls.push(`dismiss:${fileName}`)}
+      />
+    );
+
+    act(() => {
+      (container.querySelector("[aria-label='Retry wp-failed.json']") as HTMLElement).click();
+      (container.querySelector("[aria-label='Dismiss wp-failed.json']") as HTMLElement).click();
+    });
+
+    expect(calls).toEqual([
+      "retry:wp-failed.json",
+      "dismiss:wp-failed.json",
+    ]);
+  });
 });

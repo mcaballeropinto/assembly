@@ -1,6 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createRoute, useNavigate } from "@tanstack/react-router";
-import { getLineKanban, releaseHeldTasks } from "../lib/api";
+import { getLineKanban } from "../lib/api";
+import {
+  useDismissErrors,
+  useReleaseAllHeld,
+  useReleaseHeld,
+  useRetryWorkpiece,
+} from "../hooks/use-dashboard-mutations";
+import { lineKanbanQueryKey } from "../lib/query";
 import { KanbanBoard, KanbanBoardSkeleton } from "../components/kanban/kanban-board";
 import { Route as lineRoute } from "./line.$name";
 
@@ -9,6 +16,9 @@ export const Route = createRoute({
   path: "kanban",
   validateSearch: (search: Record<string, unknown>) => ({
     wp: typeof search.wp === "string" ? search.wp : undefined,
+    wpline: typeof search.wpline === "string" ? search.wpline : undefined,
+    line: typeof search.line === "string" ? search.line : undefined,
+    activity: typeof search.activity === "string" ? search.activity : undefined,
   }),
   component: LineKanbanRoute,
 });
@@ -17,20 +27,16 @@ function LineKanbanRoute() {
   const { name } = Route.useParams();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/line/$name/kanban" });
-  const queryClient = useQueryClient();
-  const queryKey = ["line", name, "kanban"] as const;
+  const queryKey = lineKanbanQueryKey(name);
+  const releaseAll = useReleaseAllHeld(name);
+  const release = useReleaseHeld(name);
+  const retry = useRetryWorkpiece(name);
+  const dismiss = useDismissErrors(name);
 
   const kanban = useQuery({
     queryKey,
     queryFn: () => getLineKanban(name),
     refetchInterval: 3000,
-  });
-
-  const releaseAll = useMutation({
-    mutationFn: () => releaseHeldTasks(name, { all: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey });
-    },
   });
 
   return (
@@ -51,7 +57,11 @@ function LineKanbanRoute() {
             aria-selected="false"
             className="inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-all hover:text-foreground"
             onClick={() => {
-              navigate({ to: "/line/$name", params: { name } });
+              navigate({
+                to: "/line/$name",
+                params: { name },
+                search: { ...search, wpline: name },
+              });
             }}
           >
             List
@@ -89,12 +99,17 @@ function LineKanbanRoute() {
           state={kanban.data}
           onOpenCard={(fileName) => {
             navigate({
-              search: { ...search, wp: fileName },
+              search: { ...search, wp: fileName, wpline: name },
               replace: true,
             });
           }}
           onReleaseAllHeld={() => releaseAll.mutate()}
-          isReleasingHeld={releaseAll.isPending}
+          onReleaseHeld={(fileName) => release.mutate(fileName)}
+          onRetryWorkpiece={(fileName) => retry.mutate(fileName)}
+          onDismissError={(fileName) => dismiss.mutate([fileName])}
+          isReleasingHeld={releaseAll.isPending || release.isPending}
+          isRetryingWorkpiece={retry.isPending}
+          isDismissingError={dismiss.isPending}
         />
       )}
     </div>

@@ -16,6 +16,8 @@ const drawerSource = () =>
 const routerSource = () =>
   readFileSync(resolve(root, "web/src/router.tsx"), "utf-8");
 const appSource = () => readFileSync(resolve(root, "web/src/app.tsx"), "utf-8");
+const rootRouteSource = () =>
+  readFileSync(resolve(root, "web/src/routes/__root.tsx"), "utf-8");
 
 const originalFetch = globalThis.fetch;
 
@@ -89,7 +91,7 @@ describe("workpiece drawer shell contract", () => {
     expect(source).toContain("const open = Boolean(fileName && lineName)");
     expect(source).toContain("delete next.wp");
     expect(source).toContain("replace: true");
-    expect(source).toContain('queryKey: ["workpiece", lineName, fileName]');
+    expect(source).toContain("queryKey: workpieceQueryKey(lineName, fileName)");
   });
 
   test("root route validates drawer search params", () => {
@@ -109,5 +111,23 @@ describe("workpiece drawer shell contract", () => {
     expect(source).toContain("search.wpline");
     expect(source).toContain("search.line");
     expect(source).toContain("missing line");
+  });
+
+  test("active root route mounts real drawer and toaster", () => {
+    const source = rootRouteSource();
+
+    expect(source).toContain("WorkpieceDrawer")
+    expect(source).toContain("<WorkpieceDrawer lineName={lineName} />")
+    expect(source).toContain("<Toaster position=\"top-right\" />")
+    expect(source).not.toContain("WorkpieceDrawerPlaceholder")
+  });
+
+  test("drawer mounts mutation-backed footer", () => {
+    const source = drawerSource();
+
+    expect(source).toContain("DrawerFooter")
+    expect(source).toContain("workpiece={workpiece}")
+    expect(source).toContain("lineName={lineName}")
+    expect(source).toContain("onClose={closeDrawer}")
   });
 });

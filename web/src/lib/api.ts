@@ -1,4 +1,6 @@
 import type {
+  ApiDismissErrorsResponse,
+  ApiRetryWorkpieceResponse,
   ApiStateResponse,
   ApiTaskEventsResponse,
   ApiTaskEventStationsResponse,
@@ -8,6 +10,8 @@ import type {
 
 export type {
   ActivityEntry,
+  ApiDismissErrorsResponse,
+  ApiRetryWorkpieceResponse,
   ApiStateLineEntry,
   ApiStateResponse,
   ApiStateTotals,
@@ -282,4 +286,46 @@ export function releaseHeldTask(
   taskFile: string
 ): Promise<ApiReleaseHeldResponse> {
   return releaseHeldTasks(lineName, { taskFile })
+}
+
+export function dismissErrors(
+  lineName: string,
+  fileNames: string[]
+): Promise<ApiDismissErrorsResponse> {
+  return fetchJson<ApiDismissErrorsResponse>(
+    `/api/line/${enc(lineName)}/errors/dismiss`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileNames }),
+    }
+  )
+}
+
+export function undismissErrors(
+  lineName: string,
+  fileNames: string[]
+): Promise<ApiDismissErrorsResponse> {
+  return fetchJson<ApiDismissErrorsResponse>(
+    `/api/line/${enc(lineName)}/errors/undismiss`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileNames }),
+    }
+  )
+}
+
+export function retryWorkpiece(
+  lineName: string,
+  fileName: string
+): Promise<ApiRetryWorkpieceResponse> {
+  return fetchJson<ApiRetryWorkpieceResponse>(
+    `/api/line/${enc(lineName)}/retry`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName }),
+    }
+  )
 }

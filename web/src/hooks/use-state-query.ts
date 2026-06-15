@@ -1,10 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchGlobalState } from '@/lib/api';
+import { apiStateQueryOptions } from '@/lib/query';
 
 export function useGlobalState() {
-  return useQuery({
-    queryKey: ['global-state'],
-    queryFn: fetchGlobalState,
-    refetchInterval: 3000,
-  });
+  return useQuery(apiStateQueryOptions());
 }

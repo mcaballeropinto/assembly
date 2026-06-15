@@ -125,4 +125,49 @@ describe("KanbanCard", () => {
 
     expect(opened).toBe("wp-click.json");
   });
+
+  test("renders held and failed actions without opening the card", () => {
+    let opened = "";
+    let released = "";
+    let retried = "";
+    let dismissed = "";
+    const { container } = render(
+      <div>
+        <KanbanCard
+          card={card({ state: "held", column: "held", fileName: "held.json" })}
+          onOpen={(fileName) => {
+            opened = fileName;
+          }}
+          onReleaseHeld={(fileName) => {
+            released = fileName;
+          }}
+          now={now}
+        />
+        <KanbanCard
+          card={card({ state: "failed", column: "error", fileName: "failed.json" })}
+          onOpen={(fileName) => {
+            opened = fileName;
+          }}
+          onRetryWorkpiece={(fileName) => {
+            retried = fileName;
+          }}
+          onDismissError={(fileName) => {
+            dismissed = fileName;
+          }}
+          now={now}
+        />
+      </div>
+    );
+
+    act(() => {
+      (container.querySelector("[aria-label='Release held.json']") as HTMLElement).click();
+      (container.querySelector("[aria-label='Retry failed.json']") as HTMLElement).click();
+      (container.querySelector("[aria-label='Dismiss failed.json']") as HTMLElement).click();
+    });
+
+    expect(opened).toBe("");
+    expect(released).toBe("held.json");
+    expect(retried).toBe("failed.json");
+    expect(dismissed).toBe("failed.json");
+  });
 });

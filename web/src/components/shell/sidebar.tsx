@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 
 import { Badge } from "../ui/badge"
 import { Button } from "../ui/button"
-import { fetchApiState } from "../../lib/api"
+import { apiStateQueryOptions } from "../../lib/query"
 import { cn } from "../../lib/utils"
 
 import type { ApiStateLineEntry } from "../../lib/api"
@@ -42,12 +42,10 @@ function getStatusDotClass(line: ApiStateLineEntry): string {
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(readStoredCollapsedState)
-  const { data, isError, isLoading } = useQuery({
-    queryKey: ["dashboard-state"],
-    queryFn: fetchApiState,
+  const { data, isError, isLoading } = useQuery(apiStateQueryOptions({
     refetchInterval: STATE_REFETCH_INTERVAL_MS,
     retry: false,
-  })
+  }))
 
   const lines = useMemo(
     () => [...(data?.lines ?? [])].sort((a, b) => a.name.localeCompare(b.name)),

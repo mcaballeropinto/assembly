@@ -11,7 +11,9 @@ import {
 } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchWorkpiece, isApiError } from "@/lib/api"
+import { workpieceQueryKey } from "@/lib/query"
 import type { ApiWorkpieceResponse, StationResult, Workpiece } from "@/lib/api"
+import { DrawerFooter } from "./drawer-footer"
 
 type WorkpieceData = Extract<ApiWorkpieceResponse, Workpiece>
 type StationEntry = [string, StationResult]
@@ -30,7 +32,7 @@ export function WorkpieceDrawer({ lineName }: WorkpieceDrawerProps) {
   const open = Boolean(fileName && lineName)
 
   const query = useQuery({
-    queryKey: ["workpiece", lineName, fileName],
+    queryKey: workpieceQueryKey(lineName, fileName),
     queryFn: () => fetchWorkpiece(lineName!, fileName!),
     enabled: open,
   })
@@ -76,6 +78,14 @@ export function WorkpieceDrawer({ lineName }: WorkpieceDrawerProps) {
           isLoading={query.isLoading}
           workpiece={workpiece}
         />
+        {workpiece && fileName && lineName ? (
+          <DrawerFooter
+            workpiece={workpiece}
+            fileName={fileName}
+            lineName={lineName}
+            onClose={closeDrawer}
+          />
+        ) : null}
       </SheetContent>
     </Sheet>
   )
