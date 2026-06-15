@@ -2,7 +2,7 @@ import { resolve, basename } from "path";
 import { mkdirSync, renameSync, readdirSync, readFileSync, watch, existsSync } from "fs";
 import type { Workpiece } from "./types";
 import { readDismissed } from "./error-dismiss";
-import { validateWorkpieceVersion } from './schemas/workpiece';
+import { WorkpieceSchema } from './schemas/workpiece';
 
 /**
  * Queue folder structure for a section or line.
@@ -197,8 +197,9 @@ export function filterReadyByDeps(
   return inboxFiles.filter((path) => {
     let deps: string[] | undefined;
     try {
-      const wp = JSON.parse(readFileSync(path, "utf-8")) as { dependsOn?: unknown };
-      const raw = wp.dependsOn;
+      const parsed = WorkpieceSchema.safeParse(JSON.parse(readFileSync(path, "utf-8")));
+      if (!parsed.success) return true;
+      const raw = parsed.data.dependsOn;
       if (Array.isArray(raw)) deps = raw.filter((x): x is string => typeof x === "string");
     } catch {
       return true;
@@ -227,9 +228,11 @@ export async function writeToQueue(
  */
 export async function readFromQueue(filePath: string): Promise<Workpiece> {
   const file = Bun.file(filePath);
-  const raw = JSON.parse(await file.text()) as Record<string, unknown>;
-  validateWorkpieceVersion(raw);
-  return raw as unknown as Workpiece;
+  const parsed = WorkpieceSchema.safeParse(JSON.parse(await file.text()));
+  if (!parsed.success) {
+    throw new Error(`schema_violation: ${parsed.error.message}`);
+  }
+  return parsed.data;
 }
 
 /**

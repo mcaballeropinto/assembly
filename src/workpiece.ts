@@ -1,7 +1,7 @@
 import { resolve } from "path";
 import type { Workpiece, StationResult, StationEnvelope, TokenUsage, FailureClass } from "./types";
-import { WorkpieceId, LineName, StationName, asWorkpiece } from './ids';
-import { CURRENT_WORKPIECE_VERSION, validateWorkpieceVersion } from './schemas/workpiece';
+import { WorkpieceId, LineName, StationName } from './ids';
+import { CURRENT_WORKPIECE_VERSION, WorkpieceSchema } from './schemas/workpiece';
 
 // Process-local counter so a fanout batch hitting createWorkpiece in the same
 // millisecond still gets distinct ids. ISO-millisecond alone collides whenever
@@ -21,9 +21,9 @@ export function createWorkpiece(
   const id = WorkpieceId(`run_${now.toISOString().replace(/[:.]/g, "-")}_${seq}`);
 
   return {
-    id,
+    id: WorkpieceId(id),
     schema_version: CURRENT_WORKPIECE_VERSION,
-    line: lineName,
+    line: LineName(lineName),
     task,
     input,
     stations: {},
@@ -189,9 +189,11 @@ export async function loadWorkpiece(path: string): Promise<Workpiece> {
   if (!(await file.exists())) {
     throw new Error(`Workpiece not found at ${path}`);
   }
-  const raw = JSON.parse(await file.text()) as Record<string, unknown>;
-  validateWorkpieceVersion(raw);
-  return asWorkpiece<Workpiece>(raw);
+  const parsed = WorkpieceSchema.safeParse(JSON.parse(await file.text()));
+  if (!parsed.success) {
+    throw new Error(`schema_violation: ${parsed.error.message}`);
+  }
+  return parsed.data as Workpiece;
 }
 
 /**

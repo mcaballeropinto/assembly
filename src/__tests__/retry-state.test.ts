@@ -112,6 +112,19 @@ describe("readRetryState", () => {
     const read = readRetryState(wpPath);
     expect(read).toBeNull();
   });
+
+  test("returns null for schema-invalid sidecar", () => {
+    const wpPath = resolve(TEMP_DIR, "wp-invalid-shape.json");
+    const sidecar = retrySidecarPath(wpPath);
+    require("fs").writeFileSync(sidecar, JSON.stringify({
+      retry_count: "wrong",
+      max_retries: 3,
+      in_backoff: false,
+      exhausted: false,
+    }));
+    const read = readRetryState(wpPath);
+    expect(read).toBeNull();
+  });
 });
 
 describe("clearRetryState", () => {

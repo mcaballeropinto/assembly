@@ -22,6 +22,7 @@
 
 import { existsSync, mkdirSync, appendFileSync, readFileSync, renameSync } from "fs";
 import { resolve, basename } from "path";
+import { EmitRecordSchema } from "./schemas/emit-manifest";
 
 export type EmitSource =
   | "fanout"            // cross-line fanout from on_complete
@@ -66,8 +67,12 @@ function mergeManifestFromDisk(queueDir: string, set: Set<string>): void {
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
       try {
-        const entry = JSON.parse(line) as EmitRecord;
-        if (entry.filename) set.add(entry.filename);
+        const parsed = EmitRecordSchema.safeParse(JSON.parse(line));
+        if (parsed.success) {
+          set.add(parsed.data.filename);
+        } else {
+          console.error(`emit_manifest_schema_violation: ${path}: ${parsed.error.message}`);
+        }
       } catch {
         // skip malformed line; the manifest is append-only and partial
         // writes can leave a torn trailing line.
@@ -120,8 +125,13 @@ export function recordEmit(
     source,
     ts: new Date().toISOString(),
   };
+  const parsed = EmitRecordSchema.safeParse(entry);
+  if (!parsed.success) {
+    console.error(`emit_manifest_schema_violation: ${queueDir}/${name}: ${parsed.error.message}`);
+    return;
+  }
   try {
-    appendFileSync(manifestPath(queueDir), JSON.stringify(entry) + "\n");
+    appendFileSync(manifestPath(queueDir), JSON.stringify(parsed.data) + "\n");
   } catch {
     // Disk write failure should not block the emit — the in-memory cache
     // is the authoritative source within this daemon process. The next

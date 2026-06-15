@@ -8,6 +8,7 @@ import {
 } from "fs";
 import { resolve } from "path";
 import type { WorkpieceId, StationName } from "./ids";
+import { TaskEventIndexSchema, TaskEventSchema } from "./schemas/task-event";
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -142,8 +143,9 @@ export function updateTaskEventIndex(
     let stations: StationMeta[] = [];
     if (existsSync(idxPath)) {
       try {
-        const raw = JSON.parse(readFileSync(idxPath, "utf-8"));
-        stations = raw.stations ?? [];
+        const parsed = TaskEventIndexSchema.safeParse(JSON.parse(readFileSync(idxPath, "utf-8")));
+        stations = parsed.success ? parsed.data.stations : [];
+        if (!parsed.success) console.warn(`task_event_index_schema_violation: ${idxPath}: ${parsed.error.message}`);
       } catch {}
     }
 
@@ -156,8 +158,9 @@ export function updateTaskEventIndex(
         const lines = readFileSync(ef, "utf-8").trim().split("\n").filter(Boolean);
         eventCount = lines.length;
         if (lines.length > 0) {
-          const last = JSON.parse(lines[lines.length - 1]);
-          if (last.ts) lastTs = last.ts;
+          const parsed = TaskEventSchema.safeParse(JSON.parse(lines[lines.length - 1]));
+          if (parsed.success) lastTs = parsed.data.ts;
+          else console.warn(`task_event_schema_violation: ${ef}: ${parsed.error.message}`);
         }
       } catch {}
     }
@@ -208,8 +211,12 @@ export function readTaskEvents(
     const parsed: TaskEvent[] = [];
     for (const line of lines) {
       try {
-        parsed.push(JSON.parse(line));
-      } catch {}
+        const result = TaskEventSchema.safeParse(JSON.parse(line));
+        if (result.success) parsed.push(result.data);
+        else console.warn(`task_event_schema_violation: ${ef}: ${result.error.message}`);
+      } catch (err) {
+        console.warn(`task_event_parse_error: ${ef}: ${(err as Error).message}`);
+      }
     }
 
     let filtered = parsed;
@@ -244,8 +251,12 @@ export function listTaskEventStations(
   try {
     const idxPath = indexFile(linePath, wpId);
     if (!existsSync(idxPath)) return [];
-    const data = JSON.parse(readFileSync(idxPath, "utf-8"));
-    return data.stations ?? [];
+    const parsed = TaskEventIndexSchema.safeParse(JSON.parse(readFileSync(idxPath, "utf-8")));
+    if (!parsed.success) {
+      console.warn(`task_event_index_schema_violation: ${idxPath}: ${parsed.error.message}`);
+      return [];
+    }
+    return parsed.data.stations;
   } catch {
     return [];
   }

@@ -9,6 +9,24 @@ export interface StationEnvelope {
   data?: Record<string, unknown>; // optional — structured fields
 }
 
+declare const __brand: unique symbol;
+export type Brand<T, Name extends string> = T & { readonly [__brand]: Name };
+export type WorkpieceId = Brand<string, "WorkpieceId">;
+export type LineName = Brand<string, "LineName">;
+export type StationName = Brand<string, "StationName">;
+
+export function WorkpieceId(value: string): WorkpieceId {
+  return value as WorkpieceId;
+}
+
+export function LineName(value: string): LineName {
+  return value as LineName;
+}
+
+export function StationName(value: string): StationName {
+  return value as StationName;
+}
+
 // === Eval Result ===
 // Returned by the evaluation step when EVAL.md exists.
 
