@@ -2,7 +2,7 @@
 
 Assembly is a framework for **chaining AI agents into pipelines** using folder structure as configuration. Each pipeline (a **line**) has **stations** (specialized agents) that process a task sequentially, passing results through a shared JSON file (the **workpiece**).
 
-It is invoked as a CLI (`assembly`) implemented in TypeScript, run with Bun. State is kept on disk in plain files — no database, no message queue.
+It is invoked as a CLI (`assembly`) implemented in TypeScript, run with Bun. State is kept on disk in plain files — no database, no message queue. The dashboard is a React + shadcn SPA served by the Bun dashboard server over the same file-backed state.
 
 ## The metaphor
 
@@ -62,7 +62,7 @@ See [`queues-and-flow.md`](./queues-and-flow.md) for the full directory map and 
    Synchronous; runs in the foreground; prints the workpiece path when done.
 
 2. **Daemon** — `assembly daemon start` plus `assembly enqueue <line> --task "..."`
-   The daemon watches `queues/inbox/` for new tasks and runs them asynchronously. The dashboard (`assembly dashboard`) provides a live view.
+   The daemon watches `queues/inbox/` for new tasks and runs them asynchronously. The dashboard (`assembly dashboard`) provides a React/shadcn live view of queues, costs, activity, and workpieces.
 
 The daemon is the production mode. The batch mode is for one-off scripting and dry runs.
 

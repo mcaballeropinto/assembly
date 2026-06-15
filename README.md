@@ -19,7 +19,8 @@ system prompt. There's no DAG file, no orchestration DSL, no hidden database.
 
 ## What's in here
 
-- `src/` — the framework (CLI, runner, daemon, dashboard, envelope contract, queues)
+- `src/` — the framework (CLI, runner, daemon, dashboard API server, envelope contract, queues)
+- `web/` — the React + shadcn live dashboard served by the Bun dashboard server
 - `lines/` — three example pipelines you can read or run
   - `hello-world` — smallest possible line (LLM + script)
   - `repo-health-digest` — five-station GitHub-repo grader with an EVAL gate
@@ -30,11 +31,16 @@ system prompt. There's no DAG file, no orchestration DSL, no hidden database.
 ## Install
 
 Requires [Bun](https://bun.sh) (the runtime + bundler this project depends on).
+Run installs from the repository root; Bun installs the root package and the `web/` workspace together.
 
 ```bash
 bun install
+bun run build:web       # build web/dist when missing or after dashboard changes
 ./install.sh             # builds `assembly` and drops it in ~/.local/bin
 ```
+
+Global installs and publishes ship the prebuilt `web/dist/` dashboard bundle, so
+users do not need a local frontend build step after installation.
 
 Or run uncompiled:
 
@@ -61,8 +67,11 @@ assembly enqueue repo-health-digest \
 
 # Watch progress
 assembly dashboard --port 4111
-# → open http://localhost:4111
+# → serves the built dashboard at http://localhost:4111
 ```
+
+If you're running from a source checkout and `web/dist/` is missing, run
+`bun run build:web` before starting the dashboard.
 
 ## The model in 30 seconds
 

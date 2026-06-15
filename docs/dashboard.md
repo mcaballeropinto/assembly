@@ -1,135 +1,177 @@
 # Dashboard
 
-The dashboard is a Bun HTTP server that reads the file system and renders a live view of every line. It's **independent of the daemon** — it can run without the orchestrator (you'll just see static state) and the orchestrator can run without it (it's an observation layer).
+The dashboard is a Bun HTTP server plus a React SPA. The server reads Assembly's file-backed runtime state on demand, exposes JSON API routes, and serves the built frontend from `web/dist/`.
 
-Implementations:
-- [`../src/global-dashboard.ts`](../src/global-dashboard.ts) — HTTP API server plus built SPA / legacy fallback shell
-- [`../src/dashboard-server.ts`](../src/dashboard-server.ts) — process wrapper (PID file, signal handlers)
-- [`../src/dashboard-data.ts`](../src/dashboard-data.ts) — state aggregation
-- [`../web/`](../web/) — React/Vite dashboard frontend, built to committed `web/dist/`
-- [`../src/dashboard-client.js`](../src/dashboard-client.js) — legacy fallback browser client (3-second poll + morphdom diff)
-- [`../src/task-events.ts`](../src/task-events.ts) — per-station event stream
-- [`../src/retry-manual.ts`](../src/retry-manual.ts) — human-triggered retry endpoint
-- [`../src/error-dismiss.ts`](../src/error-dismiss.ts) — error suppression endpoint
+It is independent of the daemon. The daemon can run without the dashboard, and the dashboard can run without the daemon; when the daemon is stopped, the dashboard still shows the last state written to disk.
+
+Key implementation files:
+
+| File | Purpose |
+|------|---------|
+| [`../src/global-dashboard.ts`](../src/global-dashboard.ts) | Bun HTTP API server and static asset server |
+| [`../src/dashboard-server.ts`](../src/dashboard-server.ts) | CLI process wrapper, PID file, signal handling |
+| [`../src/dashboard-data.ts`](../src/dashboard-data.ts) | State aggregation from queues and sidecar files |
+| [`../src/dashboard-api.ts`](../src/dashboard-api.ts) | Shared dashboard wire types |
+| [`../web/`](../web/) | React/Vite/shadcn dashboard frontend |
+| [`../src/task-events.ts`](../src/task-events.ts) | Per-station event stream |
+| [`../src/retry-manual.ts`](../src/retry-manual.ts) | Human-triggered retry endpoint |
+| [`../src/error-dismiss.ts`](../src/error-dismiss.ts) | Error suppression endpoint |
 
 ---
 
-## Running it
+## Running It
 
 ```bash
-assembly dashboard [--port 4111]    # default port is 4111
+assembly dashboard [--port 4111]
 ```
 
-PID written to `~/.assembly/dashboard.pid` with `{ pid, port }`. The CLI refuses to double-start if a live PID is found.
+The default port is `4111`. Browse to `http://localhost:4111`.
 
-To stop:
+The process writes `~/.assembly/dashboard.pid` with `{ pid, port }`. The CLI refuses to double-start when that PID still points at a live process.
+
+To stop it:
 
 ```bash
 assembly dashboard stop
 ```
 
-Browse at `http://localhost:4111`.
+When `web/dist/index.html` exists, the Bun server serves the built Vite SPA and its assets from `web/dist/assets/`. If the bundle is absent, `global-dashboard.ts` serves the embedded legacy fallback shell for compatibility only.
 
-When `web/dist/index.html` is present, the Bun server serves the built Vite SPA and static assets from `web/dist/assets/`. If that bundle is absent, it falls back to the embedded legacy dashboard shell in `global-dashboard.ts`; the legacy client remains in place for compatibility.
+---
 
-For frontend development, run the backend and Vite dev server in separate terminals:
+## What It Shows
+
+The React SPA is served as a catch-all page so frontend routes work on refresh.
+
+| View | What it shows |
+|------|---------------|
+| Kanban | One column per stage per line: held, inbox, station inbox, processing, output, done, error, review |
+| Drawer | Per-workpiece detail: stations, status, model, tokens, cost, eval, content/data, sidecar tails |
+| Activity | Recent line-level events from `queues/activity.jsonl` |
+| Error banner | Active errors with severity and dismissal controls |
+| Retry panel | Manual retry for errored workpieces |
+| Usage / cost | Session totals plus per-station token and USD rollups |
+| Throughput | Done counts over rolling 1h and 24h windows |
+| Historical timings | Per-station min, max, and average duration across recent completed runs |
+| Task events | Drawer subview for per-workpiece, per-station event streams |
+
+---
+
+## Architecture and Data Flow
+
+The dashboard treats the filesystem as the source of truth:
+
+1. Browser routes and assets are served by `src/global-dashboard.ts`.
+2. API requests call helpers in `src/dashboard-data.ts`.
+3. `dashboard-data.ts` reads queue directories, JSONL logs, usage state, and sidecar files on demand.
+4. API responses are serialized using the shared shapes in `src/dashboard-api.ts`.
+5. The React app renders those responses and polls again for freshness.
+
+There is no dashboard database, no message broker, and no required daemon RPC.
+
+Per request, `getFullState()` reads:
+
+- Line-level queues: `inbox`, `held`, `done`, `error`, and `review`.
+- Station queues: `inbox`, `processing`, and `output`.
+- `queues/activity.jsonl` for recent activity.
+- `queues/flow.jsonl` for chart snapshots.
+- `queues/task-events/<wpId>/` lazily for drawer task-event views.
+- `queues/error/.dismissed` to filter dismissed errors.
+- `.retry.json` sidecars for retry/backoff display.
+- `~/.assembly/usage-status.json` for provider quota.
+- Each workpiece's `totals` and station cost fields for rollups.
+
+---
+
+## Frontend Freshness
+
+The frontend uses TanStack Query. Operational queries poll every 3 seconds, so the dashboard updates without requiring WebSockets or SSE.
+
+Connection state is derived from request timing and failures:
+
+| State | Meaning |
+|-------|---------|
+| Live | Recent API responses are arriving normally |
+| Stale | Responses are delayed or older than expected |
+| Disconnected | Requests are failing or no response has arrived for an extended window |
+
+The legacy fallback client still exists for compatibility when the built SPA is missing. It is not the current dashboard architecture.
+
+---
+
+## Development Workflow
+
+Run the Bun dashboard API server and the Vite frontend server side by side:
 
 ```bash
 assembly dashboard --port 4111
 bun run dashboard:web
 ```
 
-The Vite app proxies `/api` to `http://localhost:4111`, so frontend requests hit the running dashboard API while Vite serves the React app.
+`bun run dashboard:web` starts Vite from `web/`. The Vite dev server serves the React app and proxies `/api` requests to `http://localhost:4111`, so frontend code talks to the same Bun API used in production.
 
-Before publishing, `prepublishOnly` runs `bun run build:web`. The generated `web/dist/` directory is intentionally committed so global installs can serve the SPA without requiring a local frontend build.
-
----
-
-## What it shows
-
-The page is a single-page application served at every path (catch-all routes). Top-level views:
-
-| View | What it shows |
-|------|---------------|
-| **Kanban** | One column per stage per line: held → inbox → station inbox → processing → output → done / error / review. Workpieces are cards. |
-| **Drawer** | Click a card → per-workpiece detail (stations, status, model, tokens, cost, eval, content/data, sidecar tails). |
-| **Activity** | Recent line-level events from `queues/activity.jsonl`. |
-| **Error banner** | Active errors with severity (critical < 30m, warning < 48h, suppressed > 48h). |
-| **Retry panel** | UI to manually retry an errored workpiece. |
-| **Usage / cost** | Session totals + per-station rollup of tokens + USD. |
-| **Throughput** | Done counts rolled over 1h and 24h windows. |
-| **Historical timings** | Per-station min/max/avg duration across the last 10 completed runs. |
-| **Per-station task events** | Drawer subview — live event stream per (workpiece, station). |
+Use this workflow when changing React components, routes, styles, query hooks, or shadcn blocks. Do not use it to start or stop a production dashboard; the process wrapper owns `~/.assembly/dashboard.pid`.
 
 ---
 
-## Data sources
+## Build and Ship Workflow
 
-Everything is read from disk on demand. **No database, no in-memory cache.** This means the dashboard works even after a daemon restart and is safe to refresh aggressively.
+Build the dashboard bundle from the repository root:
 
-Per request, [`getFullState()`](../src/dashboard-data.ts) reads:
+```bash
+bun run build:web
+```
 
-- All queue directories (line-level `inbox`/`held`/`done`/`error`/`review` and station-level `inbox`/`processing`/`output`).
-- `queues/activity.jsonl` (tail of recent entries).
-- `queues/flow.jsonl` (periodic snapshots — used for charts).
-- `queues/task-events/<wpId>/` (lazily, for the drawer view).
-- `queues/error/.dismissed` sidecar (filter out dismissed errors).
-- `.retry.json` sidecars on each workpiece (for backoff display).
-- `~/.assembly/usage-status.json` (provider quota).
-- Each workpiece's `totals` field (for cost rollups).
+That runs the `web` workspace build and writes `web/dist/index.html` plus `web/dist/assets/`.
 
----
+`web/dist/` is intentionally committed so globally installed copies of Assembly can serve the React SPA without requiring users to build frontend assets locally. The package `prepublishOnly` script runs `bun run build:web` before publishing.
 
-## Real-time updates
+Run `bun run build:web` when:
 
-**Polling-based.** The browser client fetches `/api/state` every 3 seconds. There's no WebSocket or SSE.
-
-The client uses **morphdom** to diff the new HTML against the live DOM and apply minimal updates. This preserves:
-- Form state (open drawers, expanded cards).
-- Focus and selection.
-- Ephemeral classes (animations).
-
-Connection health is tracked client-side via response timestamps:
-- `live` — last response < 5s ago.
-- `stale` — 5–30s.
-- `disconnected` — > 30s — the UI shows a warning.
+- `web/dist/` is missing.
+- Frontend source under `web/` changed.
+- The dashboard shows stale UI after a checkout, merge, or install.
+- You are preparing a publish or global install path.
 
 ---
 
-## Manual retry
+## Manual Retry
 
-POST `/api/line/<lineName>/retry` with `{ fileName: "error-xxx.json" }`.
+POST `/api/line/<line>/retry` with `{ "fileName": "error-xxx.json" }`.
 
-[`retry-manual.ts`](../src/retry-manual.ts) does:
-1. Validates the filename is a bare basename (no path traversal).
+`retry-manual.ts`:
+
+1. Validates the filename is a bare basename.
 2. Reads the original workpiece.
-3. Creates a fresh workpiece with a new `id`, empty `stations: {}`, and `parent_run_id` pointing at the original.
-4. Writes to `queues/inbox/<newName>.json` and records it in `.emitted.jsonl` with source `cli`.
-5. Marks the original as `dismissed` in `queues/error/.dismissed`.
+3. Creates a fresh workpiece with a new `id`, empty `stations`, and `parent_run_id` pointing at the original.
+4. Writes to `queues/inbox/<newName>.json` and records the emission in `.emitted.jsonl`.
+5. Marks the original error as dismissed in `queues/error/.dismissed`.
 6. Logs `retry_manual` to `queues/activity.jsonl`.
 
-The new workpiece is picked up by the orchestrator on the normal inbox watcher path.
+The new workpiece is picked up by the daemon through the normal inbox watcher path.
 
 ---
 
-## Error dismissal
+## Error Dismissal
 
-POST `/api/line/<lineName>/errors/dismiss` with `{ fileNames: ["err-1.json", "err-2.json"] }`.
+POST `/api/line/<line>/errors/dismiss` with `{ "fileNames": ["err-1.json", "err-2.json"] }`.
 
-Stored in `queues/error/.dismissed` (atomic write — temp + rename). The dashboard hides dismissed errors from the active list but they're still in the directory.
+Dismissals are stored in `queues/error/.dismissed` using an atomic temp-file rename. The dashboard hides dismissed errors from the active list, but the source files remain in the queue directory.
 
-Auto-archive: an internal sweep marks errors older than 7 days as `auto: true` in the dismissed map, decluttering the UI without deleting anything.
+An internal sweep marks errors older than 7 days as auto-dismissed to keep the UI focused without deleting history.
 
 ---
 
-## Task events stream
+## Task Events
 
-For each (workpiece, station) the section worker can emit fine-grained events via [`appendTaskEvent`](../src/task-events.ts). Storage:
+For each `(workpiece, station)`, a section worker can emit fine-grained events through `appendTaskEvent()`.
 
-```
+Storage:
+
+```text
 queues/task-events/<wpId>/
-  index.json                 # { stations: { name: { status, count, last_ts } } }
-  <station>.events.jsonl     # one event per line
+  index.json
+  <station>.events.jsonl
 ```
 
 Event shape:
@@ -139,90 +181,68 @@ Event shape:
   "ts": "2026-05-13T22:17:04Z",
   "seq": 17,
   "station": "scrape",
-  "kind": "tool_call" | "tool_result" | "message" | "heartbeat" | "lifecycle",
+  "kind": "tool_call",
   "summary": "WebFetch(linkedin.com/jobs/...)",
-  "detail": { ... }       // capped at 8 KB
+  "detail": {}
 }
 ```
 
-`seq` is a monotonic counter per `(linePath, wpId, stationName)`, stored in-memory in the worker. The dashboard paginates via `seq` so the page can scroll backward without re-reading the whole file.
-
-Endpoints:
-
-```
-GET /api/task-events/<line>/<wpId>
-  → { stations: { name: { status, count, last_ts } } }
-
-GET /api/task-events/<line>/<wpId>/<station>?after=<seq>&limit=100
-  → { events: [...], next_cursor: <seq> }
-```
+`seq` is a monotonic counter per `(linePath, wpId, stationName)`, stored in memory in the worker. The dashboard paginates by `seq` so it can load older event pages without re-reading the entire file.
 
 ---
 
-## Cost rollup endpoint
+## Endpoint Reference
 
-```
-GET /api/usage    → reads ~/.assembly/usage-status.json
-                    plus session totals from queues
-```
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/` | React SPA shell |
+| GET | `/api/state` | Full dashboard state JSON |
+| GET | `/api/usage` | Cost and provider quota snapshot |
+| GET | `/api/task-events/<line>/<wpId>` | Station event index for a workpiece |
+| GET | `/api/task-events/<line>/<wpId>/<station>?after=<seq>&limit=<n>` | Paginated station event stream |
+| POST | `/api/line/<line>/retry` | Create a retry workpiece from an errored workpiece |
+| POST | `/api/line/<line>/errors/dismiss` | Dismiss active errors |
+| GET | `/api/lines/<line>/workpieces/<id>` | Single workpiece JSON |
 
-Returns:
-
-```json
-{
-  "paused": false,
-  "pauseReason": null,
-  "providers": { "anthropic": { "remaining_quota": "...", "reset_at": "..." } },
-  "ageMs": 8400,
-  "sessionTotals": {
-    "tokens": { "in": 1283000, "out": 274000, "cache_read": 480000, "cache_creation": 18000 },
-    "cost_usd": 22.41,
-    "byStation": {
-      "enrich": { "cost_usd": 12.04, "tokens_in": 712000, "tokens_out": 198000, "count": 38 }
-    }
-  }
-}
-```
-
-The byStation rollup comes from walking `queues/done/`, `queues/error/`, and `queues/review/` and summing `workpiece.stations[name].cost_usd`. Throughput counts `queues/done/` files by mtime in rolling 1h / 24h windows.
+Static assets for the built React app are served from `web/dist/assets/`.
 
 ---
 
-## PID and daemon independence
+## PID and Daemon Independence
 
 | File | Owner |
 |------|-------|
 | `~/.assembly/orchestrator.pid` | Daemon |
 | `~/.assembly/dashboard.pid` | Dashboard |
-| `~/.assembly/usage-status.json` | Daemon writes; dashboard reads |
+| `~/.assembly/usage-status.json` | Daemon writes, dashboard reads |
 
-The dashboard does not call into the daemon. The daemon does not call into the dashboard. They communicate only through files on disk. This means:
+The dashboard does not call into the daemon. The daemon does not call into the dashboard. They communicate through files on disk.
 
-- You can stop and start the dashboard freely without affecting in-flight workpieces.
-- After a daemon crash, the dashboard still shows the last known state (which is fully accurate, because state is on disk).
-- After a dashboard crash, nothing else is affected.
+This means:
 
----
-
-## API summary
-
-```
-GET  /                                      → SPA shell
-GET  /api/state                             → full dashboard state JSON
-GET  /api/usage                             → cost + quota snapshot
-GET  /api/task-events/<line>/<wpId>         → station index
-GET  /api/task-events/<line>/<wpId>/<station>?after=<seq>&limit=<n>
-POST /api/line/<line>/retry                 → manual retry
-POST /api/line/<line>/errors/dismiss        → dismiss errors
-GET  /api/lines/<line>/workpieces/<id>      → single workpiece JSON
-```
-
-Static assets for the built React app are served from `web/dist/assets/`. The legacy client JS bundle and morphdom UMD remain served inline by the fallback shell.
+- Stopping the dashboard does not affect in-flight workpieces.
+- Restarting the daemon does not invalidate dashboard state already written to disk.
+- Restarting the dashboard does not move, retry, or delete workpieces.
 
 ---
 
-## What it deliberately doesn't do
+## Troubleshooting
 
-- **Mutate state besides retry / dismiss.** No "delete this workpiece", no "edit input", no "force-route to station X" — those operations would race with the orchestrator. To force something, use the CLI (`assembly enqueue`, `assembly run --only`).
-- **Authentication.** It binds to `localhost` by default. Anything beyond local should be fronted by your own reverse proxy.
-- **Streaming.** Polling is enough at the cadence we need. If you wanted to add SSE, [`task-events.ts`](../src/task-events.ts) is the natural source.
+| Symptom | Check |
+|---------|-------|
+| Dashboard shows an old UI | Rebuild with `bun run build:web`; stale `web/dist/` is usually the cause |
+| Source checkout serves the fallback shell | `web/dist/index.html` is missing; run `bun run build:web` |
+| Vite app cannot load data | Confirm `assembly dashboard --port 4111` is running and Vite is proxying `/api` to that port |
+| Port collision | Start the dashboard on a different port and align the Vite proxy if needed |
+| Static assets 404 | Rebuild `web/dist/` and confirm `web/dist/assets/` exists |
+| API data looks stale | Inspect the underlying queue files; dashboard APIs read disk state on demand |
+| Cannot start dashboard | Check `~/.assembly/dashboard.pid`; a live PID prevents double-start |
+
+---
+
+## What It Deliberately Does Not Do
+
+- Mutate state beyond retry and dismiss operations.
+- Authenticate users. It is intended for local use unless placed behind a reverse proxy.
+- Stream updates. The current contract is TanStack Query polling every 3 seconds.
+- Replace the CLI for force-routing, editing inputs, or deleting workpieces.

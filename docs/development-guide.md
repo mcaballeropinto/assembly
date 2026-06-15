@@ -202,6 +202,30 @@ Reference: [`runtime.md`](./runtime.md#per-worker-isolation), [`queues-and-flow.
 
 ---
 
+### Working on the dashboard
+
+For dashboard frontend work, run the Bun dashboard server and Vite dev server side by side:
+
+```bash
+assembly dashboard --port 4111
+bun run dashboard:web
+```
+
+The React dev server proxies `/api` to the Bun dashboard server, so frontend requests hit the same filesystem-backed API used by the shipped dashboard.
+
+Placement rules:
+
+- New panels and dashboard-specific components go under `web/src/components/...`, grouped by domain.
+- Route composition belongs under `web/src/routes` or the existing router structure.
+- API client and query helpers belong under `web/src/lib`.
+- Shared wire types come from `src/dashboard-api.ts`.
+
+When vendoring shadcn blocks, copy the source into `web/src/components`, normalize imports to local `@/components/ui/*` and `@/lib/utils`, and record provenance in comments or `web/PORT-NOTES.md` when that helps future updates.
+
+Spacing, padding, radius, typography, and component choices come from [`DESIGN.md#dashboard`](../DESIGN.md#dashboard). Do not add new CSS files or per-component spacing overrides unless `DESIGN.md` is updated first.
+
+---
+
 ## When to add a new feature to Assembly itself
 
 Use the `assembly-dev` meta-line. It's literally what it's for:
