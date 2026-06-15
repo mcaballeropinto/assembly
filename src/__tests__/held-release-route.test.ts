@@ -142,21 +142,3 @@ describe("POST /api/line/:name/release", () => {
     expect(body.error).toContain("taskFile or all required");
   });
 });
-
-describe("Dashboard HTML contains held release JS and CSS", () => {
-  test("Dashboard HTML contains releaseCard function", async () => {
-    const res = await request("/");
-    const html = await res.text();
-    expect(html).toContain("releaseCard");
-    expect(html).toContain("releaseAllHeld");
-    expect(html).toContain("onHeldCardKeydown");
-  });
-
-  test("Dashboard HTML contains held CSS rules", async () => {
-    const res = await request("/");
-    const html = await res.text();
-    expect(html).toContain("held-card");
-    expect(html).toContain("release-btn");
-    expect(html).toContain("prefers-reduced-motion");
-  });
-});

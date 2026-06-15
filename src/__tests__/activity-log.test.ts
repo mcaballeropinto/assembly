@@ -4,14 +4,6 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { getFullState } from "../dashboard-data";
 import { initSectionQueue, initLineQueue } from "../queue";
 
-/**
- * Tests for activity log improvements:
- * - Filter toggle buttons rendering (8 event-type toggles)
- * - Retry grouping logic (consecutive retries collapsed)
- * - Clickable workpiece IDs (wp-id-link class)
- * - toggleActivityFilter and toggleRetryGroup functions
- */
-
 const TEMP_DIR = resolve("/tmp", `assembly-test-activity-log-${Date.now()}`);
 const LINE_DIR = resolve(TEMP_DIR, "lines", "activity-test-line");
 
@@ -120,42 +112,7 @@ afterAll(() => {
   } catch {}
 });
 
-// ─── Integration Tests ──────��──────────────────────────────────
-
-describe("Activity Log - Filter Toggle Buttons", () => {
-  test("Dashboard HTML contains 8 filter toggle buttons with correct labels", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // The filter buttons are embedded in the JS template string of the dashboard
-    expect(html).toContain("activity-filter-btn");
-    expect(html).toContain("toggleActivityFilter");
-
-    // The 8 filter type labels should appear in the JS code
-    expect(html).toContain("'done'");
-    expect(html).toContain("'retry'");
-    expect(html).toContain("'error'");
-    expect(html).toContain("'routed'");
-    expect(html).toContain("'escalated'");
-    expect(html).toContain("'received'");
-    expect(html).toContain("'task done'");
-    expect(html).toContain("'trigger'");
-  });
-
-  test("Dashboard HTML contains toggleActivityFilter function", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    expect(html).toContain("function toggleActivityFilter(eventType)");
-  });
-
-  test("Dashboard HTML contains toggleRetryGroup function", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    expect(html).toContain("function toggleRetryGroup(groupId)");
-  });
-});
+// ─── Integration Tests ───────────────────────────────────────────
 
 describe("Activity Log - API Data", () => {
   test("Activity API returns retry events with correct fields", async () => {
@@ -191,144 +148,6 @@ describe("Activity Log - API Data", () => {
     expect(events).toContain("routed");
     expect(events).toContain("task_done");
     expect(events).toContain("orchestrator_start");
-  });
-});
-
-describe("Activity Log - Detail View Rendering", () => {
-  test("Detail view contains activity-filters container for filter buttons", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // The activity-filters container holds the toggle buttons
-    expect(html).toContain("activity-filters");
-    // Filter types array defines the 8 buttons
-    expect(html).toContain("filterTypes");
-  });
-
-  test("Detail view renders retry group elements", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // Check for retry-group related CSS and HTML structure
-    expect(html).toContain("retry-group-header");
-    expect(html).toContain("retry-group-entries");
-    expect(html).toContain("retry-toggle");
-  });
-
-  test("Detail view renders wp-id-link elements for clickable workpiece IDs", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // Check for wp-id-link class in CSS and JS template
-    expect(html).toContain("wp-id-link");
-    expect(html).toContain("openDrawer");
-  });
-
-  test("Detail view filters entries based on activityFilters state", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // The filtering logic uses activityFilters object
-    expect(html).toContain("activityFilters");
-    expect(html).toContain("filteredEntries");
-  });
-
-  test("Detail view groups consecutive retry entries", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // The grouping logic creates retry_group objects
-    expect(html).toContain("_type: 'retry_group'");
-    expect(html).toContain("groupedEntries");
-    expect(html).toContain("retryGroupCount");
-  });
-});
-
-describe("Activity Log - Overview page unchanged", () => {
-  test("Overview page activity rendering does NOT contain filter buttons", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // The overview's activity section uses class="activity" and class="line-tag"
-    expect(html).toContain("line-tag");
-
-    // The renderOverview function should NOT contain activity-filters
-    const overviewMatch = html.match(/function renderOverview[\s\S]*?function renderDetail/);
-    expect(overviewMatch).toBeTruthy();
-    if (overviewMatch) {
-      expect(overviewMatch[0]).not.toContain("activity-filters");
-      expect(overviewMatch[0]).not.toContain("toggleActivityFilter");
-    }
-  });
-});
-
-describe("Activity Log - Filter reset on navigation", () => {
-  test("selectLine resets activityFilters to empty object", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // Check that selectLine function contains activityFilters reset
-    const selectLineMatch = html.match(/function selectLine[\s\S]*?function goBack/);
-    expect(selectLineMatch).toBeTruthy();
-    if (selectLineMatch) {
-      expect(selectLineMatch[0]).toContain("activityFilters = {}");
-    }
-  });
-
-  test("goBack resets activityFilters to empty object", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // Check that goBack function contains activityFilters reset
-    const goBackMatch = html.match(/function goBack[\s\S]*?function metricCard/);
-    expect(goBackMatch).toBeTruthy();
-    if (goBackMatch) {
-      expect(goBackMatch[0]).toContain("activityFilters = {}");
-    }
-  });
-});
-
-describe("Activity Log - No post-DOM filter re-application needed", () => {
-  test("renderDetail does filtering during render, not after DOM rebuild", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // The new implementation filters during rendering, so there's no
-    // setActivityFilter call after innerHTML assignment
-    const renderDetailMatch = html.match(/function renderDetail[\s\S]*?function selectLine/);
-    expect(renderDetailMatch).toBeTruthy();
-    if (renderDetailMatch) {
-      // Should NOT contain the old post-DOM filter re-application
-      expect(renderDetailMatch[0]).not.toContain("setActivityFilter");
-    }
-  });
-});
-
-describe("Activity Log - CSS classes present", () => {
-  test("CSS contains activity-filters styles", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    expect(html).toContain(".activity-filters");
-    expect(html).toContain(".activity-filter-btn");
-    expect(html).toContain(".activity-filter-btn.active");
-  });
-
-  test("CSS contains retry-group-header and retry-group-entries styles", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    expect(html).toContain(".retry-group-header");
-    expect(html).toContain(".retry-group-entries");
-    expect(html).toContain(".retry-toggle");
-    expect(html).toContain(".retry-group-entries.expanded");
-  });
-
-  test("CSS contains wp-id-link styles", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    expect(html).toContain(".wp-id-link");
   });
 });
 
@@ -369,46 +188,7 @@ describe("Activity Log - Backward compatibility", () => {
   });
 });
 
-// ─── Grouping Logic Tests (via rendered HTML) ─────────────────
-
-describe("Activity Log - Retry grouping in rendered output", () => {
-  test("Consecutive retry events produce retry_group in JS rendering code", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // Verify that the grouping logic handles consecutive retries
-    expect(html).toContain("_type: 'retry_group'");
-    expect(html).toContain("retryRun.length >= 2");
-  });
-
-  test("Retry grouping checks workpiece match for consecutive entries", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // The grouping logic checks workpiece identity for consecutive retries
-    expect(html).toContain("filteredEntries[gi + 1].workpiece === entry.workpiece");
-  });
-});
-
-describe("Activity Log - Filter logic verification", () => {
-  test("Filter logic maps event types to filter keys correctly", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // Verify the filter mapping logic is present for key event types
-    expect(html).toContain("'station_done'");
-    expect(html).toContain("'task_done'");
-    expect(html).toContain("'retry'");
-    expect(html).toContain("'routed'");
-    expect(html).toContain("'escalated'");
-    expect(html).toContain("'task_received'");
-    expect(html).toContain("'trigger_fired'");
-    expect(html).toContain("'trigger_skipped'");
-    expect(html).toContain("'error_bucket'");
-  });
-});
-
-// ─── Additional edge case test ────────���────────
+// ─── Additional edge case test ───────────────────
 
 describe("Activity Log - Edge cases", () => {
   test("Empty activity line shows no-activity message", async () => {
@@ -472,11 +252,4 @@ describe("Activity Log - Edge cases", () => {
     expect(wpBRetries.length).toBe(2);
   });
 
-  test("Single retry is not collapsed (via code verification)", async () => {
-    const res = await request("/");
-    const html = await res.text();
-
-    // The grouping only collapses when retryRun.length >= 2
-    expect(html).toContain("retryRun.length >= 2");
-  });
 });

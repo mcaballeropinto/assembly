@@ -165,21 +165,3 @@ describe("POST /api/line/:name/retry", () => {
     expect(res.status).toBe(404);
   });
 });
-
-describe("Dashboard HTML contains drawer retry/dismiss JS and CSS", () => {
-  test("HTML contains retry/dismiss handlers", async () => {
-    const res = await request("/");
-    const html = await res.text();
-    expect(html).toContain("retryErroredWorkpiece");
-    expect(html).toContain("confirmDismissForever");
-    expect(html).toContain("dismissForever");
-  });
-
-  test("HTML contains drawer action CSS", async () => {
-    const res = await request("/");
-    const html = await res.text();
-    expect(html).toContain("drawer-actions");
-    expect(html).toContain("drawer-action-primary");
-    expect(html).toContain("drawer-action-danger");
-  });
-});

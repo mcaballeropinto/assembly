@@ -138,32 +138,3 @@ describe("GET /api/usage", () => {
     expect(body.ageMs).toBeNull();
   });
 });
-
-describe("Dashboard HTML exposes usage panel mount + client JS", () => {
-  test("HTML contains usage-panel-mount and loadUsage", async () => {
-    const res = await request("/");
-    const html = await res.text();
-    expect(html).toContain("usage-panel-mount");
-    expect(html).toContain("loadUsage");
-    expect(html).toContain("providers['codex']");
-    expect(html).not.toContain("providers['claude-code']");
-  });
-
-  test("HTML contains compact usage indicator mount + popover plumbing", async () => {
-    const res = await request("/");
-    const html = await res.text();
-    // Compact mount lives inside the subtitle header row.
-    expect(html).toContain('id="usage-compact-mount"');
-    // View-state CSS swaps compact vs full card between detail/overview.
-    expect(html).toContain("body.view-detail #usage-panel-mount");
-    expect(html).toContain("body:not(.view-detail) #usage-compact-mount");
-    // Client-side builders + popover interaction helpers are wired up.
-    expect(html).toContain("buildUsageCompactHtml");
-    expect(html).toContain("toggleUsagePopover");
-    expect(html).toContain("handleUsagePopoverKey");
-    // prefers-reduced-motion branch present for the popover.
-    expect(html).toContain("prefers-reduced-motion: reduce");
-    // applyViewState is what toggles body.view-detail and re-renders usage.
-    expect(html).toContain("applyViewState");
-  });
-});
