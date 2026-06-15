@@ -1,146 +1,173 @@
-import type { KanbanState, KanbanColumn } from "@/lib/api";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Info } from "lucide-react";
+import type { KanbanColumn as ApiKanbanColumn, KanbanState } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  KanbanBoard as KanbanBoardPrimitive,
+  KanbanBoardProvider,
+} from "@/components/ui/kanban-board/kanban";
 import { Skeleton } from "@/components/ui/skeleton";
-import { KanbanColumnHeader, KanbanStationGroupHeader } from "./kanban-column-header";
-import { KanbanCardComponent } from "./kanban-card";
+import { cn } from "@/lib/utils";
+import { KanbanColumn } from "./kanban-column";
 
 interface KanbanBoardProps {
-  kanbanState: KanbanState;
-  lineName: string;
+  state: KanbanState;
+  onOpenCard: (fileName: string) => void;
+  onReleaseAllHeld: () => void;
+  isReleasingHeld?: boolean;
+  now?: number;
 }
 
-interface StationGroup {
-  stationName: string;
-  lanes: KanbanColumn[];
-}
+type OrderedGroup =
+  | { type: "column"; column: ApiKanbanColumn }
+  | { type: "station"; station: string };
 
-// Group columns by station
-function groupColumnsByStation(columns: KanbanColumn[]): {
-  standalone: KanbanColumn[];
-  stationGroups: StationGroup[];
-} {
-  const standalone: KanbanColumn[] = [];
-  const stationMap = new Map<string, KanbanColumn[]>();
+function groupColumns(columns: ApiKanbanColumn[]) {
+  const ordered: OrderedGroup[] = [];
+  const stationLanes = new Map<string, ApiKanbanColumn[]>();
 
-  for (const col of columns) {
-    if (col.station) {
-      const existing = stationMap.get(col.station) || [];
-      existing.push(col);
-      stationMap.set(col.station, existing);
-    } else {
-      standalone.push(col);
+  for (const column of columns) {
+    if (!column.station) {
+      ordered.push({ type: "column", column });
+      continue;
     }
+
+    if (!stationLanes.has(column.station)) {
+      stationLanes.set(column.station, []);
+      ordered.push({ type: "station", station: column.station });
+    }
+    stationLanes.get(column.station)?.push(column);
   }
 
-  const stationGroups: StationGroup[] = [];
-  for (const [stationName, lanes] of stationMap.entries()) {
-    stationGroups.push({ stationName, lanes });
-  }
-
-  return { standalone, stationGroups };
+  return { ordered, stationLanes };
 }
 
-export function KanbanBoard({ kanbanState, lineName }: KanbanBoardProps) {
-  const { standalone, stationGroups } = groupColumnsByStation(kanbanState.columns);
+function retryChip(count: number, exhausted = false) {
+  if (count <= 0) return null;
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "shrink-0 text-[11px]",
+        exhausted ? "text-destructive" : "text-amber-700 dark:text-amber-400"
+      )}
+    >
+      {exhausted ? "\u2717" : "\u21ba"} {count}
+    </Badge>
+  );
+}
+
+export function KanbanBoard({
+  state,
+  onOpenCard,
+  onReleaseAllHeld,
+  isReleasingHeld = false,
+  now,
+}: KanbanBoardProps) {
+  const { ordered, stationLanes } = groupColumns(state.columns);
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-4 min-h-[400px]">
-      {/* Standalone columns (held, inbox, done, error, review) */}
-      {standalone.map((col) => (
-        <div key={col.key} className="flex-shrink-0 w-[280px] rounded-lg border bg-card">
-          <KanbanColumnHeader column={col} lineName={lineName} />
-          <ScrollArea className="max-h-[600px]">
-            <div className="p-2 space-y-2">
-              {col.cards.length === 0 ? (
-                <div className="p-4 text-center text-sm text-muted-foreground">
-                  {col.key === "held" ? "No held tasks" : "No items"}
-                </div>
-              ) : (
-                col.cards.map((card) => (
-                  <KanbanCardComponent key={card.fileName} card={card} lineName={lineName} />
-                ))
-              )}
-            </div>
-          </ScrollArea>
-        </div>
-      ))}
+    <KanbanBoardProvider>
+      <KanbanBoardPrimitive className="min-h-[28rem]">
+        {ordered.map((group) => {
+          if (group.type === "column") {
+            return (
+              <KanbanColumn
+                key={group.column.key}
+                column={group.column}
+                onOpenCard={onOpenCard}
+                onReleaseAll={group.column.key === "held" ? onReleaseAllHeld : undefined}
+                isReleasing={isReleasingHeld}
+                now={now}
+              />
+            );
+          }
 
-      {/* Station groups */}
-      {stationGroups.map((group) => {
-        const totalCount = group.lanes.reduce((sum, lane) => sum + lane.count, 0);
-        const retryingCount = group.lanes.reduce(
-          (sum, lane) => sum + (lane.retrying_count || 0),
-          0
-        );
-        const exhaustedCount = group.lanes.reduce(
-          (sum, lane) => sum + (lane.exhausted_count || 0),
-          0
-        );
+          const lanes = stationLanes.get(group.station) ?? [];
+          const count = lanes.reduce((sum, lane) => sum + lane.count, 0);
+          const retrying = lanes.reduce((sum, lane) => sum + (lane.retrying_count ?? 0), 0);
+          const exhausted = lanes.reduce((sum, lane) => sum + (lane.exhausted_count ?? 0), 0);
+          const status = state.stationStatuses?.[group.station];
+          const meta = state.stationMeta?.[group.station];
 
-        const freshness = kanbanState.stationFreshness?.[group.stationName];
-        const stationStatus = kanbanState.stationStatuses?.[group.stationName];
-        const stationMeta = kanbanState.stationMeta?.[group.stationName];
-
-        return (
-          <div key={group.stationName} className="flex-shrink-0 w-[320px] rounded-lg border bg-card">
-            <KanbanStationGroupHeader
-              stationName={group.stationName}
-              totalCount={totalCount}
-              freshness={freshness}
-              stationStatus={stationStatus}
-              stationMeta={stationMeta}
-              retryingCount={retryingCount}
-              exhaustedCount={exhaustedCount}
-            />
-
-            {/* Three lane sub-sections */}
-            {group.lanes.map((lane, idx) => (
-              <div key={lane.key} className={idx < group.lanes.length - 1 ? "border-b" : ""}>
-                {/* Lane label */}
-                <div className="flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground">
-                  <span>{lane.title}</span>
-                  <span>{lane.count}</span>
-                </div>
-
-                {/* Lane cards */}
-                <ScrollArea className="max-h-[200px]">
-                  <div className="px-2 pb-2 space-y-2">
-                    {lane.cards.length === 0 ? (
-                      <div className="text-center text-xs text-muted-foreground py-2">
-                        Empty
-                      </div>
-                    ) : (
-                      lane.cards.map((card) => (
-                        <KanbanCardComponent
-                          key={card.fileName}
-                          card={card}
-                          lineName={lineName}
-                        />
-                      ))
-                    )}
-                  </div>
-                </ScrollArea>
+          return (
+            <section
+              key={group.station}
+              className="flex w-[56rem] flex-shrink-0 flex-col rounded-lg border bg-card"
+            >
+              <div className="flex items-center gap-2 px-3 py-2 border-b">
+                {status && (
+                  <span className="text-sm" aria-label={status.label}>
+                    {status.icon}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                  {group.station}
+                </span>
+                <Badge variant="secondary" className="shrink-0 text-xs">
+                  {count}
+                </Badge>
+                {retryChip(retrying)}
+                {retryChip(exhausted, true)}
+                {meta?.description && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={`${group.station} info`}
+                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+                        >
+                          <Info className="h-4 w-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs">
+                        <div className="space-y-1">
+                          <p>{meta.description}</p>
+                          {meta.provider && <p>Provider: {meta.provider}</p>}
+                          {meta.model && <p>Model: {meta.model}</p>}
+                          {meta.timeout && <p>Timeout: {meta.timeout}s</p>}
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
               </div>
-            ))}
-          </div>
-        );
-      })}
-    </div>
+              <div className="grid min-h-0 flex-1 grid-cols-3 gap-3 p-3">
+                {lanes.map((lane) => (
+                  <KanbanColumn
+                    key={lane.key}
+                    column={lane}
+                    onOpenCard={onOpenCard}
+                    now={now}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </KanbanBoardPrimitive>
+    </KanbanBoardProvider>
   );
 }
 
 export function KanbanBoardSkeleton() {
   return (
-    <div className="flex gap-4 overflow-x-auto pb-4 min-h-[400px]">
-      {[...Array(5)].map((_, i) => (
-        <div key={i} className="flex-shrink-0 w-[280px] rounded-lg border bg-card">
+    <div className="flex min-h-[28rem] gap-4 overflow-x-auto pb-4">
+      {[0, 1, 2, 3].map((item) => (
+        <div key={item} className="w-72 flex-shrink-0 rounded-lg border bg-card">
           <div className="p-3 border-b">
             <Skeleton className="h-4 w-24" />
           </div>
-          <div className="p-2 space-y-2">
-            {[...Array(3)].map((_, j) => (
-              <Skeleton key={j} className="h-24 w-full" />
-            ))}
+          <div className="space-y-2 p-2">
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-28 w-full" />
           </div>
         </div>
       ))}

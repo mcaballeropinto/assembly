@@ -304,3 +304,31 @@ export type ApiLineStateResponse =
       timestamp: string;
     }
   | { error: string };
+
+/**
+ * Response from GET /api/line/:name/kanban.
+ */
+export type ApiKanbanResponse = import("./dashboard-data").KanbanState | { error: string };
+
+/**
+ * Response from GET /api/line/:name/kanban/done.
+ */
+export interface ApiKanbanDoneResponse {
+  cards: import("./dashboard-data").KanbanCard[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+/**
+ * Response from POST /api/line/:name/release.
+ */
+export interface ApiReleaseHeldResponse {
+  released: string[];
+  skipped: string[];
+  errors: Array<{ file?: string; error: string } | string>;
+}
+
+export interface ApiErrorResponse {
+  error: string;
+}
