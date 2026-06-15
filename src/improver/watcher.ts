@@ -13,6 +13,7 @@ import {
 } from "./assess";
 import { enqueueDevTask, devTaskStillPresent, devTaskTerminalBucket, requeueSource } from "./devline";
 import { buildDiagnosisReportMessage, sendDiscord, type DiagnosisReportAction } from "./discord";
+import { diagnoseFailure, formatDiagnosisReport, type FailureDiagnosis } from "./diagnosis";
 
 /**
  * The improver watcher — Assembly's self-improvement loop.
@@ -182,7 +183,10 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
       if (c.bucket === "review") {
         await handleDevEscalation(c, key, fileName);
       } else {
-        await handleDevCompletion(c, key, fileName);
+        const handled = await handleDevCompletion(c, key, fileName);
+        if (!handled && c.bucket === "error") {
+          await handleOrdinaryFailure(c, key, fileName);
+        }
       }
       return;
     }
@@ -223,6 +227,21 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
       return;
     }
     const wpId = typeof wp.id === "string" ? wp.id : null;
+
+    const deterministicDiagnosis =
+      c.bucket === "error"
+        ? diagnoseFailure({
+            lineName: c.lineName,
+            linePath: c.linePath,
+            fileName,
+            filePath: c.filePath,
+            workpiece: wp,
+          })
+        : null;
+    if (deterministicDiagnosis?.confidence === "high") {
+      await handleDiagnosis(c, key, fileName, wpId, deterministicDiagnosis);
+      return;
+    }
 
     const ctx: AssessmentContext = {
       workpiece: wp,
@@ -447,6 +466,192 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
     );
   }
 
+  async function reportDiagnosis(diagnosis: FailureDiagnosis): Promise<void> {
+    if (state.hasDiagnosisReport(diagnosis.fingerprint)) return;
+    state.appendEvent({
+      type: "diagnosis_reported",
+      fingerprint: diagnosis.fingerprint,
+      line: diagnosis.source_line,
+      file_name: diagnosis.file_name,
+      wp_id: diagnosis.workpiece_id,
+      root_cause: diagnosis.root_cause,
+      confidence: diagnosis.confidence,
+      action: diagnosis.action,
+      at: new Date().toISOString(),
+    });
+    await notify(formatDiagnosisReport(diagnosis));
+  }
+
+  async function handleDiagnosis(
+    c: Candidate,
+    key: string,
+    fileName: string,
+    wpId: string | null,
+    diagnosis: FailureDiagnosis
+  ): Promise<void> {
+    const issueKey = `${c.lineName}/${diagnosis.station ?? "line"}/${diagnosis.issue_slug}`;
+    const mark = (
+      verdictKind: Parameters<typeof state.markAssessed>[0]["verdict"],
+      issueKeyArg?: string
+    ) =>
+      state.markAssessed({
+        key,
+        wp_id: wpId,
+        line: c.lineName,
+        bucket: c.bucket,
+        file_name: fileName,
+        verdict: verdictKind,
+        issue_key: issueKeyArg,
+        at: new Date().toISOString(),
+      });
+
+    if (diagnosis.action !== "enqueue_repair") {
+      mark("no_action");
+      await reportDiagnosis(diagnosis);
+      return;
+    }
+
+    const item: RequeueItem = {
+      line_path: c.linePath,
+      line: c.lineName,
+      bucket: "error",
+      file_name: fileName,
+      wp_id: wpId,
+    };
+
+    const openForIssue = state.findOpenByIssue(issueKey);
+    if (openForIssue) {
+      state.appendEvent({
+        type: "recurrence",
+        issue_key: issueKey,
+        item,
+        wants_requeue: true,
+        at: new Date().toISOString(),
+      });
+      mark("duplicate", issueKey);
+      await reportDiagnosis({
+        ...diagnosis,
+        action: "deduped",
+        recommended_action: `Existing proposal ${openForIssue.proposal_id} is already open; attached this failure as a recurrence.`,
+      });
+      log("diagnosis_deduped", { issue: issueKey, wp: wpId, proposal: openForIssue.proposal_id });
+      return;
+    }
+
+    if (state.proposalCountForIssue(issueKey) >= config.maxProposalsPerIssue) {
+      state.appendEvent({
+        type: "recurrence",
+        issue_key: issueKey,
+        item,
+        wants_requeue: false,
+        at: new Date().toISOString(),
+      });
+      mark("exhausted", issueKey);
+      await reportDiagnosis({
+        ...diagnosis,
+        action: "capped",
+        recommended_action: `Issue ${issueKey} hit the proposal cap; manual review needed.`,
+      });
+      log("diagnosis_capped", { issue: issueKey, wp: wpId });
+      return;
+    }
+
+    const open = state.openProposals();
+    const openForLine = open.filter((p) => p.source_line === c.lineName).length;
+    if (open.length >= config.maxOpenProposals || openForLine >= config.maxOpenPerLine) {
+      await reportDiagnosis({
+        ...diagnosis,
+        action: "skipped",
+        recommended_action: `Proposal cap hit (${open.length} open, ${openForLine} for ${c.lineName}); retry on a later sweep.`,
+      });
+      log("diagnosis_cap_hit", { issue: issueKey, open_total: open.length, open_for_line: openForLine });
+      return;
+    }
+
+    const dev = devLineRef();
+    if (!dev) {
+      await reportDiagnosis({
+        ...diagnosis,
+        action: "skipped",
+        recommended_action: `Dev line ${config.devLine} is not available; retry on a later sweep.`,
+      });
+      log("diagnosis_dev_line_missing", { issue: issueKey, wp: wpId });
+      return;
+    }
+
+    const now = new Date();
+    const proposalId = `imp_${now.toISOString().replace(/[:.]/g, "-")}_${Math.random().toString(36).slice(2, 6)}`;
+    const { fileName: devFile, taskKey } = enqueueDevTask(
+      dev.linePath,
+      {
+        proposalId,
+        issueKey,
+        issueSlug: diagnosis.issue_slug,
+        sourceLine: c.lineName,
+        sourceWorkpieceId: wpId,
+        title: diagnosis.title,
+        taskBody: diagnosis.task_body,
+      },
+      now,
+      config.proposalMode
+    );
+    state.appendEvent({
+      type: "proposed",
+      proposal_id: proposalId,
+      issue_key: issueKey,
+      source_line: c.lineName,
+      source_line_path: c.linePath,
+      issue_slug: diagnosis.issue_slug,
+      target_station: diagnosis.station,
+      title: diagnosis.title,
+      dev_task_key: taskKey,
+      dev_task_file: devFile,
+      requeue: [item],
+      at: now.toISOString(),
+    });
+    mark("proposed", issueKey);
+    await reportDiagnosis({
+      ...diagnosis,
+      recommended_action: `queued improvement repair task ${taskKey} (${devFile})${config.proposalMode === "held" ? " (held for manual release)" : ""}.`,
+      action: "enqueue_repair",
+    });
+    log("diagnosis_repair_queued", {
+      issue: issueKey,
+      proposal: proposalId,
+      dev_task: taskKey,
+      wp: wpId,
+      fingerprint: diagnosis.fingerprint,
+    });
+  }
+
+  async function handleOrdinaryFailure(c: Candidate, key: string, fileName: string): Promise<void> {
+    if (!existsSync(c.filePath)) return;
+    let wp: Record<string, unknown>;
+    try {
+      wp = JSON.parse(readFileSync(c.filePath, "utf-8"));
+    } catch {
+      state.markAssessed({
+        key,
+        wp_id: null,
+        line: c.lineName,
+        bucket: c.bucket,
+        file_name: fileName,
+        verdict: "error",
+        at: new Date().toISOString(),
+      });
+      return;
+    }
+    const wpId = typeof wp.id === "string" ? wp.id : null;
+    const diagnosis = diagnoseFailure({
+      lineName: c.lineName,
+      linePath: c.linePath,
+      fileName,
+      filePath: c.filePath,
+      workpiece: wp,
+    });
+    await handleDiagnosis(c, key, fileName, wpId, diagnosis);
+  }
+
   function clipText(s: string, max: number): string {
     return s.length <= max ? s : `${s.slice(0, max)}...[truncated]`;
   }
@@ -616,7 +821,7 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
     return null;
   }
 
-  async function handleDevCompletion(c: Candidate, key: string, fileName: string): Promise<void> {
+  async function handleDevCompletion(c: Candidate, key: string, fileName: string): Promise<boolean> {
     const mark = () =>
       state.markAssessed({
         key,
@@ -636,23 +841,25 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
       // terminal-bucket check releases the proposal slot with outcome lost.
       mark();
       log("dev_completion_unparseable", { file: fileName });
-      return;
+      return true;
     }
 
     const input = (wp.input ?? {}) as Record<string, unknown>;
     const improverMeta = (input.improver ?? null) as Record<string, unknown> | null;
     const proposalId = improverMeta && typeof improverMeta.proposal_id === "string" ? improverMeta.proposal_id : null;
     if (!proposalId) {
-      // A regular dev-line run — its own line.yaml hooks handle Discord.
+      // A regular dev-line run is not a proposal completion. Let failed
+      // ordinary tasks flow through the general failure diagnostician.
+      if (c.bucket === "error") return false;
       mark();
-      return;
+      return true;
     }
 
     const open = state.findOpenByProposalId(proposalId);
     if (!open) {
       mark();
       log("dev_completion_unmatched", { proposal: proposalId, file: fileName });
-      return;
+      return true;
     }
 
     const devWpId = typeof wp.id === "string" ? wp.id : null;
@@ -716,7 +923,7 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
         await notify(
           `🛠️ **improver** — queued a repair task for \`${open.issue_key}\` after ${config.devLine} failed validation (${retryReason}).\n**${open.title}**\nfailed dev run \`${devWpId ?? fileName}\` — source tasks were NOT requeued.`
         );
-        return;
+        return true;
       }
       state.appendEvent({
         type: "resolved",
@@ -731,7 +938,7 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
       await notify(
         `❌ **improver** — improvement task for \`${open.issue_key}\` failed in ${config.devLine}.\n**${open.title}**\ndev run \`${devWpId ?? fileName}\` — source tasks were NOT requeued.`
       );
-      return;
+      return true;
     }
 
     if (noOp) {
@@ -749,7 +956,7 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
       await notify(
         `ℹ️ **improver** — ${config.devLine} judged \`${open.issue_key}\` a no-op (already implemented or nothing to change). Source tasks were not requeued.\n**${open.title}**`
       );
-      return;
+      return true;
     }
 
     // Persist the resolution BEFORE requeueing: a crash mid-requeue must not
@@ -788,6 +995,7 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
       }
     }
     await notify(lines.join("\n"));
+    return true;
   }
 
   /**
