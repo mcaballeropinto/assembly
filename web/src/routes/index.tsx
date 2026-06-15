@@ -41,14 +41,6 @@ export function OverviewRoute() {
     writeActivitySearch(next)
   }
 
-  if (isPending || !data) {
-    return (
-      <Card className="p-6">
-        <p className="text-sm text-muted-foreground">Loading overview...</p>
-      </Card>
-    )
-  }
-
   if (error) {
     return (
       <Card className="border-destructive/40 p-6">
@@ -58,6 +50,14 @@ export function OverviewRoute() {
         <p className="mt-1 text-sm text-muted-foreground">
           {(error as Error).message}
         </p>
+      </Card>
+    )
+  }
+
+  if (isPending || !data) {
+    return (
+      <Card className="p-6">
+        <p className="text-sm text-muted-foreground">Loading overview...</p>
       </Card>
     )
   }
