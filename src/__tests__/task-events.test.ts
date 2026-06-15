@@ -96,7 +96,7 @@ describe("appendTaskEvent + readTaskEvents round-trip", () => {
   });
 
   test("readTaskEvents skips schema-invalid JSONL lines", () => {
-    const wpId = "wp-invalid-line";
+    const wpId = WorkpieceId("wp-invalid-line");
     initTaskEventDir(LINE_PATH, wpId);
     const eventsPath = resolve(LINE_PATH, "queues", "task-events", wpId, "station-a.events.jsonl");
     appendFileSync(eventsPath, JSON.stringify({
@@ -114,13 +114,13 @@ describe("appendTaskEvent + readTaskEvents round-trip", () => {
       seq: 2,
     }) + "\n");
 
-    const page = readTaskEvents(LINE_PATH, wpId, "station-a");
+    const page = readTaskEvents(LINE_PATH, wpId, StationName("station-a"));
     expect(page.events.length).toBe(1);
     expect(page.events[0].summary).toBe("Started");
   });
 
   test("listTaskEventStations returns [] for schema-invalid index", () => {
-    const wpId = "wp-invalid-index";
+    const wpId = WorkpieceId("wp-invalid-index");
     initTaskEventDir(LINE_PATH, wpId);
     writeFileSync(resolve(LINE_PATH, "queues", "task-events", wpId, "index.json"), JSON.stringify({ stations: [{ name: "s" }] }));
     expect(listTaskEventStations(LINE_PATH, wpId)).toEqual([]);

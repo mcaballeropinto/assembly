@@ -1,4 +1,5 @@
-import type { WorkpieceId, LineName, StationName } from './ids';
+import { WorkpieceId, LineName, StationName } from './ids';
+export { WorkpieceId, LineName, StationName };
 
 // === The Standard Envelope ===
 // Every station returns this. No exceptions.
@@ -7,24 +8,6 @@ export interface StationEnvelope {
   summary: string; // required — one-line description
   content?: string; // optional — full text output
   data?: Record<string, unknown>; // optional — structured fields
-}
-
-declare const __brand: unique symbol;
-export type Brand<T, Name extends string> = T & { readonly [__brand]: Name };
-export type WorkpieceId = Brand<string, "WorkpieceId">;
-export type LineName = Brand<string, "LineName">;
-export type StationName = Brand<string, "StationName">;
-
-export function WorkpieceId(value: string): WorkpieceId {
-  return value as WorkpieceId;
-}
-
-export function LineName(value: string): LineName {
-  return value as LineName;
-}
-
-export function StationName(value: string): StationName {
-  return value as StationName;
 }
 
 // === Eval Result ===
@@ -407,4 +390,4 @@ export type LogEvent =
     };
 
 // Re-export branded types for convenience
-export type { WorkpieceId, LineName, StationName, TaskFileName } from './ids';
+export type { TaskFileName } from './ids';

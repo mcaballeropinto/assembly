@@ -6,6 +6,27 @@ import { initSectionQueue } from "../queue";
 
 const TMP = "/tmp/assembly-test-station-timing-" + Date.now();
 
+function baseWorkpiece(id: string, stations: Record<string, unknown>) {
+  return {
+    id,
+    line: "test-line",
+    task: "test-task",
+    input: {},
+    stations,
+  };
+}
+
+function stationResult(overrides: Record<string, unknown> = {}) {
+  return {
+    summary: "station result",
+    status: "done",
+    model: "test",
+    tokens: { in: 0, out: 0 },
+    cost_usd: 0,
+    ...overrides,
+  };
+}
+
 describe("getStationTimings - processing file priority and mtime fallback", () => {
   beforeEach(() => {
     // Create line structure
@@ -31,16 +52,12 @@ sequence:
     const startedAt = "2026-01-01T00:00:00Z";
     const finishedAt = "2026-01-01T01:00:00Z";
 
-    const workpiece = {
-      task: "test-task",
-      stations: {
-        "station-a": {
+    const workpiece = baseWorkpiece("test", {
+        "station-a": stationResult({
           started_at: startedAt,
           finished_at: finishedAt,
-          status: "done",
-        },
-      },
-    };
+        }),
+      });
 
     const processingFile = resolve(TMP, "stations", "station-a", "queue", "processing", "test.json");
     writeFileSync(processingFile, JSON.stringify(workpiece));
@@ -54,14 +71,9 @@ sequence:
   });
 
   it("processing file with station record but no started_at returns running with mtime fallback", () => {
-    const workpiece = {
-      task: "test-task",
-      stations: {
-        "station-a": {
-          status: "done",
-        },
-      },
-    };
+    const workpiece = baseWorkpiece("test", {
+      "station-a": stationResult(),
+    });
 
     const processingFile = resolve(TMP, "stations", "station-a", "queue", "processing", "test.json");
     writeFileSync(processingFile, JSON.stringify(workpiece));
@@ -77,10 +89,7 @@ sequence:
   });
 
   it("processing file with no station record at all returns running with mtime fallback", () => {
-    const workpiece = {
-      task: "test-task",
-      stations: {},
-    };
+    const workpiece = baseWorkpiece("test", {});
 
     const processingFile = resolve(TMP, "stations", "station-a", "queue", "processing", "test.json");
     writeFileSync(processingFile, JSON.stringify(workpiece));
@@ -99,16 +108,12 @@ sequence:
     const startedAt = "2026-01-01T00:00:00Z";
     const finishedAt = "2026-01-01T01:00:00Z";
 
-    const workpiece = {
-      task: "test-task",
-      stations: {
-        "station-a": {
+    const workpiece = baseWorkpiece("test", {
+        "station-a": stationResult({
           started_at: startedAt,
           finished_at: finishedAt,
-          status: "done",
-        },
-      },
-    };
+        }),
+      });
 
     const outputFile = resolve(TMP, "stations", "station-a", "queue", "output", "test.json");
     writeFileSync(outputFile, JSON.stringify(workpiece));
@@ -126,16 +131,12 @@ sequence:
     const startedAt = "2026-01-01T00:00:00Z";
     const finishedAt = "2026-01-01T01:00:00Z";
 
-    const workpiece = {
-      task: "test-task",
-      stations: {
-        "station-a": {
+    const workpiece = baseWorkpiece("test", {
+        "station-a": stationResult({
           started_at: startedAt,
           finished_at: finishedAt,
-          status: "done",
-        },
-      },
-    };
+        }),
+      });
 
     const doneFile = resolve(TMP, "queues", "done", "test.json");
     writeFileSync(doneFile, JSON.stringify(workpiece));
@@ -151,26 +152,19 @@ sequence:
 
   it("computeStationFreshness does not return completed when processing file exists without started_at", () => {
     // Create a processing file without started_at (triggers mtime fallback)
-    const workpiece = {
-      task: "test-task",
-      stations: {},
-    };
+    const workpiece = baseWorkpiece("test", {});
     const processingFile = resolve(TMP, "stations", "station-a", "queue", "processing", "test.json");
     writeFileSync(processingFile, JSON.stringify(workpiece));
 
     // Also create a prior completed workpiece in done/ with both timestamps
     const oldStartedAt = "2026-01-01T00:00:00Z";
     const oldFinishedAt = "2026-01-01T01:00:00Z";
-    const oldWorkpiece = {
-      task: "old-task",
-      stations: {
-        "station-a": {
+    const oldWorkpiece = baseWorkpiece("old", {
+        "station-a": stationResult({
           started_at: oldStartedAt,
           finished_at: oldFinishedAt,
-          status: "done",
-        },
-      },
-    };
+        }),
+      });
     const doneFile = resolve(TMP, "queues", "done", "old.json");
     writeFileSync(doneFile, JSON.stringify(oldWorkpiece));
 
@@ -193,31 +187,23 @@ sequence:
     const startedAt = "2026-01-01T00:00:00Z";
 
     // Processing file with proper started_at
-    const workpiece = {
-      task: "test-task",
-      stations: {
-        "station-a": {
+    const workpiece = baseWorkpiece("test", {
+        "station-a": stationResult({
           started_at: startedAt,
-          status: "running",
-        },
-      },
-    };
+        }),
+      });
     const processingFile = resolve(TMP, "stations", "station-a", "queue", "processing", "test.json");
     writeFileSync(processingFile, JSON.stringify(workpiece));
 
     // Stale completed workpiece in done
     const oldStartedAt = "2025-12-31T00:00:00Z";
     const oldFinishedAt = "2025-12-31T01:00:00Z";
-    const oldWorkpiece = {
-      task: "old-task",
-      stations: {
-        "station-a": {
+    const oldWorkpiece = baseWorkpiece("old", {
+        "station-a": stationResult({
           started_at: oldStartedAt,
           finished_at: oldFinishedAt,
-          status: "done",
-        },
-      },
-    };
+        }),
+      });
     const doneFile = resolve(TMP, "queues", "done", "old.json");
     writeFileSync(doneFile, JSON.stringify(oldWorkpiece));
 

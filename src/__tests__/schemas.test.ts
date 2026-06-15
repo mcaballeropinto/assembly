@@ -9,18 +9,19 @@ import {
   TaskEventSchema,
   WorkpieceSchema,
 } from "../schemas";
+import { LineName, WorkpieceId } from "../ids";
 import { createWorkpiece } from "../workpiece";
 
 describe("boundary schemas", () => {
   test("WorkpieceSchema round-trips a valid workpiece and preserves dynamic keys", () => {
-    const raw = JSON.parse(JSON.stringify(createWorkpiece("test-line", "do the thing", { a: 1 })));
+    const raw = JSON.parse(JSON.stringify(createWorkpiece(LineName("test-line"), "do the thing", { a: 1 })));
     raw.extra_station_artifact = { ok: true };
     raw.previous_attempts = [];
     raw._retry_history = {};
 
     const parsed = WorkpieceSchema.parse(raw);
     expect(parsed.id).toBe(raw.id);
-    expect(parsed.line).toBe("test-line");
+    expect(parsed.line).toBe(LineName("test-line"));
     expect(parsed.stations).toEqual({});
     expect((parsed as any).extra_station_artifact).toEqual({ ok: true });
   });
@@ -45,7 +46,7 @@ describe("boundary schemas", () => {
       input: { target: "x" },
       source_workpiece_id: "wp-source",
     };
-    expect(InboxPayloadSchema.parse(payload).source_workpiece_id).toBe("wp-source");
+    expect(InboxPayloadSchema.parse(payload).source_workpiece_id).toBe(WorkpieceId("wp-source"));
     expect(FanoutPayloadSchema.parse(payload).task).toBe("hello");
     expect(InboxPayloadSchema.safeParse({ ...payload, typo: true }).success).toBe(false);
   });

@@ -124,7 +124,7 @@ const WorkpieceObjectSchema = z.object({
   }).optional(),
 }).passthrough();
 
-export const WorkpieceSchema: z.ZodType<Workpiece> = WorkpieceObjectSchema.transform((workpiece): Workpiece => ({
+export const WorkpieceSchema: z.ZodType<Workpiece, z.ZodTypeDef, unknown> = WorkpieceObjectSchema.transform((workpiece): Workpiece => ({
   ...workpiece,
   stations: workpiece.stations as Record<StationName, StationResult>,
   _retry_history: workpiece._retry_history as Workpiece["_retry_history"],
