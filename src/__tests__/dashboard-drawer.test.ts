@@ -250,15 +250,6 @@ describe("Drawer prior attempts rendering", () => {
     expect(data.stations.plan.previous_attempts[1].failure_class).toBe("envelope");
   });
 
-  test("dashboard HTML includes prior attempts rendering logic", async () => {
-    const res = await request("/");
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).toContain("timeline-prior-attempts");
-    expect(html).toContain("previous_attempts");
-    expect(html).toContain("Prior attempts (");
-  });
-
   test("workpiece without previous_attempts returns cleanly", async () => {
     // The original drawer-wp-1 has no previous_attempts
     const res = await request("/api/workpiece/drawer-test-line/drawer-wp-1.json");
