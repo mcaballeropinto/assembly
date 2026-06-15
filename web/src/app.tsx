@@ -1,5 +1,5 @@
-import { Header } from "@/components/shell/header"
-import { Sidebar } from "@/components/shell/sidebar"
+import { Header } from "./components/shell/header"
+import { Sidebar } from "./components/shell/sidebar"
 
 export default function App() {
   return (

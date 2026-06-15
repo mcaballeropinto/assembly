@@ -1,16 +1,36 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, mock, test } from "bun:test"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { act } from "react-dom/test-utils"
 import { createRoot } from "react-dom/client"
 
-import {
-  SIDEBAR_COLLAPSE_STORAGE_KEY,
-  STATE_REFETCH_INTERVAL_MS,
-  Sidebar,
-} from "../sidebar"
-
 import type { ApiStateResponse } from "../../../../../src/dashboard-api"
+
+mock.module("../../ui/badge", () => {
+  return {
+    Badge({ variant, ...props }: { variant?: string }) {
+      return <div data-variant={variant} {...props} />
+    },
+  }
+})
+
+mock.module("../../ui/button", () => {
+  return {
+    Button({
+      variant,
+      size,
+      ...props
+    }: {
+      variant?: string
+      size?: string
+    }) {
+      return <button data-size={size} data-variant={variant} {...props} />
+    },
+  }
+})
+
+const { SIDEBAR_COLLAPSE_STORAGE_KEY, STATE_REFETCH_INTERVAL_MS, Sidebar } =
+  await import("../sidebar")
 
 if (typeof document === "undefined") {
   GlobalRegistrator.register()

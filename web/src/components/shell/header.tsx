@@ -1,6 +1,6 @@
 import { useRouterState } from "@tanstack/react-router"
 
-import { Badge } from "@/components/ui/badge"
+import { Badge } from "../ui/badge"
 
 export function getBreadcrumb(pathname: string): string {
   if (pathname === "/") {
@@ -11,7 +11,11 @@ export function getBreadcrumb(pathname: string): string {
     const lineName = pathname.split("/")[2]
 
     if (lineName) {
-      return `Line: ${decodeURIComponent(lineName)}`
+      try {
+        return `Line: ${decodeURIComponent(lineName)}`
+      } catch {
+        return `Line: ${lineName}`
+      }
     }
   }
 

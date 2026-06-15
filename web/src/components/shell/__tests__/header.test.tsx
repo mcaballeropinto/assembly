@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, mock, test } from "bun:test"
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import {
   createMemoryHistory,
@@ -9,7 +9,15 @@ import {
 import { act } from "react-dom/test-utils"
 import { createRoot } from "react-dom/client"
 
-import { Header } from "../header"
+mock.module("../../ui/badge", () => {
+  return {
+    Badge({ variant, ...props }: { variant?: string }) {
+      return <div data-variant={variant} {...props} />
+    },
+  }
+})
+
+const { Header } = await import("../header")
 
 if (typeof document === "undefined") {
   GlobalRegistrator.register()
@@ -44,22 +52,42 @@ afterEach(() => {
   document.body.innerHTML = ""
 })
 
+async function waitFor(assertion: () => void) {
+  let error: unknown
+
+  for (let index = 0; index < 20; index += 1) {
+    try {
+      assertion()
+      return
+    } catch (caught) {
+      error = caught
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  }
+
+  throw error
+}
+
 describe("Header", () => {
-  test("renders the overview breadcrumb and placeholder badges", () => {
+  test("renders the overview breadcrumb and placeholder badges", async () => {
     const screen = renderHeader("/")
 
-    expect(screen.container.textContent).toContain("Overview")
-    expect(screen.container.textContent).toContain("TODO connection")
-    expect(screen.container.textContent).toContain("TODO usage")
-    expect(screen.container.textContent).toContain("TODO theme")
+    await waitFor(() => {
+      expect(screen.container.textContent).toContain("Overview")
+      expect(screen.container.textContent).toContain("TODO connection")
+      expect(screen.container.textContent).toContain("TODO usage")
+      expect(screen.container.textContent).toContain("TODO theme")
+    })
 
     screen.unmount()
   })
 
-  test("renders a line breadcrumb from the pathname", () => {
+  test("renders a line breadcrumb from the pathname", async () => {
     const screen = renderHeader("/line/assembly-dev")
 
-    expect(screen.container.textContent).toContain("Line: assembly-dev")
+    await waitFor(() => {
+      expect(screen.container.textContent).toContain("Line: assembly-dev")
+    })
 
     screen.unmount()
   })
