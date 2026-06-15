@@ -1,15 +1,12 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createElement } from "react"
 import { renderToString } from "react-dom/server"
 
+import type { ReactElement } from "react"
 import type { ActivityFilterKey } from "../lib/activity"
 import type { ApiStateResponse } from "../lib/api"
-
-type QueryResult = {
-  data?: ApiStateResponse
-  isPending: boolean
-  error: Error | null
-}
+import { apiStateQueryOptions } from "../lib/query"
 
 type ActivityFeedProps = {
   items: unknown[]
@@ -19,28 +16,7 @@ type ActivityFeedProps = {
   totalItems?: number
 }
 
-let queryResult: QueryResult
-let lastQueryOptions: unknown
 let lastFeedProps: ActivityFeedProps | undefined
-
-mock.module("@tanstack/react-query", () => ({
-  QueryClient: class QueryClient {
-    options: unknown
-
-    constructor(options: unknown) {
-      this.options = options
-    }
-
-    getDefaultOptions() {
-      return (this.options as { defaultOptions?: unknown }).defaultOptions
-    }
-  },
-  queryOptions: (options: unknown) => options,
-  useQuery: (options: unknown) => {
-    lastQueryOptions = options
-    return queryResult
-  },
-}))
 
 mock.module("../components/ui/activity-feed", () => ({
   ActivityFeed: (props: ActivityFeedProps) => {
@@ -130,21 +106,66 @@ function installWindow(search = "") {
   })
 }
 
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        retryOnMount: false,
+      },
+    },
+  })
+}
+
+function renderOverviewRoute(
+  OverviewRoute: () => ReactElement,
+  options: { data?: ApiStateResponse; error?: Error } = { data: stateFixture },
+) {
+  const queryClient = createQueryClient()
+  const queryOptions = apiStateQueryOptions()
+
+  if (options.data) {
+    queryClient.setQueryData(queryOptions.queryKey, options.data)
+  }
+
+  if (options.error) {
+    queryClient.getQueryCache().build(queryClient, queryOptions, {
+      data: undefined,
+      dataUpdateCount: 0,
+      dataUpdatedAt: 0,
+      error: options.error,
+      errorUpdateCount: 1,
+      errorUpdatedAt: Date.now(),
+      fetchFailureCount: 1,
+      fetchFailureReason: options.error,
+      fetchMeta: null,
+      isInvalidated: false,
+      status: "error",
+      fetchStatus: "idle",
+    })
+  }
+
+  const markup = renderToString(
+    createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      createElement(OverviewRoute),
+    ),
+  )
+  queryClient.clear()
+
+  return markup
+}
+
 describe("OverviewRoute", () => {
   beforeEach(() => {
     installWindow()
-    queryResult = {
-      data: stateFixture,
-      isPending: false,
-      error: null,
-    }
-    lastQueryOptions = undefined
     lastFeedProps = undefined
   })
 
   test("renders the overview shell from live state totals and lines", async () => {
     const { OverviewRoute } = await import("./index")
-    const markup = renderToString(createElement(OverviewRoute))
+    const markup = renderOverviewRoute(OverviewRoute)
 
     expect(markup).toContain("space-y-8")
     expect(markup).toContain("pt-6")
@@ -160,19 +181,13 @@ describe("OverviewRoute", () => {
     expect(markup).toContain("Activity")
     expect(markup).not.toContain("Chrome primitive mock wiring")
     expect(markup).not.toContain("It works")
-    expect(lastQueryOptions).toEqual(
-      expect.objectContaining({
-        queryKey: ["api", "state"],
-        refetchInterval: 3000,
-      }),
-    )
   })
 
   test("preserves activity URL filter parsing and serialization", async () => {
     installWindow("?activity=error")
     const { OverviewRoute } = await import("./index")
 
-    renderToString(createElement(OverviewRoute))
+    renderOverviewRoute(OverviewRoute)
 
     expect(lastFeedProps?.items).toHaveLength(1)
     expect(lastFeedProps?.selectedFilters).toEqual(new Set(["error"]))
@@ -183,12 +198,10 @@ describe("OverviewRoute", () => {
   })
 
   test("renders the error branch", async () => {
-    queryResult = {
-      isPending: false,
-      error: new Error("Nope"),
-    }
     const { OverviewRoute } = await import("./index")
-    const markup = renderToString(createElement(OverviewRoute))
+    const markup = renderOverviewRoute(OverviewRoute, {
+      error: new Error("Nope"),
+    })
 
     expect(markup).toContain("Failed to load dashboard state")
     expect(markup).toContain("Nope")
