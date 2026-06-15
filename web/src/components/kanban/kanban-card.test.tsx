@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react-dom/test-utils";
 import { createRoot } from "react-dom/client";
-import type { KanbanCard as ApiKanbanCard } from "@/lib/api";
+import type { KanbanCard as ApiKanbanCard } from "../../lib/api";
+import { KanbanBoardProvider } from "../ui/kanban-board/kanban";
 import { KanbanCard } from "./kanban-card";
 
 try {
@@ -16,7 +17,7 @@ function render(element: React.ReactElement) {
   document.body.appendChild(container);
   const root = createRoot(container);
   act(() => {
-    root.render(element);
+    root.render(<KanbanBoardProvider>{element}</KanbanBoardProvider>);
   });
   return { container, root };
 }

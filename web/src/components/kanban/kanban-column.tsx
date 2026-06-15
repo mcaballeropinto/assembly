@@ -1,8 +1,6 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Info, MoreHorizontal } from "lucide-react";
-import type { KanbanColumn as ApiKanbanColumn } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import type { KanbanColumn as ApiKanbanColumn } from "../../lib/api";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,24 +10,12 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "../ui/alert-dialog";
 import {
   KanbanBoardColumn,
   KanbanBoardColumnList,
-} from "@/components/ui/kanban-board/kanban";
-import { cn } from "@/lib/utils";
+} from "../ui/kanban-board/kanban";
+import { cn } from "../../lib/utils";
 import { KanbanCard } from "./kanban-card";
 
 interface KanbanColumnProps {
@@ -46,6 +32,25 @@ function statusIcon(column: ApiKanbanColumn): string | null {
   return null;
 }
 
+function Chip({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+        className
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function KanbanColumn({
   column,
   onOpenCard,
@@ -54,6 +59,7 @@ export function KanbanColumn({
   now,
 }: KanbanColumnProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const showReleaseAll = column.key === "held" && column.count > 0 && onReleaseAll;
   const wipWarning = column.wipLimit != null && column.count > column.wipLimit;
   const wipError = column.wipLimit != null && column.count > column.wipLimit * 2;
@@ -74,10 +80,9 @@ export function KanbanColumn({
           </span>
         )}
         <span className="min-w-0 flex-1 truncate text-sm font-semibold">{column.title}</span>
-        <Badge
-          variant="secondary"
+        <Chip
           className={cn(
-            "shrink-0 text-xs",
+            "border-transparent bg-secondary text-secondary-foreground text-xs",
             wipError && "bg-destructive text-destructive-foreground",
             wipWarning &&
               !wipError &&
@@ -85,59 +90,60 @@ export function KanbanColumn({
           )}
         >
           {column.count}
-        </Badge>
+        </Chip>
         {column.retrying_count ? (
-          <Badge variant="outline" className="shrink-0 text-[11px] text-amber-700 dark:text-amber-400">
+          <Chip className="text-[11px] text-amber-700 dark:text-amber-400">
             {"\u21ba"} {column.retrying_count}
-          </Badge>
+          </Chip>
         ) : null}
         {column.exhausted_count ? (
-          <Badge variant="outline" className="shrink-0 text-[11px] text-destructive">
+          <Chip className="text-[11px] text-destructive">
             {"\u2717"} {column.exhausted_count}
-          </Badge>
+          </Chip>
         ) : null}
         {column.tooltip && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={`${column.title} info`}
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
-                >
-                  <Info className="h-4 w-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-xs">
-                <p>{column.tooltip}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <button
+            type="button"
+            aria-label={`${column.title} info`}
+            title={column.tooltip}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+          >
+            <Info className="h-4 w-4" />
+          </button>
         )}
         {showReleaseAll && (
           <>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="ml-auto h-7 w-7 shrink-0"
-                  aria-label="Held column actions"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onSelect={(event) => {
-                    event.preventDefault();
+            <div className="relative ml-auto">
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground"
+                aria-label="Held column actions"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((open) => !open)}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+              <div
+                role="menu"
+                className={cn(
+                  "absolute right-0 z-50 mt-1 min-w-32 rounded-md border bg-popover p-1 text-popover-foreground shadow-md",
+                  !menuOpen && "sr-only"
+                )}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent"
+                  onClick={() => {
+                    setMenuOpen(false);
                     setConfirmOpen(true);
                   }}
                 >
                   Release all
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </button>
+              </div>
+            </div>
 
             <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
               <AlertDialogContent>

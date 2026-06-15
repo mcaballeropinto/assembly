@@ -1,7 +1,7 @@
-import type { KanbanCard as ApiKanbanCard, KanbanCardState } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { KanbanBoardCard } from "@/components/ui/kanban-board/kanban";
-import { cn } from "@/lib/utils";
+import type { ReactNode } from "react";
+import type { KanbanCard as ApiKanbanCard, KanbanCardState } from "../../lib/api";
+import { KanbanBoardCard } from "../ui/kanban-board/kanban";
+import { cn } from "../../lib/utils";
 
 interface KanbanCardProps {
   card: ApiKanbanCard;
@@ -82,6 +82,25 @@ export function buildCardDurationLabel(card: ApiKanbanCard, now = Date.now()): s
   return "\u2014";
 }
 
+function Chip({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+        className
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 function retryCount(card: ApiKanbanCard): number {
   return card.retry?.retry_count ?? card.retries ?? 0;
 }
@@ -133,19 +152,18 @@ export function KanbanCard({ card, onOpen, now }: KanbanCardProps) {
       )}
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <Badge variant="outline" className="max-w-full truncate font-mono text-[11px]">
+        <Chip className="max-w-full truncate font-mono text-[11px]">
           {card.id}
-        </Badge>
+        </Chip>
         {retry && (
-          <Badge
-            variant="outline"
+          <Chip
             className={cn(
               "text-[11px] text-amber-700 dark:text-amber-400",
               card.retry?.exhausted && "border-destructive text-destructive"
             )}
           >
             {"\u21ba"} {retry}
-          </Badge>
+          </Chip>
         )}
         <span>{duration}</span>
       </div>
