@@ -1,6 +1,6 @@
-import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
-import { formatLastUpdate } from "@/lib/dashboard-format"
+import { Badge } from "../ui/badge"
+import { formatLastUpdate } from "../../lib/dashboard-format"
+import { cn } from "../../lib/utils"
 
 export type ConnectionChipState = "live" | "stale" | "disconnected"
 

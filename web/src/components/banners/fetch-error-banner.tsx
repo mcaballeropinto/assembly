@@ -1,8 +1,8 @@
 import { RefreshCw } from "lucide-react"
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { Alert, AlertDescription, AlertTitle } from "../ui/alert"
+import { Button } from "../ui/button"
+import { cn } from "../../lib/utils"
 
 export type FetchErrorBannerProps = {
   error: string | Error | null | undefined

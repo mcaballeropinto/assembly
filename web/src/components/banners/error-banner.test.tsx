@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 
-mock.module("@/components/ui/alert", () => ({
+mock.module("../ui/alert", () => ({
   Alert: ({ className, variant, ...props }: React.HTMLAttributes<HTMLDivElement> & { variant?: string }) => (
     <div role="alert" className={`${variant ?? ""} ${className ?? ""}`} {...props} />
   ),
@@ -9,13 +9,13 @@ mock.module("@/components/ui/alert", () => ({
   AlertDescription: (props: React.HTMLAttributes<HTMLDivElement>) => <div {...props} />,
 }))
 
-mock.module("@/components/ui/button", () => ({
+mock.module("../ui/button", () => ({
   Button: ({ className, variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => (
     <button className={className} {...props} />
   ),
 }))
 
-mock.module("@/lib/utils", () => ({
+mock.module("../../lib/utils", () => ({
   cn: (...inputs: Array<string | false | null | undefined>) => inputs.filter(Boolean).join(" "),
 }))
 

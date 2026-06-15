@@ -1,22 +1,22 @@
 import { Outlet, useRouterState } from "@tanstack/react-router"
 
-import { Button } from "@/components/ui/button"
+import { ErrorBanner } from "./components/banners/error-banner"
+import { FetchErrorBanner } from "./components/banners/fetch-error-banner"
+import { AppShell } from "./components/shell/app-shell"
+import { Button } from "./components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { ErrorBanner } from "@/components/banners/error-banner"
-import { FetchErrorBanner } from "@/components/banners/fetch-error-banner"
+} from "./components/ui/card"
 import {
   mockBannerErrors,
   mockFetchError,
   noopDismiss,
   noopRetry,
-} from "@/lib/dashboard-mock-data"
-import { AppShell } from "@/components/shell/app-shell"
+} from "./lib/dashboard-mock-data"
 
 export default function App() {
   const pathname = useRouterState({

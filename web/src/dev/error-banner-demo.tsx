@@ -1,7 +1,7 @@
-import { ErrorBanner } from "@/components/banners/error-banner"
-import { AppShell } from "@/components/shell/app-shell"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { mockBannerErrors, noopDismiss } from "@/lib/dashboard-mock-data"
+import { ErrorBanner } from "../components/banners/error-banner"
+import { AppShell } from "../components/shell/app-shell"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
+import { mockBannerErrors, noopDismiss } from "../lib/dashboard-mock-data"
 
 export function ErrorBannerDemo() {
   const [critical, warning] = mockBannerErrors

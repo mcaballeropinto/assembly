@@ -1,13 +1,13 @@
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
-import { cn } from "@/lib/utils"
+import { Button } from "../ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover"
+import { Progress } from "../ui/progress"
 import {
   clampPercent,
   findSoonestReset,
   formatLastUpdate,
   formatResetShort,
-} from "@/lib/dashboard-format"
+} from "../../lib/dashboard-format"
+import { cn } from "../../lib/utils"
 
 export type UsageBucket = {
   label: string

@@ -1,7 +1,7 @@
-import { FetchErrorBanner } from "@/components/banners/fetch-error-banner"
-import { AppShell } from "@/components/shell/app-shell"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { mockFetchError, noopRetry } from "@/lib/dashboard-mock-data"
+import { FetchErrorBanner } from "../components/banners/fetch-error-banner"
+import { AppShell } from "../components/shell/app-shell"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
+import { mockFetchError, noopRetry } from "../lib/dashboard-mock-data"
 
 export function FetchErrorBannerDemo() {
   return (

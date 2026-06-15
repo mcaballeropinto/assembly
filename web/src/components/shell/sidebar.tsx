@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronLeft, ChevronRight } from "lucide-react"
 
 import { Badge } from "../ui/badge"
 import { Button } from "../ui/button"
@@ -90,7 +89,7 @@ export function Sidebar() {
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           onClick={() => setCollapsed((current) => !current)}
         >
-          {collapsed ? <ChevronRight /> : <ChevronLeft />}
+          <span aria-hidden="true">{collapsed ? ">" : "<"}</span>
         </Button>
       </div>
 

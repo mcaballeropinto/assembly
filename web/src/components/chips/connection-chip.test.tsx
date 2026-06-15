@@ -1,17 +1,17 @@
 import { describe, expect, mock, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 
-mock.module("@/components/ui/badge", () => ({
+mock.module("../ui/badge", () => ({
   Badge: ({ className, variant, ...props }: React.HTMLAttributes<HTMLDivElement> & { variant?: string }) => (
     <div className={`${variant ?? ""} ${className ?? ""}`} {...props} />
   ),
 }))
 
-mock.module("@/lib/utils", () => ({
+mock.module("../../lib/utils", () => ({
   cn: (...inputs: Array<string | false | null | undefined>) => inputs.filter(Boolean).join(" "),
 }))
 
-mock.module("@/lib/dashboard-format", () => ({
+mock.module("../../lib/dashboard-format", () => ({
   formatLastUpdate: (ms: number | null) => {
     if (ms === null) {
       return "not connected"
