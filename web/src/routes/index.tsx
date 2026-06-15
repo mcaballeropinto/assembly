@@ -2,16 +2,16 @@ import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { createRoute } from "@tanstack/react-router"
 
-import { ActivityFeed } from "@/components/ui/activity-feed"
-import { Card } from "@/components/ui/card"
-import { fetchDashboardState } from "@/lib/api"
+import { ActivityFeed } from "../components/ui/activity-feed"
+import { Card } from "../components/ui/card"
+import { fetchDashboardState } from "../lib/api"
 import {
   filterActivity,
   normalizeActivity,
   parseActivitySearch,
   serializeActivitySearch,
   type ActivityFilterKey,
-} from "@/lib/activity"
+} from "../lib/activity"
 
 import { Route as rootRoute } from "./__root"
 
