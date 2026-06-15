@@ -2049,6 +2049,15 @@ function findWorkpieceWithPath(
   linePath: string,
   fileName: string
 ): { workpiece: Workpiece; source: string; path: string } | null {
+  if (
+    !fileName ||
+    basename(fileName) !== fileName ||
+    fileName.includes("\0") ||
+    !fileName.endsWith(".json")
+  ) {
+    return null;
+  }
+
   const candidates: { dir: string; source: string }[] = [
     { dir: resolve(linePath, "queues", "done"), source: "done" },
     { dir: resolve(linePath, "queues", "error"), source: "error" },
