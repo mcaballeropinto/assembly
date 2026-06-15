@@ -8,6 +8,7 @@ import {
 import { resolve } from "path";
 import { recordEmit } from "./emit-manifest";
 import { InvalidTaskFileError, TaskFileName } from './ids';
+import { InboxPayloadSchema } from "./schemas/inbox-payload";
 
 // Re-export InvalidTaskFileError for backward compatibility
 export { InvalidTaskFileError };
@@ -63,10 +64,10 @@ export function listHeld(linePath: string): HeldTask[] {
     const filePath = resolve(dir, fileName);
     let taskText = "";
     try {
-      const raw = JSON.parse(readFileSync(filePath, "utf-8"));
-      taskText = ((raw as { task?: unknown }).task ?? "") as string;
+      const parsed = InboxPayloadSchema.safeParse(JSON.parse(readFileSync(filePath, "utf-8")));
+      taskText = parsed.success ? parsed.data.task : `schema_violation: ${fileName}`;
     } catch {
-      taskText = "";
+      taskText = `schema_violation: ${fileName}`;
     }
 
     const mtime = Bun.file(filePath).lastModified;

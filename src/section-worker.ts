@@ -29,7 +29,8 @@ import { unlinkStderrLog, moveStderrLogAlongside } from "./stderr-log";
 import { computeRoundsFromProgress } from "./tool-rounds";
 import type { Workpiece, Provider, ProgressCallback, ProgressEvent, HeartbeatConfig, LLMMessage, LLMResult, RepairConfig, FailureClass, OnEventCallback, StationEnvelope, EvalResult } from "./types";
 import { appendTaskEvent, initTaskEventDir, updateTaskEventIndex } from "./task-events";
-import { StationName, asWorkpiece } from "./ids";
+import { StationName } from "./ids";
+import { WorkpieceSchema } from "./schemas/workpiece";
 
 const HEARTBEAT_MS = 30_000;
 
@@ -272,9 +273,9 @@ async function main() {
   const station = await loadStation(stationDir, stationName);
 
   // Load workpiece
-  let workpiece: Workpiece = asWorkpiece<Workpiece>(JSON.parse(
+  let workpiece: Workpiece = WorkpieceSchema.parse(JSON.parse(
     await Bun.file(workpiecePath).text()
-  ));
+  )) as Workpiece;
 
   const provider: Provider = station.provider ?? "claude-code";
   // Default to the abstract "cheap" tier; each provider resolves it to its own
@@ -443,7 +444,13 @@ async function main() {
     flushing = true;
     try {
       const diskData = readFileSync(workpiecePath, 'utf-8');
-      const diskWorkpiece = asWorkpiece<Workpiece>(JSON.parse(diskData));
+      const parsedDiskWorkpiece = WorkpieceSchema.safeParse(JSON.parse(diskData));
+      if (!parsedDiskWorkpiece.success) {
+        console.error(`schema_violation: ${parsedDiskWorkpiece.error.message}`);
+        stopHeartbeat();
+        process.exit(1);
+      }
+      const diskWorkpiece = parsedDiskWorkpiece.data as Workpiece;
       const stationResult = diskWorkpiece.stations[stationName];
 
       if (stationResult?.status === 'done') {

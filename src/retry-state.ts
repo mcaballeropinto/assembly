@@ -14,6 +14,7 @@
 import { writeFileSync, unlinkSync, readFileSync, existsSync, renameSync, readdirSync } from "fs";
 import { resolve } from "path";
 import type { FailureClass } from "./types";
+import { RetryStateSchema } from "./schemas/retry-state";
 
 export interface RetryState {
   retry_count: number;          // 0 when not retrying; 1+ for attempt N+1
@@ -55,8 +56,14 @@ export function readRetryState(workpiecePath: string): RetryState | null {
   try {
     if (!existsSync(sidecar)) return null;
     const raw = readFileSync(sidecar, "utf-8");
-    return JSON.parse(raw) as RetryState;
-  } catch {
+    const parsed = RetryStateSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) {
+      console.warn(`retry_state_schema_violation: ${sidecar}: ${parsed.error.message}`);
+      return null;
+    }
+    return parsed.data;
+  } catch (err) {
+    console.warn(`retry_state_read_error: ${sidecar}: ${(err as Error).message}`);
     return null;
   }
 }

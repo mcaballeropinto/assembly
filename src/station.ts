@@ -3,6 +3,7 @@ import matter from "gray-matter";
 import type { StationConfig, EvalConfig } from "./types";
 import { StationName } from "./ids";
 import { loadMemory } from "./memory";
+import { EvalFrontmatterSchema, StationFrontmatterSchema } from "./schemas/station-frontmatter";
 
 /**
  * Load a station from its folder path.
@@ -22,6 +23,11 @@ export async function loadStation(
 
   const raw = await file.text();
   const { data: frontmatter, content: prompt } = matter(raw);
+  const parsedFrontmatter = StationFrontmatterSchema.safeParse(frontmatter);
+  if (!parsedFrontmatter.success) {
+    throw new Error(`AGENT.md frontmatter schema violation at ${agentPath}: ${parsedFrontmatter.error.message}`);
+  }
+  const data = parsedFrontmatter.data;
 
   // Check for optional EVAL.md
   const evalConfig = await loadEval(stationDir);
@@ -34,14 +40,14 @@ export async function loadStation(
     name,
     dir: stationDir,
     memoryDir,
-    description: frontmatter.description ?? undefined,
-    reads: frontmatter.reads ?? undefined,
-    provider: frontmatter.provider ?? undefined,
-    model: frontmatter.model ?? undefined,
-    tools: frontmatter.tools ?? undefined,
-    script: frontmatter.script ?? undefined,
-    cwd: frontmatter.cwd ?? undefined,
-    guardrails: frontmatter.guardrails ?? undefined,
+    description: data.description ?? undefined,
+    reads: data.reads ?? undefined,
+    provider: data.provider ?? undefined,
+    model: data.model ?? undefined,
+    tools: data.tools ?? undefined,
+    script: data.script ?? undefined,
+    cwd: data.cwd ?? undefined,
+    guardrails: data.guardrails ?? undefined,
     prompt: prompt.trim(),
     eval: evalConfig,
     memory: memoryContent,
@@ -61,13 +67,18 @@ async function loadEval(
 
   const raw = await file.text();
   const { data: frontmatter, content: prompt } = matter(raw);
+  const parsedFrontmatter = EvalFrontmatterSchema.safeParse(frontmatter);
+  if (!parsedFrontmatter.success) {
+    throw new Error(`EVAL.md frontmatter schema violation at ${evalPath}: ${parsedFrontmatter.error.message}`);
+  }
+  const data = parsedFrontmatter.data;
 
   return {
-    provider: frontmatter.provider ?? undefined,
-    model: frontmatter.model ?? undefined,
-    on_fail: frontmatter.on_fail ?? "retry",
-    max_retries: frontmatter.max_retries ?? 1,
+    provider: data.provider ?? undefined,
+    model: data.model ?? undefined,
+    on_fail: data.on_fail ?? "retry",
+    max_retries: data.max_retries ?? 1,
     prompt: prompt.trim(),
-    script: frontmatter.script ?? undefined,
+    script: data.script ?? undefined,
   };
 }

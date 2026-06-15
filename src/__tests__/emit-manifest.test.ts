@@ -127,6 +127,15 @@ describe("manifest persistence", () => {
     // Bad line should be silently dropped, not crash.
     expect(isEmitted(workDir, "bad")).toBe(false);
   });
+
+  it("skips schema-invalid manifest lines", () => {
+    writeFileSync(
+      resolve(workDir, ".emitted.jsonl"),
+      `{"filename":"good.json","source":"fanout","ts":"2026-01-01T00:00:00Z"}\n{"filename":"bad.json","source":"bogus","ts":"2026-01-01T00:00:00Z"}\n`
+    );
+    expect(isEmitted(workDir, "good.json")).toBe(true);
+    expect(isEmitted(workDir, "bad.json")).toBe(false);
+  });
 });
 
 describe("quarantineUnverified", () => {

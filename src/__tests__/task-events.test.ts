@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach, afterAll } from "bun:test";
 import { resolve } from "path";
-import { mkdirSync, rmSync, existsSync } from "fs";
+import { mkdirSync, rmSync, existsSync, appendFileSync, writeFileSync } from "fs";
 import {
   appendTaskEvent,
   readTaskEvents,
@@ -93,6 +93,37 @@ describe("appendTaskEvent + readTaskEvents round-trip", () => {
     expect(page.total).toBe(0);
     expect(page.has_more).toBe(false);
     expect(page.next_cursor).toBe(0);
+  });
+
+  test("readTaskEvents skips schema-invalid JSONL lines", () => {
+    const wpId = "wp-invalid-line";
+    initTaskEventDir(LINE_PATH, wpId);
+    const eventsPath = resolve(LINE_PATH, "queues", "task-events", wpId, "station-a.events.jsonl");
+    appendFileSync(eventsPath, JSON.stringify({
+      ts: "2026-06-14T00:00:00.000Z",
+      station: "station-a",
+      kind: "lifecycle",
+      summary: "Started",
+      seq: 1,
+    }) + "\n");
+    appendFileSync(eventsPath, JSON.stringify({
+      ts: "2026-06-14T00:00:01.000Z",
+      station: "station-a",
+      kind: "bogus",
+      summary: "Bad",
+      seq: 2,
+    }) + "\n");
+
+    const page = readTaskEvents(LINE_PATH, wpId, "station-a");
+    expect(page.events.length).toBe(1);
+    expect(page.events[0].summary).toBe("Started");
+  });
+
+  test("listTaskEventStations returns [] for schema-invalid index", () => {
+    const wpId = "wp-invalid-index";
+    initTaskEventDir(LINE_PATH, wpId);
+    writeFileSync(resolve(LINE_PATH, "queues", "task-events", wpId, "index.json"), JSON.stringify({ stations: [{ name: "s" }] }));
+    expect(listTaskEventStations(LINE_PATH, wpId)).toEqual([]);
   });
 });
 

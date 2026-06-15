@@ -12,6 +12,7 @@ export type { StationMeta, TaskEventsPage, TaskEvent } from "./task-events";
 import { readDismissed } from "./error-dismiss";
 import { readRetryState } from "./retry-state";
 import { listHeld } from "./held";
+import { WorkpieceSchema } from "./schemas/workpiece";
 
 // ─── Health State ──────────────────────────────────────────────────
 
@@ -441,7 +442,8 @@ export async function getFullState(linePath: string) {
     const files = listQueue(doneDir).slice(-10).reverse();
     for (const f of files) {
       try {
-        const wp = JSON.parse(readFileSync(f, "utf-8")) as Workpiece;
+        const wp = readWorkpieceSafe(f);
+        if (!wp) continue;
         accumulateWorkpieceCost(wp);
         const stationVals = Object.values(wp.stations);
         const allStarted = stationVals.map(s => s.started_at).filter(Boolean).sort();
@@ -476,7 +478,30 @@ export async function getFullState(linePath: string) {
     const files = listQueue(errorDir).slice(-20).reverse(); // load extra to have enough after splitting
     for (const f of files) {
       try {
-        const wp = JSON.parse(readFileSync(f, "utf-8")) as Workpiece;
+        const wp = readWorkpieceSafe(f);
+        if (!wp) {
+          const fName = basename(f);
+          const errItem = {
+            id: fName.replace(/\.json$/, ""),
+            fileName: fName,
+            task: "Schema violation",
+            failed: [{ station: "schema", error: "schema_violation" }],
+            finished_at: fileMtimeIso(f),
+            duration_ms: null,
+            outcome: "failed",
+            errorSummary: "schema_violation",
+            stations: { schema: { status: "failed", summary: "schema_violation" } },
+          };
+          if (dismissedMap[fName]) {
+            dismissedErrors.push({
+              ...errItem,
+              dismissed_at: dismissedMap[fName].dismissed_at,
+            });
+          } else {
+            activeErrors.push(errItem);
+          }
+          continue;
+        }
         accumulateWorkpieceCost(wp);
         const failedStations = Object.entries(wp.stations)
           .filter(([, v]) => v.status === "failed")
@@ -539,7 +564,8 @@ export async function getFullState(linePath: string) {
     const files = listQueue(reviewDir).slice(-10).reverse();
     for (const f of files) {
       try {
-        const wp = JSON.parse(readFileSync(f, "utf-8")) as Workpiece;
+        const wp = readWorkpieceSafe(f);
+        if (!wp) continue;
         accumulateWorkpieceCost(wp);
         const escalatedStations = Object.entries(wp.stations)
           .filter(([, v]) => v.status === "escalated")
@@ -639,7 +665,8 @@ export function getStationTimings(
     if (processingFiles.length > 0) {
       try {
         const latestProcessingFile = processingFiles[processingFiles.length - 1];
-        const wp = JSON.parse(readFileSync(latestProcessingFile, "utf-8")) as Workpiece;
+        const wp = readWorkpieceSafe(latestProcessingFile);
+        if (!wp) continue;
         const sr = wp.stations[name as any];
         // Always return running:true when a processing file exists, even if started_at
         // hasn't been written yet (brief window between file-move and first envelope update).
@@ -673,7 +700,8 @@ export function getStationTimings(
     const outputFiles = listQueue(outputDir);
     if (outputFiles.length > 0) {
       try {
-        const wp = JSON.parse(readFileSync(outputFiles[outputFiles.length - 1], "utf-8")) as Workpiece;
+        const wp = readWorkpieceSafe(outputFiles[outputFiles.length - 1]);
+        if (!wp) continue;
         const sr = wp.stations[name as any];
         if (sr?.started_at && sr?.finished_at) {
           const durationMs = new Date(sr.finished_at).getTime() - new Date(sr.started_at).getTime();
@@ -689,7 +717,8 @@ export function getStationTimings(
       const doneFiles = listQueue(doneDir).slice(-5).reverse();
       for (const f of doneFiles) {
         try {
-          const wp = JSON.parse(readFileSync(f, "utf-8")) as Workpiece;
+          const wp = readWorkpieceSafe(f);
+          if (!wp) continue;
           const sr = wp.stations[name as any];
           if (sr?.started_at && sr?.finished_at) {
             const durationMs = new Date(sr.finished_at).getTime() - new Date(sr.started_at).getTime();
@@ -792,7 +821,8 @@ export async function getHistory(
   const runs: HistoryRun[] = [];
   for (const c of selected) {
     try {
-      const wp = JSON.parse(readFileSync(c.path, "utf-8")) as Workpiece;
+      const wp = readWorkpieceSafe(c.path);
+      if (!wp) continue;
       const stationsOut: Record<string, HistoryStationCell> = {};
       for (const name of sequence) {
         const sr = wp.stations?.[name as any];
@@ -1031,7 +1061,8 @@ export interface KanbanState {
 
 function readWorkpieceSafe(path: string): Workpiece | null {
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as Workpiece;
+    const parsed = WorkpieceSchema.safeParse(JSON.parse(readFileSync(path, "utf-8")));
+    return parsed.success ? (parsed.data as Workpiece) : null;
   } catch {
     return null;
   }
@@ -1910,7 +1941,8 @@ export function computeFlowMetrics(linePath: string, sequence: string[]): FlowMe
   function computeTimings(files: FileEntry[], cycleTimes: number[], waitTimes: number[]) {
     for (const f of files) {
       try {
-        const wp = JSON.parse(readFileSync(f.path, "utf-8")) as Workpiece;
+        const wp = readWorkpieceSafe(f.path);
+        if (!wp) continue;
         if (!wp.stations) continue;
 
         const stationVals = Object.values(wp.stations);
@@ -2041,7 +2073,8 @@ export async function findWorkpiece(
     const path = resolve(dir, fileName);
     if (existsSync(path)) {
       try {
-        const wp = JSON.parse(readFileSync(path, "utf-8")) as Workpiece;
+        const wp = readWorkpieceSafe(path);
+        if (!wp) continue;
         return { ...wp, _source: source };
       } catch {}
     }
