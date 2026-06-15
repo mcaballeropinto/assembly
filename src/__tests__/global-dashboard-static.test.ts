@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { resolve } from "path";
-import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-dashboard-static-${Date.now()}-${process.pid}`);
 const LINE_DIR = resolve(TEMP_DIR, "lines");
@@ -96,15 +96,16 @@ describe("dashboard static bundle serving", () => {
     expect(body.version).toBe("2026.05.24");
   });
 
-  test("falls back to legacy embedded dashboard when index.html is absent", async () => {
-    if (existsSync(INDEX_PATH)) unlinkSync(INDEX_PATH);
+  test("returns 500 when built dashboard index.html is absent", async () => {
+    rmSync(INDEX_PATH, { force: true });
 
     const res = await request("/");
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type") ?? "").toContain("text/html");
-    const html = await res.text();
-    expect(html).toContain("Global Dashboard");
-    expect(html).toContain("usage-compact-mount");
-    expect(html).toContain("loadUsage");
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type") ?? "").toContain("text/plain");
+    const body = await res.text();
+    expect(body).toContain("Dashboard web build not found");
+    expect(body).not.toContain("Global Dashboard");
+    expect(body).not.toContain("usage-compact-mount");
+    expect(body).not.toContain("loadUsage");
   });
 });

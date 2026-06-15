@@ -22,7 +22,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "gray-matter": "^4.0.3",
-    "morphdom": "^2.7.4",
     "yaml": "^2.7.0",
     "zod": "^3.25.76"
   },
