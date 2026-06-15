@@ -3,6 +3,7 @@ import {
   createRouter,
   type RouterHistory,
 } from "@tanstack/react-router"
+import { lazy, Suspense } from "react"
 
 import { ConnectionChipDemo } from "./dev/connection-chip-demo"
 import { ErrorBannerDemo } from "./dev/error-banner-demo"
@@ -14,9 +15,14 @@ import {
   type ActivityFilterKey,
 } from "./lib/activity"
 import { Route as rootRoute } from "./routes/__root"
-import { Route as indexRoute } from "./routes/index"
 import { Route as lineRoute } from "./routes/line.$name"
 import { Route as lineKanbanRoute } from "./routes/line.$name.kanban"
+
+const OverviewRoute = lazy(() =>
+  import("./routes/index").then((module) => ({
+    default: module.OverviewRoute,
+  })),
+)
 
 export interface DashboardSearch {
   wp?: string
@@ -93,6 +99,20 @@ const fetchErrorBannerRoute = createRoute({
   path: "/dev/fetch-error-banner",
   component: FetchErrorBannerDemo,
 })
+
+const indexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/",
+  component: OverviewRouteLoader,
+})
+
+function OverviewRouteLoader() {
+  return (
+    <Suspense fallback={null}>
+      <OverviewRoute />
+    </Suspense>
+  )
+}
 
 const dashboardRouteTree = rootRoute.addChildren([
   indexRoute,

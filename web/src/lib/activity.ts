@@ -1,4 +1,4 @@
-import type { ApiStateResponse } from '@/lib/api';
+import type { ApiStateResponse } from './api';
 
 export type ActivityFilterKey =
   | 'station_done'

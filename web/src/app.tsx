@@ -1,12 +1,31 @@
-import { OverviewRoute } from "@/routes"
+import { Outlet, useSearch } from "@tanstack/react-router"
+
+import { WorkpieceDrawer } from "./components/drawer/workpiece-drawer"
+import { Shell } from "./components/shell/shell"
 
 export function App() {
+  const search = useSearch({ strict: false }) as {
+    wp?: unknown
+    wpline?: unknown
+    line?: unknown
+  }
+  const lineName =
+    typeof search.wpline === "string" && search.wpline.length > 0
+      ? search.wpline
+      : typeof search.line === "string" && search.line.length > 0
+        ? search.line
+        : undefined
+
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-screen-2xl px-6 py-6 lg:px-8">
-        <OverviewRoute />
-      </div>
-    </main>
+    <>
+      <Shell>
+        <Outlet />
+        {search.wp && !lineName ? (
+          <span className="sr-only">missing line</span>
+        ) : null}
+      </Shell>
+      <WorkpieceDrawer lineName={lineName} />
+    </>
   )
 }
 

@@ -15,8 +15,8 @@ import {
   Zap,
 } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Button } from "../button"
+import { Card } from "../card"
 import {
   Command,
   CommandEmpty,
@@ -24,19 +24,19 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@/components/ui/command"
+} from "../command"
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover"
-import { ScrollArea } from "@/components/ui/scroll-area"
+} from "../popover"
+import { ScrollArea } from "../scroll-area"
 import {
   ACTIVITY_FILTERS,
   type ActivityFilterKey,
   type DashboardActivityEvent,
-} from "@/lib/activity"
-import { cn } from "@/lib/utils"
+} from "../../../lib/activity"
+import { cn } from "../../../lib/utils"
 
 interface ActivityFeedProps {
   items: DashboardActivityEvent[]
@@ -96,6 +96,8 @@ export function ActivityFeed({
           >
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
               const item = items[virtualRow.index]
+              if (!item) return null
+
               return (
                 <li
                   key={item.id}
