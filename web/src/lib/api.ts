@@ -1,5 +1,4 @@
 import type {
-  ApiErrorResponse,
   ApiTaskEventsResponse,
   ApiTaskEventStationsResponse,
   ApiWorkpieceResponse,
@@ -168,8 +167,6 @@ type JsonError = {
   message?: unknown
 }
 
-export type ApiWorkpieceFetchResponse = ApiWorkpieceResponse | ApiErrorResponse
-
 export async function fetchJson<T>(
   url: string,
   init?: RequestInit
@@ -206,14 +203,14 @@ function enc(value: string): string {
 export function fetchWorkpiece(
   lineName: string,
   fileName: string
-): Promise<ApiWorkpieceFetchResponse> {
-  return fetchJson<ApiWorkpieceFetchResponse>(
+): Promise<ApiWorkpieceResponse> {
+  return fetchJson<ApiWorkpieceResponse>(
     `/api/workpiece/${enc(lineName)}/${enc(fileName)}`
   )
 }
 
 export function isApiError(
-  value: ApiWorkpieceFetchResponse
+  value: ApiWorkpieceResponse
 ): value is { error: string } {
   return (
     typeof value === "object" &&
