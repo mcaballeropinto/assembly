@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react-dom/test-utils";
 import { createRoot } from "react-dom/client";
-import type { KanbanState } from "@/lib/api";
+import type { KanbanState } from "../../lib/api";
 import { KanbanBoard } from "./kanban-board";
 
 try {

@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react-dom/test-utils";
 import { createRoot } from "react-dom/client";
-import type { KanbanColumn as ApiKanbanColumn } from "@/lib/api";
+import type { KanbanColumn as ApiKanbanColumn } from "../../lib/api";
+import { KanbanBoardProvider } from "../ui/kanban-board/kanban";
 import { KanbanColumn } from "./kanban-column";
 
 try {
@@ -16,7 +17,7 @@ function render(element: React.ReactElement) {
   document.body.appendChild(container);
   const root = createRoot(container);
   act(() => {
-    root.render(element);
+    root.render(<KanbanBoardProvider>{element}</KanbanBoardProvider>);
   });
   return { container, root };
 }
@@ -70,15 +71,17 @@ describe("KanbanColumn", () => {
       (container.querySelector("[aria-label='Held column actions']") as HTMLElement).click();
     });
     await act(async () => {
-      (document.body.textContent?.includes("Release all") ? document.body : container)
-        .querySelectorAll("[role='menuitem']")[0]
-        .dispatchEvent(new Event("click", { bubbles: true }));
+      (
+        (document.body.textContent?.includes("Release all") ? document.body : container)
+          .querySelectorAll("[role='menuitem']")[0] as HTMLElement
+      ).click();
     });
 
     expect(released).toBe(0);
     expect(document.body.textContent).toContain("Release all held tasks?");
 
-    const confirm = Array.from(document.body.querySelectorAll("button")).find(
+    const dialog = document.body.querySelector("[role='alertdialog']") as HTMLElement;
+    const confirm = Array.from(dialog.querySelectorAll("button")).find(
       (button) => button.textContent === "Release all"
     ) as HTMLButtonElement;
 

@@ -20,15 +20,7 @@ import {
 } from "react"
 import { createPortal } from "react-dom"
 
-import { Button, buttonVariants } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
+import { cn } from "../../../lib/utils"
 
 export type KanbanBoardDndMonitorEventHandler = {
   onDragStart?: (activeId: string) => void
@@ -437,7 +429,12 @@ export function KanbanBoardColumn({
 }
 
 export function KanbanBoardColumnSkeleton() {
-  return <Skeleton className="h-full w-64 flex-shrink-0 rounded-lg" />
+  return (
+    <div
+      className="h-full w-64 flex-shrink-0 animate-pulse rounded-lg bg-muted"
+      aria-hidden="true"
+    />
+  )
 }
 
 export function KanbanBoardColumnHeader({
@@ -467,12 +464,14 @@ export function KanbanBoardColumnTitle({
 export function KanbanBoardColumnIconButton({
   className,
   ...props
-}: ComponentProps<typeof Button>) {
+}: ComponentProps<"button">) {
   return (
-    <Button
-      className={cn("size-7", className)}
-      size="icon"
-      variant="ghost"
+    <button
+      className={cn(
+        "inline-flex size-7 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+        className
+      )}
+      type="button"
       {...props}
     />
   )
@@ -570,9 +569,16 @@ export function KanbanBoardColumnFooter({
 export function KanbanBoardColumnButton({
   className,
   ...props
-}: ComponentProps<typeof Button>) {
+}: ComponentProps<"button">) {
   return (
-    <Button className={cn("w-full justify-start", className)} {...props} />
+    <button
+      className={cn(
+        "inline-flex h-9 w-full items-center justify-start gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+        className
+      )}
+      type="button"
+      {...props}
+    />
   )
 }
 
@@ -679,7 +685,7 @@ export function KanbanBoardCardTextarea({
   )
 
   return (
-    <Textarea
+    <textarea
       className={cn("resize-none overflow-hidden", className)}
       onChange={handleChange}
       ref={internalRef}
@@ -737,8 +743,7 @@ export function KanbanBoardCardButton({
   const button = (
     <div
       className={cn(
-        buttonVariants({ size: "icon", variant: "ghost" }),
-        "size-5 border border-border hover:cursor-default [&_svg]:size-3.5",
+        "inline-flex size-5 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground hover:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&_svg]:size-3.5",
         className
       )}
       onKeyDown={handleKeyDown}
@@ -749,16 +754,9 @@ export function KanbanBoardCardButton({
     />
   )
 
-  if (!tooltip) {
-    return button
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent align="center" side="bottom">
-        {tooltip}
-      </TooltipContent>
-    </Tooltip>
-  )
+  return tooltip ? (
+    <span title={tooltip}>
+      {button}
+    </span>
+  ) : button
 }

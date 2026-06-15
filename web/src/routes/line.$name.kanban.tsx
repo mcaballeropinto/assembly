@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRoute, useNavigate } from "@tanstack/react-router";
-import { getLineKanban, releaseHeldTasks } from "@/lib/api";
-import { KanbanBoard, KanbanBoardSkeleton } from "@/components/kanban/kanban-board";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { getLineKanban, releaseHeldTasks } from "../lib/api";
+import { KanbanBoard, KanbanBoardSkeleton } from "../components/kanban/kanban-board";
 import { Route as lineRoute } from "./line.$name";
 
 export const Route = createRoute({
@@ -41,19 +40,31 @@ function LineKanbanRoute() {
           <h2 className="text-2xl font-semibold tracking-tight">{name}</h2>
           <p className="mt-1 text-sm text-muted-foreground">Kanban</p>
         </div>
-        <Tabs
-          value="kanban"
-          onValueChange={(value) => {
-            if (value === "list") {
-              navigate({ to: "/line/$name", params: { name } });
-            }
-          }}
+        <div
+          role="tablist"
+          aria-label="Line view"
+          className="inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground"
         >
-          <TabsList>
-            <TabsTrigger value="list">List</TabsTrigger>
-            <TabsTrigger value="kanban">Kanban</TabsTrigger>
-          </TabsList>
-        </Tabs>
+          <button
+            type="button"
+            role="tab"
+            aria-selected="false"
+            className="inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-all hover:text-foreground"
+            onClick={() => {
+              navigate({ to: "/line/$name", params: { name } });
+            }}
+          >
+            List
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected="true"
+            className="inline-flex items-center justify-center whitespace-nowrap rounded-md bg-background px-3 py-1 text-sm font-medium text-foreground shadow-sm"
+          >
+            Kanban
+          </button>
+        </div>
       </div>
 
       {releaseAll.isError && (

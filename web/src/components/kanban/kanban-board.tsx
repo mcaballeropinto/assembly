@@ -1,18 +1,10 @@
 import { Info } from "lucide-react";
-import type { KanbanColumn as ApiKanbanColumn, KanbanState } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import type { KanbanColumn as ApiKanbanColumn, KanbanState } from "../../lib/api";
 import {
   KanbanBoard as KanbanBoardPrimitive,
   KanbanBoardProvider,
-} from "@/components/ui/kanban-board/kanban";
-import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
+} from "../ui/kanban-board/kanban";
+import { cn } from "../../lib/utils";
 import { KanbanColumn } from "./kanban-column";
 
 interface KanbanBoardProps {
@@ -50,15 +42,14 @@ function groupColumns(columns: ApiKanbanColumn[]) {
 function retryChip(count: number, exhausted = false) {
   if (count <= 0) return null;
   return (
-    <Badge
-      variant="outline"
+    <span
       className={cn(
-        "shrink-0 text-[11px]",
+        "inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold",
         exhausted ? "text-destructive" : "text-amber-700 dark:text-amber-400"
       )}
     >
       {exhausted ? "\u2717" : "\u21ba"} {count}
-    </Badge>
+    </span>
   );
 }
 
@@ -109,33 +100,25 @@ export function KanbanBoard({
                 <span className="min-w-0 flex-1 truncate text-sm font-semibold">
                   {group.station}
                 </span>
-                <Badge variant="secondary" className="shrink-0 text-xs">
+                <span className="inline-flex shrink-0 items-center rounded-full border border-transparent bg-secondary px-2.5 py-0.5 text-xs font-semibold text-secondary-foreground">
                   {count}
-                </Badge>
+                </span>
                 {retryChip(retrying)}
                 {retryChip(exhausted, true)}
                 {meta?.description && (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label={`${group.station} info`}
-                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
-                        >
-                          <Info className="h-4 w-4" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        <div className="space-y-1">
-                          <p>{meta.description}</p>
-                          {meta.provider && <p>Provider: {meta.provider}</p>}
-                          {meta.model && <p>Model: {meta.model}</p>}
-                          {meta.timeout && <p>Timeout: {meta.timeout}s</p>}
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <button
+                    type="button"
+                    aria-label={`${group.station} info`}
+                    title={[
+                      meta.description,
+                      meta.provider ? `Provider: ${meta.provider}` : "",
+                      meta.model ? `Model: ${meta.model}` : "",
+                      meta.timeout ? `Timeout: ${meta.timeout}s` : "",
+                    ].filter(Boolean).join("\n")}
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+                  >
+                    <Info className="h-4 w-4" />
+                  </button>
                 )}
               </div>
               <div className="grid min-h-0 flex-1 grid-cols-3 gap-3 p-3">
@@ -162,12 +145,12 @@ export function KanbanBoardSkeleton() {
       {[0, 1, 2, 3].map((item) => (
         <div key={item} className="w-72 flex-shrink-0 rounded-lg border bg-card">
           <div className="p-3 border-b">
-            <Skeleton className="h-4 w-24" />
+            <div className="h-4 w-24 animate-pulse rounded bg-muted" />
           </div>
           <div className="space-y-2 p-2">
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-28 w-full" />
+            <div className="h-24 w-full animate-pulse rounded bg-muted" />
+            <div className="h-20 w-full animate-pulse rounded bg-muted" />
+            <div className="h-28 w-full animate-pulse rounded bg-muted" />
           </div>
         </div>
       ))}

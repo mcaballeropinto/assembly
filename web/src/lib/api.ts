@@ -1,25 +1,175 @@
-import type {
-  ApiStateResponse,
-  ApiTaskEventsResponse,
-  ApiTaskEventStationsResponse,
-  ApiWorkpieceResponse,
-  ApiWorkpieceSidecarsResponse,
-  KanbanCard,
-  KanbanState,
-} from "../../../src/dashboard-api"
+export type KanbanLane = "inbox" | "processing" | "output"
 
-export type {
-  KanbanLane,
-  KanbanCardState,
-  KanbanCard,
-  KanbanColumn,
-  StationFreshnessState,
-  StationFreshness,
-  StationStatusState,
-  StationStatus,
-  StationTooltipMeta,
-  KanbanState,
-} from "../../../src/dashboard-api"
+export type KanbanCardState =
+  | "held"
+  | "waiting"
+  | "running"
+  | "evaluating"
+  | "retrying"
+  | "routed"
+  | "done"
+  | "failed"
+  | "escalated"
+
+export interface KanbanCard {
+  id: string
+  fileName: string
+  title: string
+  preview?: string
+  state: KanbanCardState
+  column: string
+  station?: string
+  lane?: KanbanLane
+  enteredColumnAt?: string | null
+  stationStartedAt?: string | null
+  duration_ms?: number | null
+  outcome?: string
+  failedStation?: string
+  retries?: number
+  retry?: {
+    retry_count: number
+    max_retries?: number
+    in_backoff?: boolean
+    exhausted?: boolean
+    backoff_until?: string
+  }
+}
+
+export interface KanbanColumn {
+  key: string
+  title: string
+  tooltip?: string
+  count: number
+  cards: KanbanCard[]
+  station?: string
+  lane?: KanbanLane
+  wipLimit?: number
+  retrying_count?: number
+  exhausted_count?: number
+}
+
+export type StationFreshnessState =
+  | "fresh"
+  | "stale"
+  | "disconnected"
+  | "completed"
+
+export interface StationFreshness {
+  state: StationFreshnessState
+  last_updated_at: string | null
+  silent_s: number
+  icon: string
+  label: string
+}
+
+export type StationStatusState =
+  | "running"
+  | "blocked"
+  | "errored"
+  | "idle"
+  | "muted"
+
+export interface StationStatus {
+  state: StationStatusState
+  label: string
+  icon: string
+  itemCount: number
+}
+
+export interface StationTooltipMeta {
+  description?: string
+  provider?: string
+  model?: string
+  timeout?: number
+}
+
+export interface KanbanState {
+  line: string
+  sequence: string[]
+  lastUpdated: string
+  columns: KanbanColumn[]
+  stationStatuses?: Record<string, StationStatus>
+  stationFreshness?: Record<string, StationFreshness>
+  stationMeta?: Record<string, StationTooltipMeta>
+}
+
+export interface ApiStateResponse {
+  lines: Array<{
+    name: string
+    path: string
+    status: "running" | "error"
+    error?: string
+    startedAt: string
+    state: {
+      line: string
+      description?: string
+      lineQueue?: {
+        inbox: number
+        done: number
+        error: number
+        errorActive: number
+        review: number
+      }
+      health?: { state: string; count: number; detail: string }
+      throughput?: { last_1h: number; last_24h: number }
+      sessionTotals?: {
+        cost_usd: number
+        tokens_in: number
+        tokens_out: number
+      }
+      timestamp: string
+    } | null
+  }>
+  totals: {
+    lines: number
+    linesRunning: number
+    linesErrored: number
+    totalInbox: number
+    totalDone: number
+    totalErrors: number
+    totalReview: number
+    totalCostUsd: number
+    totalThroughput1h: number
+    totalThroughput24h: number
+  }
+  timestamp: string
+  version: string
+}
+
+export interface ApiWorkpieceResponse {
+  id?: string
+  task?: string
+  input?: unknown
+  status?: string
+  stations?: Record<string, unknown>
+  [key: string]: unknown
+  _source?: string
+  _activity?: unknown[]
+  _taskEventStations?: Array<Record<string, unknown>>
+}
+
+export interface ApiTaskEventStationsResponse {
+  stations: Array<Record<string, unknown>>
+}
+
+export interface ApiTaskEventsResponse {
+  events: Array<Record<string, unknown>>
+  nextCursor?: number | null
+  hasMore?: boolean
+}
+
+export interface ApiSidecarTail {
+  content: string
+  exists: boolean
+  truncated: boolean
+  bytes: number
+}
+
+export interface ApiWorkpieceSidecarsResponse {
+  stdout: ApiSidecarTail
+  stderr: ApiSidecarTail
+  retry: ApiSidecarTail
+}
 
 export interface ApiErrorResponse {
   error: string
