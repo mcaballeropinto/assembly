@@ -3,13 +3,13 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import type React from "react"
 import { createRoot, type Root } from "react-dom/client"
 
-mock.module("@/components/ui/button", () => ({
+mock.module("../ui/button", () => ({
   Button: ({ className, asChild: _asChild, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { asChild?: boolean }) => (
     <button className={className} {...props} />
   ),
 }))
 
-mock.module("@/components/ui/popover", () => ({
+mock.module("../ui/popover", () => ({
   Popover: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   PopoverTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   PopoverContent: ({ className, children }: { className?: string; children: React.ReactNode }) => (
@@ -17,17 +17,17 @@ mock.module("@/components/ui/popover", () => ({
   ),
 }))
 
-mock.module("@/components/ui/progress", () => ({
+mock.module("../ui/progress", () => ({
   Progress: ({ value, className }: { value?: number | null; className?: string }) => (
     <div className={className} role="progressbar" aria-valuenow={value ?? 0} />
   ),
 }))
 
-mock.module("@/lib/utils", () => ({
+mock.module("../../lib/utils", () => ({
   cn: (...inputs: Array<string | false | null | undefined>) => inputs.filter(Boolean).join(" "),
 }))
 
-mock.module("@/lib/dashboard-format", () => ({
+mock.module("../../lib/dashboard-format", () => ({
   clampPercent: (value: number) => Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0)),
   findSoonestReset: (buckets: Array<{ resets_at: string | null }>) =>
     buckets

@@ -3,9 +3,9 @@ import { useRouterState } from "@tanstack/react-router"
 import {
   ConnectionChip,
   type ConnectionChipProps,
-} from "@/components/chips/connection-chip"
-import { UsageChip, type UsageChipProps } from "@/components/chips/usage-chip"
-import { Badge } from "@/components/ui/badge"
+} from "../chips/connection-chip"
+import { UsageChip, type UsageChipProps } from "../chips/usage-chip"
+import { Badge } from "../ui/badge"
 
 export type HeaderProps = {
   connection?: ConnectionChipProps

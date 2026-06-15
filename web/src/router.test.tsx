@@ -1,22 +1,22 @@
 import { describe, expect, mock, test } from "bun:test"
 
-mock.module("@/app", () => ({
+mock.module("./app", () => ({
   default: () => null,
 }))
 
-mock.module("@/dev/connection-chip-demo", () => ({
+mock.module("./dev/connection-chip-demo", () => ({
   ConnectionChipDemo: () => null,
 }))
 
-mock.module("@/dev/usage-chip-demo", () => ({
+mock.module("./dev/usage-chip-demo", () => ({
   UsageChipDemo: () => null,
 }))
 
-mock.module("@/dev/error-banner-demo", () => ({
+mock.module("./dev/error-banner-demo", () => ({
   ErrorBannerDemo: () => null,
 }))
 
-mock.module("@/dev/fetch-error-banner-demo", () => ({
+mock.module("./dev/fetch-error-banner-demo", () => ({
   FetchErrorBannerDemo: () => null,
 }))
 

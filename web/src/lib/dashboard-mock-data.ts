@@ -1,6 +1,6 @@
-import type { DashboardErrorBannerItem } from "@/components/banners/error-banner"
-import type { ConnectionChipProps } from "@/components/chips/connection-chip"
-import type { UsageChipProps } from "@/components/chips/usage-chip"
+import type { DashboardErrorBannerItem } from "../components/banners/error-banner"
+import type { ConnectionChipProps } from "../components/chips/connection-chip"
+import type { UsageChipProps } from "../components/chips/usage-chip"
 
 function fromNow(ms: number): string {
   return new Date(Date.now() + ms).toISOString()

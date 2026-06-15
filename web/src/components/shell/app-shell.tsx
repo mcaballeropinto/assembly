@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 
-import { Header } from "@/components/shell/header"
-import { mockConnectionStates, mockUsageWarn } from "@/lib/dashboard-mock-data"
+import { mockConnectionStates, mockUsageWarn } from "../../lib/dashboard-mock-data"
+import { Header } from "./header"
 
 export type AppShellProps = {
   children: ReactNode

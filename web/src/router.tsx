@@ -4,11 +4,11 @@ import {
   createRouter,
 } from "@tanstack/react-router"
 
-import App from "@/app"
-import { ConnectionChipDemo } from "@/dev/connection-chip-demo"
-import { ErrorBannerDemo } from "@/dev/error-banner-demo"
-import { FetchErrorBannerDemo } from "@/dev/fetch-error-banner-demo"
-import { UsageChipDemo } from "@/dev/usage-chip-demo"
+import App from "./app"
+import { ConnectionChipDemo } from "./dev/connection-chip-demo"
+import { ErrorBannerDemo } from "./dev/error-banner-demo"
+import { FetchErrorBannerDemo } from "./dev/fetch-error-banner-demo"
+import { UsageChipDemo } from "./dev/usage-chip-demo"
 
 const rootRoute = createRootRoute({
   component: App,

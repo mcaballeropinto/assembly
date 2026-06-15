@@ -1,7 +1,7 @@
-import { ConnectionChip } from "@/components/chips/connection-chip"
-import { AppShell } from "@/components/shell/app-shell"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { mockConnectionStates } from "@/lib/dashboard-mock-data"
+import { ConnectionChip } from "../components/chips/connection-chip"
+import { AppShell } from "../components/shell/app-shell"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
+import { mockConnectionStates } from "../lib/dashboard-mock-data"
 
 export function ConnectionChipDemo() {
   return (
