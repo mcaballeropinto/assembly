@@ -1,17 +1,18 @@
 import { appendFileSync, existsSync, readFileSync } from "fs";
-import { basename, resolve } from "path";
+import { basename, relative, resolve } from "path";
 import { listQueue, watchFolder, type WatchFolderStop } from "../queue";
 import { loadImproverConfig, isHardExcluded, type ImproverConfig } from "./config";
 import { ImproverState, assessedKey, type RequeueItem } from "./state";
 import {
   assessWorkpiece,
   guardedDownstreamSuccessVerdict,
+  normalizeSlug,
   VerdictParseError,
   type AssessmentContext,
   type AssessmentVerdict,
 } from "./assess";
 import { enqueueDevTask, devTaskStillPresent, devTaskTerminalBucket, requeueSource } from "./devline";
-import { sendDiscord } from "./discord";
+import { buildDiagnosisReportMessage, sendDiscord, type DiagnosisReportAction } from "./discord";
 
 /**
  * The improver watcher — Assembly's self-improvement loop.
@@ -282,6 +283,12 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
     parseFailures.delete(key);
 
     if (!verdict.should_improve || verdict.confidence !== "high") {
+      await postDiagnosisReportOnce(c, fileName, wp, verdict, {
+        text:
+          verdict.confidence === "low" || verdict.confidence === "medium"
+            ? "deferred due to low confidence/manual-only diagnosis; no automatic action taken"
+            : "no automatic action taken: should_improve=false",
+      });
       mark("no_action", wpId);
       log("no_action", {
         line: c.lineName,
@@ -310,6 +317,9 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
 
     const openForIssue = state.findOpenByIssue(issueKey);
     if (openForIssue) {
+      await postDiagnosisReportOnce(c, fileName, wp, verdict, {
+        text: `deduped as already handled by proposal ${openForIssue.proposal_id}; no new repair task enqueued`,
+      });
       state.appendEvent({
         type: "recurrence",
         issue_key: issueKey,
@@ -323,6 +333,9 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
     }
 
     if (state.proposalCountForIssue(issueKey) >= config.maxProposalsPerIssue) {
+      await postDiagnosisReportOnce(c, fileName, wp, verdict, {
+        text: `capped due to repeated attempts (${config.maxProposalsPerIssue}/${config.maxProposalsPerIssue}); no automatic action taken`,
+      });
       state.appendEvent({
         type: "recurrence",
         issue_key: issueKey,
@@ -344,6 +357,9 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
     const open = state.openProposals();
     const openForLine = open.filter((p) => p.source_line === c.lineName).length;
     if (open.length >= config.maxOpenProposals || openForLine >= config.maxOpenPerLine) {
+      await postDiagnosisReportOnce(c, fileName, wp, verdict, {
+        text: `skipped due to safety gate: proposal cap hit (${open.length}/${config.maxOpenProposals}, ${openForLine}/${config.maxOpenPerLine} for line); will reconsider later`,
+      });
       // Leave UNREGISTERED so the candidate is reconsidered when a slot
       // frees (the next sweep re-assesses it — bounded by the budget).
       log("proposal_cap_hit", {
@@ -364,6 +380,9 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
     if (!dev) {
       // Dev line not discovered (not running / removed). Leave unregistered
       // so the sweep retries once it exists.
+      await postDiagnosisReportOnce(c, fileName, wp, verdict, {
+        text: `skipped due to safety gate: dev line ${config.devLine} unavailable; no automatic action taken`,
+      });
       if (!devLineMissingLogged) {
         devLineMissingLogged = true;
         log("dev_line_missing", { dev_line: config.devLine, issue: issueKey });
@@ -412,6 +431,12 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
       wp: wpId,
       mode: config.proposalMode,
     });
+    await postDiagnosisReportOnce(c, fileName, wp, verdict, {
+      text: `auto-enqueued repair task ${taskKey} (${devFile})`,
+      devTaskKey: taskKey,
+      devTaskFile: devFile,
+      fingerprint: diagnosisFingerprint(verdict, failedStationInfo(wp, verdict).station, failedStationInfo(wp, verdict).failureClass),
+    });
     await notify(
       [
         `🔧 **improver** — queued improvement for **${c.lineName}**${config.proposalMode === "held" ? " (held — release to run)" : ""}`,
@@ -424,6 +449,116 @@ export function startImproverWatcher(opts: ImproverWatcherOptions): ImproverWatc
 
   function clipText(s: string, max: number): string {
     return s.length <= max ? s : `${s.slice(0, max)}...[truncated]`;
+  }
+
+  function failedStationInfo(
+    wp: Record<string, unknown>,
+    verdict: AssessmentVerdict
+  ): { station: string | null; failureClass: string | null } {
+    const stations = (wp.stations ?? {}) as Record<string, Record<string, unknown>>;
+    for (const [name, station] of Object.entries(stations)) {
+      if (!station || typeof station !== "object") continue;
+      if (station.status === "failed" || station.status === "escalated") {
+        return {
+          station: name,
+          failureClass: typeof station.failure_class === "string" && station.failure_class.trim() ? station.failure_class : null,
+        };
+      }
+    }
+    if (verdict.target_station) {
+      const station = stations[verdict.target_station];
+      return {
+        station: verdict.target_station,
+        failureClass:
+          station && typeof station.failure_class === "string" && station.failure_class.trim()
+            ? station.failure_class
+            : null,
+      };
+    }
+    return { station: null, failureClass: null };
+  }
+
+  function compactPath(path: string): string {
+    const rel = relative(process.cwd(), path);
+    return rel && !rel.startsWith("..") ? rel : path;
+  }
+
+  function existingSidecars(filePath: string): string[] {
+    return [`${filePath}.stderr.log`, `${filePath}.session.jsonl`]
+      .filter((path) => existsSync(path))
+      .map((path) => compactPath(path));
+  }
+
+  function diagnosisFingerprint(
+    verdict: AssessmentVerdict,
+    station: string | null,
+    failureClass: string | null
+  ): string {
+    if (verdict.failure_fingerprint) return verdict.failure_fingerprint;
+    return normalizeSlug(`${station ?? "line"}-${failureClass ?? "unknown"}-${verdict.issue_slug}`);
+  }
+
+  function diagnosisReportKey(
+    c: Candidate,
+    fileName: string,
+    wpId: string | null,
+    station: string | null,
+    fingerprint: string
+  ): string {
+    return `${c.lineName}:${wpId ?? fileName}:${station ?? "line"}:${fingerprint}`;
+  }
+
+  function reportEvidence(c: Candidate, verdict: AssessmentVerdict): string[] {
+    const evidence = [...(verdict.evidence ?? [])].filter((x) => x.trim()).slice(0, 4);
+    for (const path of existingSidecars(c.filePath)) {
+      const line = `sidecar: ${path}`;
+      if (evidence.length >= 4) evidence[evidence.length - 1] = line;
+      else evidence.push(line);
+    }
+    return evidence.length > 0 ? evidence : [verdict.reasoning || `issue: ${verdict.issue_slug}`];
+  }
+
+  async function postDiagnosisReportOnce(
+    c: Candidate,
+    fileName: string,
+    wp: Record<string, unknown>,
+    verdict: AssessmentVerdict,
+    action: DiagnosisReportAction
+  ): Promise<void> {
+    if (c.bucket !== "error" || c.lineName === config.devLine) return;
+    const wpId = typeof wp.id === "string" ? wp.id : null;
+    const stationInfo = failedStationInfo(wp, verdict);
+    const fingerprint = diagnosisFingerprint(verdict, stationInfo.station, stationInfo.failureClass);
+    const reportKey = diagnosisReportKey(c, fileName, wpId, stationInfo.station, fingerprint);
+    if (state.hasReport(reportKey)) return;
+    const finalAction = { ...action, fingerprint: action.fingerprint ?? fingerprint };
+    try {
+      await notify(
+        buildDiagnosisReportMessage({
+          sourceLine: c.lineName,
+          workpieceId: wpId,
+          fileName,
+          sourceFile: compactPath(c.filePath),
+          failedStation: stationInfo.station,
+          failureClass: stationInfo.failureClass,
+          rootCauseCategory: verdict.root_cause_category ?? verdict.issue_slug,
+          confidenceLevel: verdict.confidence,
+          confidenceScore: verdict.confidence_score,
+          evidence: reportEvidence(c, verdict),
+          recommendedNextAction: verdict.recommended_next_action ?? "manual review",
+          action: finalAction,
+        })
+      );
+    } catch {}
+    state.markReport({
+      key: reportKey,
+      line: c.lineName,
+      wp_id: wpId,
+      file_name: fileName,
+      station: stationInfo.station,
+      fingerprint,
+      at: new Date().toISOString(),
+    });
   }
 
   function stringifyPart(v: unknown): string {

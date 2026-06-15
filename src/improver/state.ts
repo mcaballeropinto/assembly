@@ -14,6 +14,10 @@ import { ASSEMBLY_HOME } from "../paths";
  *   proposals.jsonl — event log of improvement proposals: proposed →
  *                     (recurrence)* → resolved. Open proposals and per-issue
  *                     lifetime counts are folds over this log.
+ *
+ *   reports.jsonl    — one-shot diagnosis report keys, so repeated scans or
+ *                     restarts do not spam Assembly logs for the same source
+ *                     failure.
  */
 
 export type AssessVerdictKind =
@@ -43,6 +47,16 @@ export interface RequeueItem {
   bucket: "done" | "error";
   file_name: string;
   wp_id: string | null;
+}
+
+export interface DiagnosisReportRecord {
+  key: string;
+  line: string;
+  wp_id: string | null;
+  file_name: string;
+  station: string | null;
+  fingerprint: string;
+  at: string;
 }
 
 export type ProposalEvent =
@@ -148,11 +162,13 @@ export class ImproverState {
   readonly dir: string;
   private assessed = new Set<string>();
   private events: ProposalEvent[] = [];
+  private reported = new Set<string>();
 
-  private constructor(dir: string, assessed: Set<string>, events: ProposalEvent[]) {
+  private constructor(dir: string, assessed: Set<string>, events: ProposalEvent[], reported: Set<string>) {
     this.dir = dir;
     this.assessed = assessed;
     this.events = events;
+    this.reported = reported;
   }
 
   static defaultDir(): string {
@@ -166,7 +182,11 @@ export class ImproverState {
       if (rec.key) assessed.add(rec.key);
     }
     const events = readJsonl<ProposalEvent>(resolve(dir, "proposals.jsonl"));
-    return new ImproverState(dir, assessed, events);
+    const reported = new Set<string>();
+    for (const rec of readJsonl<DiagnosisReportRecord>(resolve(dir, "reports.jsonl"))) {
+      if (rec.key) reported.add(rec.key);
+    }
+    return new ImproverState(dir, assessed, events, reported);
   }
 
   private assessedPath(): string {
@@ -175,6 +195,10 @@ export class ImproverState {
 
   private proposalsPath(): string {
     return resolve(this.dir, "proposals.jsonl");
+  }
+
+  private reportsPath(): string {
+    return resolve(this.dir, "reports.jsonl");
   }
 
   hasAssessed(key: string): boolean {
@@ -189,6 +213,20 @@ export class ImproverState {
     } catch {
       // In-memory set is authoritative within this process; next boot's
       // sweep re-assesses anything that failed to persist.
+    }
+  }
+
+  hasReport(key: string): boolean {
+    return this.reported.has(key);
+  }
+
+  markReport(record: DiagnosisReportRecord): void {
+    if (this.reported.has(record.key)) return;
+    this.reported.add(record.key);
+    try {
+      appendFileSync(this.reportsPath(), JSON.stringify(record) + "\n");
+    } catch {
+      // Best effort, matching the assessed registry behavior.
     }
   }
 
