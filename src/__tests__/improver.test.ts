@@ -25,6 +25,7 @@ import {
   requeueDoneWorkpiece,
   requeueSource,
 } from "../improver/devline";
+import { diagnoseFailure } from "../improver/diagnosis";
 import { startImproverWatcher, type ImproverWatcherHandle } from "../improver/watcher";
 import { isEmitted, _resetCacheForTests } from "../emit-manifest";
 
@@ -582,6 +583,41 @@ describe("buildAssessmentMessages", () => {
   });
 });
 
+describe("diagnoseFailure", () => {
+  test("identifies malformed envelope sidecar plus fallback missing content", () => {
+    const linePath = makeLine("assembly-dev");
+    mkdirSync(resolve(linePath, "stations", "plan", "queue", "output"), { recursive: true });
+    const fileName = writeWorkpiece(linePath, "error", "run_t10", {
+      stations: {
+        plan: {
+          status: "failed",
+          summary: "Failed: Guardrail validation failed: Missing required field: content",
+          failure_class: "guardrail",
+          data: { error: "Guardrail validation failed: Missing required field: content" },
+        },
+      },
+    });
+    writeFileSync(resolve(linePath, "stations", "plan", "queue", "output", `${fileName}.envelope.json`), "{ bad json");
+    writeFileSync(
+      resolve(linePath, "queues", "error", `${fileName}.session.jsonl`),
+      `{"type":"item.completed","item":{"text":"{\\"summary\\":\\"Plan envelope written\\",\\"data\\":{\\"envelope_path\\":\\"x\\"}}"}}\n`
+    );
+
+    const diagnosis = diagnoseFailure({
+      lineName: "assembly-dev",
+      linePath,
+      fileName,
+      filePath: resolve(linePath, "queues", "error", fileName),
+      workpiece: JSON.parse(readFileSync(resolve(linePath, "queues", "error", fileName), "utf-8")),
+    });
+
+    expect(diagnosis.root_cause).toBe("malformed-envelope-sidecar");
+    expect(diagnosis.confidence).toBe("high");
+    expect(diagnosis.action).toBe("enqueue_repair");
+    expect(diagnosis.evidence.some((e) => e.includes("invalid JSON"))).toBe(true);
+  });
+});
+
 describe("guardedDownstreamSuccessVerdict", () => {
   test("returns no-action when guarded data exists and downstream station succeeded", () => {
     const linePath = makeGuardedProspectorLine("em-prospector");
@@ -794,6 +830,73 @@ describe("startImproverWatcher", () => {
     writeWorkpiece(linePath, "done", "run_new1");
     await h.sweep();
     expect(calls).toEqual([{ lineName: "line-a", bucket: "done" }]);
+  });
+
+  test("ordinary assembly-dev guardrail failure is diagnosed, reported, and queued for repair once", async () => {
+    const devPath = makeLine("assembly-dev");
+    mkdirSync(resolve(devPath, "stations", "plan", "queue", "output"), { recursive: true });
+    const { calls, notifications, handle: h } = startWatcher({
+      lines: [{ linePath: devPath, lineName: "assembly-dev" }],
+    });
+    await h.sweep();
+
+    const fileName = writeWorkpiece(devPath, "error", "run_t10", {
+      stations: {
+        plan: {
+          status: "failed",
+          summary: "Failed: Guardrail validation failed: Missing required field: content",
+          failure_class: "guardrail",
+          data: { error: "Guardrail validation failed: Missing required field: content" },
+        },
+      },
+    });
+    writeFileSync(resolve(devPath, "stations", "plan", "queue", "output", `${fileName}.envelope.json`), "{ bad json");
+    writeFileSync(
+      resolve(devPath, "queues", "error", `${fileName}.session.jsonl`),
+      `{"type":"item.completed","item":{"text":"{\\"summary\\":\\"Plan envelope written\\",\\"data\\":{\\"envelope_path\\":\\"x\\"}}"}}\n`
+    );
+
+    await h.sweep();
+    await h.sweep();
+
+    expect(calls.length).toBe(0);
+    const devTasks = readdirSync(resolve(devPath, "queues", "inbox")).filter((f) => f.endsWith(".json"));
+    expect(devTasks.length).toBe(1);
+    const task = JSON.parse(readFileSync(resolve(devPath, "queues", "inbox", devTasks[0]), "utf-8"));
+    expect(task.input.improver.source_line).toBe("assembly-dev");
+    expect(task.task).toContain("malformed sidecar");
+    expect(notifications.length).toBe(1);
+    expect(notifications[0]).toContain("improver diagnosis");
+    expect(notifications[0]).toContain("malformed-envelope-sidecar");
+    expect(notifications[0]).toContain("confidence: **high**");
+    expect(notifications[0]).toContain("action: enqueue_repair");
+  });
+
+  test("ordinary assembly-dev low-confidence failure reports once without auto-repair", async () => {
+    const devPath = makeLine("assembly-dev");
+    const { calls, notifications, handle: h } = startWatcher({
+      lines: [{ linePath: devPath, lineName: "assembly-dev" }],
+    });
+    await h.sweep();
+
+    writeWorkpiece(devPath, "error", "run_unknown", {
+      stations: {
+        plan: {
+          status: "failed",
+          summary: "Failed: unclear local condition",
+          failure_class: "unknown",
+        },
+      },
+    });
+
+    await h.sweep();
+    await h.sweep();
+
+    expect(calls.length).toBe(0);
+    expect(readdirSync(resolve(devPath, "queues", "inbox")).filter((f) => f.endsWith(".json")).length).toBe(0);
+    expect(notifications.length).toBe(1);
+    expect(notifications[0]).toContain("confidence: **low**");
+    expect(notifications[0]).toContain("action: manual");
   });
 
   test("no_action verdicts are registered and never re-assessed", async () => {

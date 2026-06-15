@@ -108,6 +108,18 @@ export type ProposalEvent =
       kind: "exhausted" | "cap";
       issue_key: string;
       at: string;
+    }
+  | {
+      /** One-shot diagnosis report marker, deduped by failure fingerprint. */
+      type: "diagnosis_reported";
+      fingerprint: string;
+      line: string;
+      file_name: string;
+      wp_id?: string | null;
+      root_cause: string;
+      confidence: "low" | "medium" | "high";
+      action: string;
+      at: string;
     };
 
 export interface OpenProposal {
@@ -256,6 +268,10 @@ export class ImproverState {
   /** Has a one-shot notice already been posted for this issue? */
   hasNotice(kind: "exhausted" | "cap", issueKey: string): boolean {
     return this.events.some((e) => e.type === "notice" && e.kind === kind && e.issue_key === issueKey);
+  }
+
+  hasDiagnosisReport(fingerprint: string): boolean {
+    return this.events.some((e) => e.type === "diagnosis_reported" && e.fingerprint === fingerprint);
   }
 
   appendEvent(event: ProposalEvent): void {
