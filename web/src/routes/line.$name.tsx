@@ -1,36 +1,41 @@
-import { Outlet, createRoute, useNavigate, useParams } from "@tanstack/react-router"
+import { Outlet, createRoute, useNavigate } from "@tanstack/react-router"
 
-import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Route as rootRoute } from "./__root"
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
   path: "/line/$name",
-  component: LineDetailRoute,
+  component: LineRoute,
 })
 
-function LineDetailRoute() {
-  const { name } = useParams({ from: "/line/$name" })
-  const navigate = useNavigate()
-  const activeTab = window.location.pathname.endsWith("/kanban") ? "kanban" : "list"
+function LineRoute() {
+  const { name } = Route.useParams()
+  const navigate = useNavigate({ from: "/line/$name" })
 
-  const handleTabChange = (value: string) => {
-    if (value === "kanban") {
-      void navigate({ to: `/line/${name}/kanban` })
-      return
-    }
-
-    void navigate({ to: `/line/${name}` })
+  if (window.location.pathname.endsWith("/kanban")) {
+    return <Outlet />
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+    <div className="mx-auto max-w-screen-2xl px-6 pb-12 pt-6 lg:px-8">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold">{name}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Line detail</p>
+          <h2 className="text-2xl font-semibold tracking-tight">{name}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">List</p>
         </div>
-        <Tabs value={activeTab} onValueChange={handleTabChange}>
+        <Tabs
+          value="list"
+          onValueChange={value => {
+            if (value === "kanban") {
+              void navigate({
+                to: "/line/$name/kanban",
+                params: { name },
+                search: { wp: undefined },
+              })
+            }
+          }}
+        >
           <TabsList>
             <TabsTrigger value="list">List</TabsTrigger>
             <TabsTrigger value="kanban">Kanban</TabsTrigger>
@@ -38,13 +43,13 @@ function LineDetailRoute() {
         </Tabs>
       </div>
 
-      {activeTab === "kanban" ? (
-        <Outlet />
-      ) : (
-        <div className="rounded-lg border p-6 text-sm text-muted-foreground">
-          List view is not implemented yet.
-        </div>
-      )}
+      <div className="rounded-lg border bg-card p-6">
+        <h3 className="text-base font-semibold">List panel pending</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The shadcn list view will be ported in a later phase. Use the Kanban tab for the
+          Phase 7 filesystem-backed board.
+        </p>
+      </div>
     </div>
   )
 }

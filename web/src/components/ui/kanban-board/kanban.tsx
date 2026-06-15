@@ -283,6 +283,7 @@ export type KanbanBoardProviderProps = {
   announcements?: KanbanBoardAnnouncements
   children: ReactNode
   container?: Element
+  onDragStart?: (activeId: string) => void
   screenReaderInstructions?: string
 }
 
@@ -290,6 +291,7 @@ export function KanbanBoardProvider({
   announcements,
   children,
   container,
+  onDragStart,
   screenReaderInstructions,
 }: KanbanBoardProviderProps) {
   const draggableDescribedById = useId()
@@ -314,11 +316,14 @@ export function KanbanBoardProvider({
       activeId: string,
       overId?: string
     ) => {
+      if (eventType === "onDragStart") {
+        onDragStart?.(activeId)
+      }
       for (const monitor of monitorsRef.current) {
         monitor[eventType]?.(activeId, overId)
       }
     },
-    []
+    [onDragStart]
   )
 
   const contextValue = useMemo(
@@ -387,7 +392,7 @@ export function KanbanBoardExtraMargin({
 }
 
 export type KanbanBoardColumnProps = {
-  columnId: string
+  columnId?: string
   onDropOverColumn?: (dataTransferData: string) => void
 }
 
@@ -412,7 +417,7 @@ export function KanbanBoardColumn({
       )}
       onDragLeave={() => setIsDropTarget(false)}
       onDragOver={event => {
-        if (event.dataTransfer.types.includes(DATA_TRANSFER_TYPES.CARD)) {
+        if (columnId && event.dataTransfer.types.includes(DATA_TRANSFER_TYPES.CARD)) {
           event.preventDefault()
           setIsDropTarget(true)
           onDragOver("", columnId)
@@ -421,7 +426,9 @@ export function KanbanBoardColumn({
       onDrop={event => {
         const data = event.dataTransfer.getData(DATA_TRANSFER_TYPES.CARD)
         onDropOverColumn?.(data)
-        onDragEnd(JSON.parse(data).id as string, columnId)
+        if (columnId) {
+          onDragEnd(JSON.parse(data).id as string, columnId)
+        }
         setIsDropTarget(false)
       }}
       {...props}
@@ -572,6 +579,7 @@ export function KanbanBoardColumnButton({
 export type KanbanBoardCardProps<T extends { id: string }> = {
   data: T
   isActive?: boolean
+  isDragDisabled?: boolean
 }
 
 export const kanbanBoardCardClassNames =
@@ -581,6 +589,7 @@ export function KanbanBoardCard<T extends { id: string }>({
   className,
   data,
   isActive = false,
+  isDragDisabled = false,
   ...props
 }: ComponentProps<"button"> & KanbanBoardCardProps<T>) {
   const [isDragging, setIsDragging] = useState(false)
@@ -589,15 +598,22 @@ export function KanbanBoardCard<T extends { id: string }>({
   return (
     <button
       aria-describedby={draggableDescribedById}
+      aria-disabled={isDragDisabled || undefined}
       className={cn(
         kanbanBoardCardClassNames,
         "group relative w-full cursor-grab disabled:cursor-not-allowed",
+        isDragDisabled && "cursor-default",
         (isDragging || isActive) && "opacity-50",
         className
       )}
-      draggable
+      data-kanban-card-id={data.id}
+      draggable={!isDragDisabled}
       onDragEnd={() => setIsDragging(false)}
       onDragStart={event => {
+        if (isDragDisabled) {
+          event.preventDefault()
+          return
+        }
         setIsDragging(true)
         event.dataTransfer.effectAllowed = "move"
         event.dataTransfer.setData(DATA_TRANSFER_TYPES.CARD, JSON.stringify(data))

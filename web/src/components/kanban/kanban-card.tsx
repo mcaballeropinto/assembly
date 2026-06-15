@@ -1,157 +1,154 @@
-import { useNavigate } from "@tanstack/react-router";
-import type { KanbanCard, KanbanCardState } from "@/lib/api";
+import type { KanbanCard as ApiKanbanCard, KanbanCardState } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
+import { KanbanBoardCard } from "@/components/ui/kanban-board/kanban";
 import { cn } from "@/lib/utils";
 
 interface KanbanCardProps {
-  card: KanbanCard;
-  lineName: string;
+  card: ApiKanbanCard;
+  onOpen: (fileName: string) => void;
+  now?: number;
 }
 
-// State icon mapping (matching global-dashboard.ts:2714)
 const stateIcons: Record<KanbanCardState, string> = {
-  held: "\u23f8",        // ⏸
-  waiting: "\u2026",     // …
-  running: "\u21bb",     // ↻
-  evaluating: "\u25d0",  // ◐
-  retrying: "\u21ba",    // ↺
-  routed: "\u2192",      // →
-  done: "\u2713",        // ✓
-  failed: "\u2717",      // ✗
-  escalated: "\u26a0",   // ⚠
+  held: "\u23f8",
+  waiting: "\u2026",
+  running: "\u21bb",
+  evaluating: "\u25d0",
+  retrying: "\u21ba",
+  routed: "\u2192",
+  done: "\u2713",
+  failed: "\u2717",
+  escalated: "\u26a0",
 };
 
-// State color classes (matching CSS at global-dashboard.ts:1318-1327)
-const stateColorClasses: Record<KanbanCardState, string> = {
-  running: "text-emerald-600 dark:text-emerald-500 animate-pulse",
+const stateClasses: Record<KanbanCardState, string> = {
+  held: "text-blue-500",
+  waiting: "text-muted-foreground",
+  running: "text-emerald-600 dark:text-emerald-500",
   evaluating: "text-blue-600 dark:text-blue-500",
   retrying: "text-amber-600 dark:text-amber-500",
-  waiting: "text-muted-foreground",
-  held: "text-blue-500",
   routed: "text-emerald-500",
   done: "text-emerald-600 dark:text-emerald-500",
   failed: "text-destructive",
   escalated: "text-amber-600 dark:text-amber-500",
 };
 
-// Build duration label matching global-dashboard.ts:2758
-function buildDurationLabel(card: KanbanCard): string {
-  // Done/failed cards show finished duration
-  if (card.finished_at && card.duration_ms !== null && card.duration_ms !== undefined) {
-    const sec = Math.floor(card.duration_ms / 1000);
-    if (sec < 60) return `${sec}s`;
-    const min = Math.floor(sec / 60);
-    if (min < 60) return `${min}m ${sec % 60}s`;
-    const hr = Math.floor(min / 60);
-    return `${hr}h ${min % 60}m`;
-  }
+function formatElapsedShort(iso: string | null | undefined, now: number): string {
+  if (!iso) return "";
+  const ms = Math.max(0, now - new Date(iso).getTime());
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
 
-  // In-flight cards show elapsed time
-  if (card.totalElapsedMs !== null && card.totalElapsedMs !== undefined) {
-    const sec = Math.floor(card.totalElapsedMs / 1000);
-    if (sec < 60) return `${sec}s`;
-    const min = Math.floor(sec / 60);
-    if (min < 60) return `${min}m`;
-    const hr = Math.floor(min / 60);
-    return `${hr}h ${min % 60}m`;
+function formatDuration(ms: number | null | undefined): string {
+  if (ms == null) return "";
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainSeconds = seconds % 60;
+  if (minutes < 60) {
+    return `${minutes}m${remainSeconds > 0 ? ` ${remainSeconds}s` : ""}`;
   }
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  return `${hours}h${remainMinutes > 0 ? ` ${remainMinutes}m` : ""}`;
+}
 
-  // Held/waiting cards show time since entered column
+export function buildCardDurationLabel(card: ApiKanbanCard, now = Date.now()): string {
+  if (card.column === "done" && card.duration_ms != null) {
+    return formatDuration(card.duration_ms);
+  }
+  if (card.lane === "processing" && card.stationStartedAt) {
+    return `${formatElapsedShort(card.stationStartedAt, now)} in ${card.station ?? "?"}`;
+  }
+  if (card.lane === "inbox" && card.station && card.enteredColumnAt) {
+    return `${formatElapsedShort(card.enteredColumnAt, now)} waiting`;
+  }
+  if (card.lane === "output" && card.enteredColumnAt) {
+    return `${formatElapsedShort(card.enteredColumnAt, now)} routed`;
+  }
+  if ((card.column === "inbox" || card.column === "held") && card.enteredColumnAt) {
+    return `${formatElapsedShort(card.enteredColumnAt, now)} queued`;
+  }
   if (card.enteredColumnAt) {
-    const enteredMs = new Date(card.enteredColumnAt).getTime();
-    const ageMs = Date.now() - enteredMs;
-    const min = Math.floor(ageMs / 60000);
-    if (min < 60) return `${min}m ago`;
-    const hr = Math.floor(min / 60);
-    return `${hr}h ago`;
+    return `${formatElapsedShort(card.enteredColumnAt, now)} queued`;
   }
-
-  return "";
+  return "\u2014";
 }
 
-// Check if card is stuck (in inbox/held > 15min)
-function isStuck(card: KanbanCard): boolean {
-  if (!card.enteredColumnAt) return false;
-  if (card.column !== "inbox" && card.column !== "held") return false;
-  const enteredMs = new Date(card.enteredColumnAt).getTime();
-  const ageMs = Date.now() - enteredMs;
-  return ageMs > 15 * 60 * 1000;
+function retryCount(card: ApiKanbanCard): number {
+  return card.retry?.retry_count ?? card.retries ?? 0;
 }
 
-export function KanbanCardComponent({ card, lineName }: KanbanCardProps) {
-  const navigate = useNavigate();
+function retryLabel(card: ApiKanbanCard): string | null {
+  const count = retryCount(card);
+  if (count <= 0) return null;
+  if (card.retry?.max_retries) return `${count}/${card.retry.max_retries}`;
+  return String(count);
+}
 
-  const handleClick = () => {
-    navigate({
-      to: `/line/${lineName}/kanban`,
-      search: { wp: card.fileName },
-    });
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleClick();
-    }
-  };
-
-  const durationLabel = buildDurationLabel(card);
-  const stateIcon = stateIcons[card.state] || "\u2026";
-  const stateColor = stateColorClasses[card.state] || "text-muted-foreground";
-  const stuck = isStuck(card);
-  const isFailed = card.state === "failed";
+export function KanbanCard({ card, onOpen, now }: KanbanCardProps) {
+  const retry = retryLabel(card);
+  const duration = buildCardDurationLabel(card, now);
+  const isFailed = card.state === "failed" || card.outcome === "failed" || card.retry?.exhausted;
+  const inBackoff = Boolean(card.retry?.in_backoff && !card.retry?.exhausted);
 
   return (
-    <div
-      className={cn(
-        "rounded-lg border bg-card p-3 cursor-pointer hover:border-primary/50 transition-colors",
-        isFailed && "border-l-[3px] border-l-destructive",
-        stuck && !isFailed && "border-l-[3px] border-l-amber-500"
-      )}
-      tabIndex={0}
+    <KanbanBoardCard
+      data={{ id: card.fileName }}
+      isDragDisabled={true}
       role="button"
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      title={`${card.id}\u2014${card.title}`}
+      className={cn(
+        "space-y-2 text-left hover:border-primary/50",
+        isFailed && "border-destructive",
+        inBackoff && "border-amber-500 border-dashed"
+      )}
+      onClick={() => onOpen(card.fileName)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen(card.fileName);
+        }
+      }}
     >
-      {/* Head row: ID chip + state icon */}
-      <div className="flex items-center justify-between gap-2">
-        <Badge variant="outline" className="font-mono text-xs">
-          {card.id}
-        </Badge>
-        <span className={cn("text-base", stateColor)} aria-label={card.state}>
-          {stateIcon}
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="min-w-0 flex-1 text-sm font-medium leading-5 line-clamp-2">
+          {card.title || card.id}
+        </h3>
+        <span className={cn("shrink-0 text-base", stateClasses[card.state])} aria-label={card.state}>
+          {stateIcons[card.state] ?? "\u2026"}
         </span>
       </div>
 
-      {/* Title */}
-      <div className="text-sm font-medium leading-5 line-clamp-2 mt-1">
-        {card.title}
-      </div>
-
-      {/* Preview */}
       {card.preview && (
-        <div className="text-xs text-muted-foreground line-clamp-2 mt-1">
-          {card.preview}
-        </div>
+        <p className="text-xs leading-5 text-muted-foreground line-clamp-2">{card.preview}</p>
       )}
 
-      {/* Meta row: duration + retry chip + cost */}
-      <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground flex-wrap">
-        {durationLabel && <span>{durationLabel}</span>}
-        {card.retries && card.retries > 0 && (
-          <Badge variant="outline" className="text-amber-600 dark:text-amber-500">
-            ↺ {card.retries}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Badge variant="outline" className="max-w-full truncate font-mono text-[11px]">
+          {card.id}
+        </Badge>
+        {retry && (
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-[11px] text-amber-700 dark:text-amber-400",
+              card.retry?.exhausted && "border-destructive text-destructive"
+            )}
+          >
+            {"\u21ba"} {retry}
           </Badge>
         )}
-        {card.costUsd !== undefined && card.costUsd !== null && card.costUsd > 0 && (
-          <span>
-            {card.costUsd < 0.01
-              ? `$${(card.costUsd * 100).toFixed(1)}¢`
-              : card.costUsd < 0.1
-              ? `$${card.costUsd.toFixed(3)}`
-              : `$${card.costUsd.toFixed(2)}`}
-          </span>
-        )}
+        <span>{duration}</span>
       </div>
-    </div>
+    </KanbanBoardCard>
   );
 }

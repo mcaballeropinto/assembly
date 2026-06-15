@@ -46,6 +46,8 @@ const dashboardRouteTree = rootRoute.addChildren([
   fetchErrorBannerRoute,
 ])
 
+export { rootRoute, lineRoute, lineKanbanRoute }
+
 export function createDashboardRouter(options?: { history?: RouterHistory }) {
   const dashboardRouter = createRouter({
     routeTree: dashboardRouteTree,
