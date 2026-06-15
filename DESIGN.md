@@ -34,6 +34,66 @@ that reads from and writes to the workpiece. The folder structure defines the li
 
 ---
 
+## Dashboard
+
+The dashboard is the operational view for Assembly. It observes the same file-backed state the daemon uses, but it is not part of the orchestration path.
+
+### Architecture
+
+- `src/global-dashboard.ts` is the Bun HTTP server. It serves JSON API routes and static dashboard assets.
+- `src/dashboard-data.ts` reads queue directories, activity logs, usage snapshots, retry sidecars, dismissed-error sidecars, and workpiece files on demand. There is no dashboard database and no long-lived in-memory state.
+- The browser UI is a React SPA built from `web/` and served from `web/dist/` by the Bun dashboard server.
+- Freshness comes from TanStack Query polling every 3 seconds. The dashboard intentionally uses polling rather than WebSockets or SSE.
+- The legacy embedded dashboard shell exists only as fallback compatibility when `web/dist/index.html` is missing.
+
+### Stack Decisions (locked)
+
+| Layer | Decision |
+|-------|----------|
+| Build tool | Vite 5 |
+| Framework | React 18 |
+| Router | TanStack Router |
+| Data fetching | TanStack Query with 3-second polling |
+| Styling | Tailwind 3.4 |
+| Component base | shadcn/ui with Zinc base and CSS variables |
+| Charts | Tremor plus shadcn chart wrappers |
+| Kanban | `janhesters/shadcn-kanban-board`, vendored with drag-and-drop disabled |
+| Activity feed | shadcn.io activity feed pattern |
+| Timeline | reui timeline pattern |
+| Icons | lucide-react |
+| Theme | next-themes with light, dark, and system modes |
+
+### Design Tokens (locked - do not drift)
+
+| Category | Token |
+|----------|-------|
+| Card padding | `p-6` |
+| KPI tile padding | `p-4` |
+| Card header/footer | `p-6 pb-3` headers, `p-6 pt-3` footers |
+| Major page sections | `gap-8` |
+| Card grids/stacks | `gap-4` in grids, `gap-6` in stacks |
+| App container | `max-w-screen-2xl mx-auto px-6 lg:px-8` |
+| Header | `h-14` sticky |
+| Sidebar | `w-64` expanded, `w-16` collapsed |
+| Cards | `rounded-lg border bg-card` |
+| KPI numbers | `text-2xl font-semibold tracking-tight tabular-nums` |
+| Base color | Zinc |
+| Status colors | Semantic tokens only: `text-destructive`, `text-amber-600`, `text-emerald-600`, `text-muted-foreground` |
+
+Rules:
+
+- New panels use shadcn/ui primitives and the tokens above.
+- Do not add new global CSS files for panel-level layout.
+- Do not introduce per-component spacing, radius, border, typography, or component-choice overrides unless this section is updated first.
+- Status color must carry meaning; decoration should stay neutral.
+
+### References
+
+- [`docs/dashboard.md`](./docs/dashboard.md) documents operations, development workflow, API routes, and troubleshooting.
+- `/root/mcp-brain/personal-vault/projects/assembly/assembly-dashboard-shadcn-redesign.md` records the redesign plan and migration history.
+
+---
+
 ## Three Concepts. That's It.
 
 ### 1. Workpiece — The thing being built

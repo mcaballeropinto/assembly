@@ -45,7 +45,7 @@ If you only have time for two pages: read [`overview.md`](./overview.md) and [`c
 
 | Doc | What it covers |
 |-----|----------------|
-| [`dashboard.md`](./dashboard.md) | Dashboard server (port 4111), data sources, kanban, retry-manual, error-dismiss, usage panel, task-events stream |
+| [`dashboard.md`](./dashboard.md) | React SPA dashboard, Bun static/API server, Vite dev flow, build/ship workflow, data sources, kanban, retry, error dismissal, usage, task-events |
 | [`cost-and-memory.md`](./cost-and-memory.md) | Pricing table, token + cache accounting, per-station `memory/MEMORY.md` persistence |
 
 ### Example lines in this repo
@@ -71,7 +71,7 @@ workpiece.json        the accumulating state — one JSON file per run
 envelope              what each station returns: { summary, content?, data? }
 queues/               file-based mailboxes — moving files = moving state
 daemon                watches queues, spawns section workers, routes outputs
-dashboard             reads disk, shows kanban + costs (independent of daemon)
+dashboard             Bun-served React dashboard; reads disk, shows kanban + costs
 ```
 
 Everything else is a refinement on these.
