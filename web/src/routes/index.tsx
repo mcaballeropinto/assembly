@@ -2,17 +2,10 @@ import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { createRoute } from "@tanstack/react-router"
 
-import { ErrorBanner } from "../components/banners/error-banner"
-import { FetchErrorBanner } from "../components/banners/fetch-error-banner"
+import { KpiStrip } from "../components/kpi/kpi-strip"
+import { LineSummaryGrid } from "../components/overview/line-summary-grid"
 import { ActivityFeed } from "../components/ui/activity-feed"
-import { Button } from "../components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "../components/ui/card"
+import { Card } from "../components/ui/card"
 import {
   filterActivity,
   normalizeActivity,
@@ -20,13 +13,7 @@ import {
   serializeActivitySearch,
   type ActivityFilterKey,
 } from "../lib/activity"
-import { fetchDashboardState } from "../lib/api"
-import {
-  mockBannerErrors,
-  mockFetchError,
-  noopDismiss,
-  noopRetry,
-} from "../lib/dashboard-mock-data"
+import { apiStateQueryOptions } from "../lib/query"
 
 import { Route as rootRoute } from "./__root"
 
@@ -41,11 +28,7 @@ export function OverviewRoute() {
     Set<ActivityFilterKey>
   >(() => parseActivitySearch(readActivitySearch()))
 
-  const { data, isPending, error } = useQuery({
-    queryKey: ["dashboard-state"],
-    queryFn: fetchDashboardState,
-    refetchInterval: 3000,
-  })
+  const { data, isPending, error } = useQuery(apiStateQueryOptions())
 
   const normalized = useMemo(() => (data ? normalizeActivity(data) : []), [data])
   const filtered = useMemo(
@@ -58,10 +41,10 @@ export function OverviewRoute() {
     writeActivitySearch(next)
   }
 
-  if (isPending) {
+  if (isPending || !data) {
     return (
       <Card className="p-6">
-        <p className="text-sm text-muted-foreground">Loading activity...</p>
+        <p className="text-sm text-muted-foreground">Loading overview...</p>
       </Card>
     )
   }
@@ -80,24 +63,9 @@ export function OverviewRoute() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-3">
-        <ErrorBanner errors={mockBannerErrors} onDismiss={noopDismiss} />
-        <FetchErrorBanner error={mockFetchError} onRetry={noopRetry} />
-      </div>
-
-      <Card className="max-w-2xl">
-        <CardHeader>
-          <CardTitle>Chrome primitive mock wiring</CardTitle>
-          <CardDescription>
-            Header chips and page banners are rendered from mock data.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button>It works</Button>
-        </CardContent>
-      </Card>
-
+    <div className="space-y-8 pt-6 pb-12">
+      <KpiStrip totals={data.totals} />
+      <LineSummaryGrid lines={data.lines} />
       <ActivityFeed
         items={filtered}
         totalItems={normalized.length}
