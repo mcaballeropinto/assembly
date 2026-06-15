@@ -1,5 +1,4 @@
-import * as React from "react"
-import { Outlet, useRouterState } from "@tanstack/react-router"
+import { Outlet, useRouterState, useSearch } from "@tanstack/react-router"
 
 import { ErrorBanner } from "./components/banners/error-banner"
 import { FetchErrorBanner } from "./components/banners/fetch-error-banner"
@@ -19,35 +18,22 @@ import {
   noopRetry,
 } from "./lib/dashboard-mock-data"
 
-function readDrawerParams() {
-  const params = new URLSearchParams(window.location.search)
-  return {
-    fileName: params.get("wp") ?? "",
-    lineName: params.get("wpline") ?? params.get("line") ?? "",
-  }
-}
-
-export default function App() {
+export function App() {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
-  const [drawerParams, setDrawerParams] = React.useState(readDrawerParams)
-  const open = pathname === "/" && Boolean(drawerParams.fileName && drawerParams.lineName)
-
-  React.useEffect(() => {
-    const onPopState = () => setDrawerParams(readDrawerParams())
-    window.addEventListener("popstate", onPopState)
-    return () => window.removeEventListener("popstate", onPopState)
-  }, [])
-
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (nextOpen) return
-    const url = new URL(window.location.href)
-    url.searchParams.delete("wp")
-    url.searchParams.delete("wpline")
-    window.history.pushState({}, "", url)
-    setDrawerParams(readDrawerParams())
+  const search = useSearch({ strict: false }) as {
+    wp?: unknown
+    wpline?: unknown
+    line?: unknown
   }
+  const lineName =
+    typeof search.wpline === "string"
+      ? search.wpline
+      : typeof search.line === "string"
+        ? search.line
+        : undefined
+  const hasWorkpieceParam = typeof search.wp === "string" && search.wp.length > 0
 
   if (pathname !== "/") {
     return <Outlet />
@@ -69,18 +55,26 @@ export default function App() {
         </CardHeader>
         <CardContent>
           <div className="text-sm text-muted-foreground">
-            {open ? "Drawer parameters detected." : "No workpiece selected."}
+            {hasWorkpieceParam
+              ? lineName
+                ? "Drawer parameters detected."
+                : "Cannot open workpiece drawer: missing line context."
+              : "No workpiece selected."}
           </div>
         </CardContent>
       </Card>
-      {open ? (
-        <WorkpieceDrawer
-          lineName={drawerParams.lineName}
-          fileName={drawerParams.fileName}
-          open={open}
-          onOpenChange={handleOpenChange}
-        />
+
+      {hasWorkpieceParam && !lineName ? (
+        <p
+          role="alert"
+          className="max-w-2xl rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          Cannot open workpiece drawer: this deep link is missing line context.
+        </p>
       ) : null}
+      <WorkpieceDrawer lineName={lineName} />
     </AppShell>
   )
 }
+
+export default App

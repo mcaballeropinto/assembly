@@ -1,3 +1,4 @@
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 
 import { Badge } from "@/components/ui/badge"
@@ -9,7 +10,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { fetchWorkpiece } from "@/lib/api"
+import { fetchWorkpiece, isApiError } from "@/lib/api"
+import type { ApiWorkpieceData } from "../../../../src/dashboard-api"
 import { DrawerFooter } from "./drawer-footer"
 import {
   formatCost,
@@ -22,37 +24,89 @@ import { SidecarTails } from "./sidecar-tails"
 import { StationTimeline } from "./station-timeline"
 import { TaskEventsStream } from "./task-events-stream"
 
-interface WorkpieceDrawerProps {
-  lineName: string
-  fileName: string
-  open: boolean
-  onOpenChange: (open: boolean) => void
+export interface WorkpieceDrawerProps {
+  lineName?: string
 }
 
-export function WorkpieceDrawer({ lineName, fileName, open, onOpenChange }: WorkpieceDrawerProps) {
+export function WorkpieceDrawer({ lineName: lineNameProp }: WorkpieceDrawerProps) {
+  const search = useSearch({ strict: false }) as {
+    wp?: unknown
+    wpline?: unknown
+    line?: unknown
+  }
+  const navigate = useNavigate()
+  const fileName =
+    typeof search.wp === "string" && search.wp.length > 0
+      ? search.wp
+      : undefined
+  const lineName =
+    lineNameProp ??
+    (typeof search.wpline === "string" && search.wpline.length > 0
+      ? search.wpline
+      : typeof search.line === "string" && search.line.length > 0
+        ? search.line
+        : undefined)
+  const open = Boolean(fileName && lineName)
+
   const query = useQuery({
     queryKey: ["workpiece", lineName, fileName],
-    queryFn: () => fetchWorkpiece(lineName, fileName),
-    enabled: open && Boolean(lineName && fileName),
+    queryFn: () => fetchWorkpiece(lineName!, fileName!),
+    enabled: open,
   })
 
-  const workpiece = query.data
+  const apiError =
+    query.error instanceof Error
+      ? query.error.message
+      : query.data && isApiError(query.data)
+        ? query.data.error
+        : undefined
+  const workpiece: ApiWorkpieceData | undefined =
+    query.data && !isApiError(query.data) ? query.data : undefined
   const outcome = workpiece ? getWorkpieceOutcome(workpiece) : null
   const stations = workpiece ? sortStationEntries(workpiece.stations) : []
   const models = [...new Set(stations.map(([, station]) => station.model).filter(Boolean))]
-  const totalIn = workpiece?.totals?.tokens?.in ?? stations.reduce((sum, [, station]) => sum + (station.tokens?.in ?? 0), 0)
-  const totalOut = workpiece?.totals?.tokens?.out ?? stations.reduce((sum, [, station]) => sum + (station.tokens?.out ?? 0), 0)
-  const totalCost = workpiece?.totals?.cost_usd ?? stations.reduce((sum, [, station]) => sum + (station.cost_usd ?? 0), 0)
-  const title = workpiece?.id ? String(workpiece.id) : fileName.replace(/\.json$/, "")
+  const totalIn =
+    workpiece?.totals?.tokens?.in ??
+    stations.reduce((sum, [, station]) => sum + (station.tokens?.in ?? 0), 0)
+  const totalOut =
+    workpiece?.totals?.tokens?.out ??
+    stations.reduce((sum, [, station]) => sum + (station.tokens?.out ?? 0), 0)
+  const totalCost =
+    workpiece?.totals?.cost_usd ??
+    stations.reduce((sum, [, station]) => sum + (station.cost_usd ?? 0), 0)
+  const title = getWorkpieceTitle(workpiece, fileName)
+
+  function closeDrawer() {
+    void navigate({
+      search: (prev) => {
+        const next = { ...(prev as Record<string, unknown>) }
+        delete next.wp
+        return next
+      },
+      replace: true,
+    })
+  }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-[640px] max-w-full flex-col p-0 sm:max-w-[640px]">
+    <Sheet
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) closeDrawer()
+      }}
+    >
+      <SheetContent
+        side="right"
+        className="flex w-[640px] max-w-full flex-col gap-0 p-0 sm:max-w-[640px]"
+      >
         {query.isLoading ? (
-          <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">Loading workpiece...</div>
-        ) : query.isError ? (
-          <div className="flex flex-1 items-center justify-center p-6 text-sm text-destructive">Could not load workpiece.</div>
-        ) : workpiece && outcome ? (
+          <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+            Loading workpiece...
+          </div>
+        ) : apiError ? (
+          <div className="flex flex-1 items-center justify-center p-6 text-sm text-destructive">
+            {apiError}
+          </div>
+        ) : workpiece && outcome && lineName && fileName ? (
           <>
             <SheetHeader className="border-b p-6 pr-12">
               <div className="flex min-w-0 items-center gap-2">
@@ -102,9 +156,27 @@ export function WorkpieceDrawer({ lineName, fileName, open, onOpenChange }: Work
             <DrawerFooter workpiece={workpiece} fileName={fileName} />
           </>
         ) : (
-          <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">Select a workpiece.</div>
+          <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+            Select a workpiece.
+          </div>
         )}
       </SheetContent>
     </Sheet>
   )
+}
+
+function getWorkpieceTitle(
+  workpiece: ApiWorkpieceData | undefined,
+  fileName: string | undefined
+): string {
+  if (!workpiece) return fileName ?? "Workpiece"
+  if (workpiece.taskKey?.trim()) return workpiece.taskKey.trim()
+
+  const firstTaskLine = workpiece.task
+    ?.split("\n")
+    .map((line) => line.trim())
+    .find(Boolean)
+  if (firstTaskLine) return firstTaskLine
+
+  return workpiece.id || fileName || "Workpiece"
 }

@@ -13,6 +13,24 @@ import { Route as indexRoute } from "./routes/index"
 import { Route as lineRoute } from "./routes/line.$name"
 import { Route as lineKanbanRoute } from "./routes/line.$name.kanban"
 
+export interface DashboardSearch {
+  wp?: string
+  wpline?: string
+  line?: string
+}
+
+function stringSearchParam(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined
+}
+
+export function validateSearch(search: Record<string, unknown>): DashboardSearch {
+  return {
+    wp: stringSearchParam(search.wp),
+    wpline: stringSearchParam(search.wpline),
+    line: stringSearchParam(search.line),
+  }
+}
+
 const connectionChipRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/dev/connection-chip",
@@ -46,6 +64,7 @@ const dashboardRouteTree = rootRoute.addChildren([
   fetchErrorBannerRoute,
 ])
 
+export const routeTree = dashboardRouteTree
 export { rootRoute, lineRoute, lineKanbanRoute }
 
 export function createDashboardRouter(options?: { history?: RouterHistory }) {
