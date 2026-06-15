@@ -195,17 +195,9 @@ export interface ApiUsageResponse {
   reason?: string;
 }
 
-export interface ApiWorkpieceData extends Workpiece {
-  _source?: string;
-  _activity?: unknown[];
-  _taskEventStations?: StationMeta[];
-}
-
 export interface ApiErrorResponse {
   error: string;
 }
-
-export type ApiWorkpieceResponse = ApiWorkpieceData;
 
 export interface ApiTaskEventStationsResponse {
   stations: StationMeta[];
@@ -308,8 +300,16 @@ export type ApiLineStateResponse =
       };
       throughput: { last_1h: number; last_24h: number };
       timestamp: string;
-    }
+  }
   | { error: string };
+
+export type ApiWorkpieceResponse =
+  | (Workpiece & {
+      _source?: string;
+      _activity?: unknown[];
+      _taskEventStations?: StationMeta[];
+    })
+  | ApiErrorResponse;
 
 /**
  * Response from GET /api/line/:name/kanban.
