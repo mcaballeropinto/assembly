@@ -84,11 +84,11 @@ export const FailureClassSchema = z.enum([
 
 const StationResultBaseSchema = StationEnvelopeSchema.extend({
   status: z.enum(["done", "failed", "skipped", "escalated"]),
-  started_at: z.string(),
-  finished_at: z.string(),
+  started_at: z.string().nullable().optional().transform((value) => value ?? undefined),
+  finished_at: z.string().nullable().optional().transform((value) => value ?? undefined),
   model: z.string(),
-  tokens: TokenUsageSchema,
-  cost_usd: z.number(),
+  tokens: TokenUsageSchema.default({ in: 0, out: 0 }),
+  cost_usd: z.number().default(0),
   eval: EvalResultSchema.extend({
     tokens: TokenUsageSchema.optional(),
     cost_usd: z.number().optional(),
@@ -97,13 +97,13 @@ const StationResultBaseSchema = StationEnvelopeSchema.extend({
   rounds: StationRoundsSchema.optional(),
 });
 
-export const StationResultSchema: z.ZodType<StationResult> = StationResultBaseSchema.extend({
+export const StationResultSchema = StationResultBaseSchema.extend({
   previous_attempts: z.array(StationResultBaseSchema).optional(),
-});
+}) as unknown as z.ZodType<StationResult>;
 
 const StationNameKeySchema = z.string().transform((s) => StationName(s));
 
-export const WorkpieceSchema = z.object({
+const WorkpieceObjectSchema = z.object({
   id: z.string().transform((s) => WorkpieceId(s)),
   schema_version: WorkpieceVersionSchema.optional().default(CURRENT_WORKPIECE_VERSION),
   line: z.string().transform((s) => LineName(s)),
@@ -118,10 +118,17 @@ export const WorkpieceSchema = z.object({
   }).optional(),
   _retry_history: z.record(StationNameKeySchema, z.array(StationResultBaseSchema)).optional(),
   _pending_eval_feedback: z.object({
-    station: z.string(),
+    station: z.string().transform((s) => StationName(s)),
     feedback: z.string(),
     attempt: z.number(),
   }).optional(),
-}).passthrough() satisfies z.ZodType<Workpiece>;
+}).passthrough();
+
+export const WorkpieceSchema: z.ZodType<Workpiece> = WorkpieceObjectSchema.transform((workpiece): Workpiece => ({
+  ...workpiece,
+  stations: workpiece.stations as Record<StationName, StationResult>,
+  _retry_history: workpiece._retry_history as Workpiece["_retry_history"],
+  _pending_eval_feedback: workpiece._pending_eval_feedback as Workpiece["_pending_eval_feedback"],
+}));
 
 export type ParsedWorkpiece = z.infer<typeof WorkpieceSchema>;

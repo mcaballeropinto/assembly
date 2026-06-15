@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { EvalConfig, StationConfig } from "../types";
 
-const ProviderSchema = z.enum(["api", "claude-code", "claude-code-cached", "pi", "script"]);
+const ProviderSchema = z.enum(["api", "claude-code", "claude-code-cached", "codex", "pi", "script"]);
 
 const GuardrailOutputSchema = z.object({
   required: z.array(z.string()).optional(),

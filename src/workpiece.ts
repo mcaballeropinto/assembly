@@ -1,6 +1,6 @@
 import { resolve } from "path";
 import type { Workpiece, StationResult, StationEnvelope, TokenUsage, FailureClass } from "./types";
-import { WorkpieceId, LineName, StationName } from './ids';
+import { WorkpieceId, LineName, StationName } from './types';
 import { CURRENT_WORKPIECE_VERSION, WorkpieceSchema } from './schemas/workpiece';
 
 // Process-local counter so a fanout batch hitting createWorkpiece in the same

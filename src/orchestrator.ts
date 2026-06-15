@@ -766,15 +766,15 @@ export async function startOrchestrator(
       }
 
       const raw = JSON.parse(await Bun.file(filePath).text());
-      const payload = InboxPayloadSchema.safeParse(raw);
-      if (!payload.success) {
+      const parsedMessage = raw?.id ? WorkpieceSchema.safeParse(raw) : InboxPayloadSchema.safeParse(raw);
+      if (!parsedMessage.success) {
         const dest = quarantineUnverified(lineQueue.inbox, filePath);
         log("schema_violation", {
           line: config.name,
           queue: "line_inbox",
           filename: fileName,
           quarantined_to: dest,
-          error: payload.error.message,
+          error: parsedMessage.error.message,
         });
         return;
       }
@@ -786,8 +786,8 @@ export async function startOrchestrator(
         // content) or the enriched shape (and skips this branch).
         const workpiece = createWorkpiece(
           config.name,
-          payload.data.task,
-          payload.data.input
+          parsedMessage.data.task,
+          parsedMessage.data.input
         );
         const tmp = `${filePath}.tmp.${process.pid}`;
         writeFileSync(tmp, JSON.stringify(workpiece, null, 2));
@@ -799,7 +799,7 @@ export async function startOrchestrator(
       } else {
         log("task_received", {
           workpiece: raw.id,
-          task: payload.data.task.slice(0, 80),
+          task: parsedMessage.data.task.slice(0, 80),
         });
       }
 
