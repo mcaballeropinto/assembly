@@ -2,7 +2,7 @@
 
 Assembly is a framework for **chaining AI agents into pipelines** using folder structure as configuration. Each pipeline (a **line**) has **stations** (specialized agents) that process a task sequentially, passing results through a shared JSON file (the **workpiece**).
 
-It is invoked as a CLI (`assembly`) implemented in TypeScript, run with Bun. State is kept on disk in plain files — no database, no message queue. The dashboard is a React + shadcn SPA served by the Bun dashboard server over the same file-backed state.
+It is invoked as a CLI (`assembly`) implemented in TypeScript, run with Bun. State is kept on disk in plain files — no database, no message queue. The dashboard is a React + shadcn SPA served by the Bun dashboard server over JSON APIs backed by the same file state.
 
 ## The metaphor
 
