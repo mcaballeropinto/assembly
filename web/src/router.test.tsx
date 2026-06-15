@@ -20,6 +20,18 @@ mock.module("./dev/fetch-error-banner-demo", () => ({
   FetchErrorBannerDemo: () => null,
 }))
 
+mock.module("./routes/dev-kpi-tile", () => ({
+  DevKpiTileRoute: () => null,
+}))
+
+mock.module("./routes/dev-kpi-strip", () => ({
+  DevKpiStripRoute: () => null,
+}))
+
+mock.module("./routes/dev-station-status-dot", () => ({
+  DevStationStatusDotRoute: () => null,
+}))
+
 const { router } = await import("./router")
 
 describe("dashboard dev routes", () => {
@@ -28,5 +40,10 @@ describe("dashboard dev routes", () => {
     expect(Object.keys(router.routesByPath)).toContain("/dev/usage-chip")
     expect(Object.keys(router.routesByPath)).toContain("/dev/error-banner")
     expect(Object.keys(router.routesByPath)).toContain("/dev/fetch-error-banner")
+    expect(Object.keys(router.routesByPath)).toContain("/dev/kpi-tile")
+    expect(Object.keys(router.routesByPath)).toContain("/dev/kpi-strip")
+    expect(Object.keys(router.routesByPath)).toContain(
+      "/dev/station-status-dot",
+    )
   })
 })
