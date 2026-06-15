@@ -15,6 +15,9 @@ import {
   type ActivityFilterKey,
 } from "./lib/activity"
 import { Route as rootRoute } from "./routes/__root"
+import { DevKpiStripRoute } from "./routes/dev-kpi-strip"
+import { DevKpiTileRoute } from "./routes/dev-kpi-tile"
+import { DevStationStatusDotRoute } from "./routes/dev-station-status-dot"
 import { Route as lineRoute } from "./routes/line.$name"
 import { Route as lineKanbanRoute } from "./routes/line.$name.kanban"
 
@@ -114,6 +117,24 @@ function OverviewRouteLoader() {
   )
 }
 
+const devKpiTileRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dev/kpi-tile",
+  component: DevKpiTileRoute,
+})
+
+const devKpiStripRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dev/kpi-strip",
+  component: DevKpiStripRoute,
+})
+
+const devStationStatusDotRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dev/station-status-dot",
+  component: DevStationStatusDotRoute,
+})
+
 const dashboardRouteTree = rootRoute.addChildren([
   indexRoute,
   lineRoute.addChildren([lineKanbanRoute]),
@@ -121,6 +142,9 @@ const dashboardRouteTree = rootRoute.addChildren([
   usageChipRoute,
   errorBannerRoute,
   fetchErrorBannerRoute,
+  devKpiTileRoute,
+  devKpiStripRoute,
+  devStationStatusDotRoute,
 ])
 
 export const routeTree = dashboardRouteTree
