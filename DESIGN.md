@@ -36,7 +36,7 @@ that reads from and writes to the workpiece. The folder structure defines the li
 
 ## Dashboard
 
-The dashboard is the operational view for Assembly. It observes the same file-backed state the daemon uses, but it is not part of the orchestration path.
+The dashboard is Assembly's operational view for queues, workpieces, costs, and activity. It observes the same file-backed state the daemon uses, but it is not part of the orchestration path.
 
 ### Architecture
 

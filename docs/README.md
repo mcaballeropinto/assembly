@@ -71,7 +71,7 @@ workpiece.json        the accumulating state — one JSON file per run
 envelope              what each station returns: { summary, content?, data? }
 queues/               file-based mailboxes — moving files = moving state
 daemon                watches queues, spawns section workers, routes outputs
-dashboard             Bun-served React dashboard; reads disk, shows kanban + costs
+dashboard             Bun-served React dashboard; reads disk, shows kanban, activity + costs
 ```
 
 Everything else is a refinement on these.

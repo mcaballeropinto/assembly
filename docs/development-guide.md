@@ -216,7 +216,7 @@ The React dev server proxies `/api` to the Bun dashboard server, so frontend req
 Placement rules:
 
 - New panels and dashboard-specific components go under `web/src/components/...`, grouped by domain.
-- Route composition belongs under `web/src/routes` or the existing router structure.
+- Route composition belongs under `web/src/routes` or the existing router structure; keep route files focused on composition.
 - API client and query helpers belong under `web/src/lib`.
 - Shared wire types come from `src/dashboard-api.ts`.
 

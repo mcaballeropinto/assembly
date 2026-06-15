@@ -1,6 +1,6 @@
 # Dashboard
 
-The dashboard is a Bun HTTP server plus a React SPA. The server reads Assembly's file-backed runtime state on demand, exposes JSON API routes, and serves the built frontend from `web/dist/`.
+The dashboard is a Bun HTTP server plus a React SPA. The server reads Assembly's file-backed runtime state on demand, exposes JSON API routes, and serves the built frontend from `web/dist/`; the browser never talks directly to queue files.
 
 It is independent of the daemon. The daemon can run without the dashboard, and the dashboard can run without the daemon; when the daemon is stopped, the dashboard still shows the last state written to disk.
 
