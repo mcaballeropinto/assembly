@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { readFileSync } from "fs"
+import { resolve } from "path"
 
 import type { ApiStateResponse } from "@/lib/api"
 import {
@@ -12,6 +14,8 @@ import {
 } from "./use-dashboard-mutations"
 
 const originalFetch = globalThis.fetch
+const mutationSource = () =>
+  readFileSync(resolve(import.meta.dir, "use-dashboard-mutations.ts"), "utf-8")
 
 afterEach(() => {
   globalThis.fetch = originalFetch
@@ -134,5 +138,21 @@ describe("optimistic dashboard error movement", () => {
     expect(line?.errorsDismissed).toHaveLength(0)
     expect(line?.lineQueue.errorActive).toBe(2)
     expect(next.totals.totalErrors).toBe(2)
+  })
+
+  test("dismiss and undismiss hooks restore the previous cache and toast on failure", () => {
+    const source = mutationSource()
+
+    expect(source).toContain("const previousState")
+    expect(source).toContain("return { previousState }")
+    expect(source).toContain(
+      "queryClient.setQueryData(API_STATE_QUERY_KEY, context.previousState)"
+    )
+    expect(source).toContain(
+      'toast.error(errorMessage(error, "Failed to dismiss errors"))'
+    )
+    expect(source).toContain(
+      'toast.error(errorMessage(error, "Failed to undismiss errors"))'
+    )
   })
 })
