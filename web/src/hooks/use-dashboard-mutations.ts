@@ -7,13 +7,13 @@ import {
   releaseHeldTask,
   retryWorkpiece,
   undismissErrors,
-} from "@/lib/api"
+} from "../lib/api"
 import {
   API_STATE_QUERY_KEY,
   lineKanbanQueryKey,
   workpieceQueryKey,
-} from "@/lib/query"
-import type { ApiStateLineEntry, ApiStateResponse } from "@/lib/api"
+} from "../lib/query"
+import type { ApiStateLineEntry, ApiStateResponse } from "../lib/api"
 
 type MutationContext = {
   previousState?: ApiStateResponse

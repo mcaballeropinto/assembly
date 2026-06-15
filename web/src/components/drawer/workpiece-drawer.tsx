@@ -1,18 +1,18 @@
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 
-import { Badge } from "@/components/ui/badge"
+import { Badge } from "../ui/badge"
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@/components/ui/sheet"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { fetchWorkpiece, isApiError } from "@/lib/api"
-import { workpieceQueryKey } from "@/lib/query"
-import type { ApiWorkpieceResponse, StationResult, Workpiece } from "@/lib/api"
+} from "../ui/sheet"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs"
+import { fetchWorkpiece, isApiError } from "../../lib/api"
+import { workpieceQueryKey } from "../../lib/query"
+import type { ApiWorkpieceResponse, StationResult, Workpiece } from "../../lib/api"
 import { DrawerFooter } from "./drawer-footer"
 
 type WorkpieceData = Extract<ApiWorkpieceResponse, Workpiece>

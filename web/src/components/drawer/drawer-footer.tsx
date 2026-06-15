@@ -1,12 +1,12 @@
 import { Archive, RotateCcw, Send, type LucideIcon } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "../ui/button"
 import {
   useDismissErrors,
   useReleaseHeld,
   useRetryWorkpiece,
-} from "@/hooks/use-dashboard-mutations"
-import type { ApiWorkpieceResponse, Workpiece } from "@/lib/api"
+} from "../../hooks/use-dashboard-mutations"
+import type { ApiWorkpieceResponse, Workpiece } from "../../lib/api"
 import { getWorkpieceOutcome } from "./drawer-utils"
 
 type WorkpieceData = Extract<ApiWorkpieceResponse, Workpiece>

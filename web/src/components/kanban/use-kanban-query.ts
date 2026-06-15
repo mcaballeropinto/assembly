@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchKanbanState } from "@/lib/api";
+import { fetchKanbanState } from "../../lib/api";
 import {
   useReleaseAllHeld as useSharedReleaseAllHeld,
   useReleaseHeld as useSharedReleaseHeld,
-} from "@/hooks/use-dashboard-mutations";
-import { lineKanbanQueryKey } from "@/lib/query";
+} from "../../hooks/use-dashboard-mutations";
+import { lineKanbanQueryKey } from "../../lib/query";
 
 /**
  * Hook to fetch kanban state with 3-second polling.

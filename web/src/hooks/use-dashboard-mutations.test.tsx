@@ -1,17 +1,35 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, mock, test } from "bun:test"
 import { readFileSync } from "fs"
 import { resolve } from "path"
 
-import type { ApiStateResponse } from "@/lib/api"
+import type { ApiStateResponse } from "../lib/api"
 import {
   dismissErrors,
   retryWorkpiece,
   undismissErrors,
-} from "@/lib/api"
-import {
+} from "../lib/api"
+mock.module("@tanstack/react-query", () => ({
+  QueryClient: class {
+    getDefaultOptions() {
+      return {}
+    }
+  },
+  queryOptions: (options: unknown) => options,
+  useMutation: () => ({}),
+  useQueryClient: () => ({}),
+}))
+
+mock.module("sonner", () => ({
+  toast: {
+    error: () => {},
+    success: () => {},
+  },
+}))
+
+const {
   optimisticallyDismissErrors,
   optimisticallyUndismissErrors,
-} from "./use-dashboard-mutations"
+} = await import("./use-dashboard-mutations")
 
 const originalFetch = globalThis.fetch
 const mutationSource = () =>
