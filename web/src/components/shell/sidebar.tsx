@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { fetchApiState } from "@/lib/api"
-import { cn } from "@/lib/utils"
+import { Badge } from "../ui/badge"
+import { Button } from "../ui/button"
+import { fetchApiState } from "../../lib/api"
+import { cn } from "../../lib/utils"
 
 import type { ApiStateLineEntry } from "../../../../src/dashboard-api"
 
@@ -18,7 +18,11 @@ function readStoredCollapsedState(): boolean {
     return false
   }
 
-  return window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY) === "true"
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY) === "true"
+  } catch {
+    return false
+  }
 }
 
 function getInboxCount(line: ApiStateLineEntry): number {
@@ -56,10 +60,14 @@ export function Sidebar() {
       return
     }
 
-    window.localStorage.setItem(
-      SIDEBAR_COLLAPSE_STORAGE_KEY,
-      String(collapsed),
-    )
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_COLLAPSE_STORAGE_KEY,
+        String(collapsed),
+      )
+    } catch {
+      // Storage can be unavailable in restricted browser contexts.
+    }
   }, [collapsed])
 
   return (
