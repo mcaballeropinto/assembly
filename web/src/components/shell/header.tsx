@@ -1,6 +1,16 @@
 import { useRouterState } from "@tanstack/react-router"
 
+import {
+  ConnectionChip,
+  type ConnectionChipProps,
+} from "@/components/chips/connection-chip"
+import { UsageChip, type UsageChipProps } from "@/components/chips/usage-chip"
 import { Badge } from "../ui/badge"
+
+export type HeaderProps = {
+  connection?: ConnectionChipProps
+  usage?: UsageChipProps
+}
 
 export function getBreadcrumb(pathname: string): string {
   if (pathname === "/") {
@@ -22,7 +32,7 @@ export function getBreadcrumb(pathname: string): string {
   return "Overview"
 }
 
-export function Header() {
+export function Header({ connection, usage }: HeaderProps) {
   const breadcrumb = useRouterState({
     select: (state) => getBreadcrumb(state.location.pathname),
   })
@@ -33,9 +43,17 @@ export function Header() {
         <div className="min-w-0 truncate text-sm font-medium text-foreground">
           {breadcrumb}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Badge variant="outline">TODO connection</Badge>
-          <Badge variant="outline">TODO usage</Badge>
+        <div className="flex min-w-0 shrink-0 items-center gap-2">
+          {connection ? (
+            <ConnectionChip {...connection} />
+          ) : (
+            <Badge variant="outline">TODO connection</Badge>
+          )}
+          {usage ? (
+            <UsageChip {...usage} />
+          ) : (
+            <Badge variant="outline">TODO usage</Badge>
+          )}
           <Badge variant="outline">TODO theme</Badge>
         </div>
       </div>
