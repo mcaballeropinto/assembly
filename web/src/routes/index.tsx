@@ -2,9 +2,17 @@ import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { createRoute } from "@tanstack/react-router"
 
+import { ErrorBanner } from "../components/banners/error-banner"
+import { FetchErrorBanner } from "../components/banners/fetch-error-banner"
 import { ActivityFeed } from "../components/ui/activity-feed"
-import { Card } from "../components/ui/card"
-import { fetchDashboardState } from "../lib/api"
+import { Button } from "../components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card"
 import {
   filterActivity,
   normalizeActivity,
@@ -12,6 +20,13 @@ import {
   serializeActivitySearch,
   type ActivityFilterKey,
 } from "../lib/activity"
+import { fetchDashboardState } from "../lib/api"
+import {
+  mockBannerErrors,
+  mockFetchError,
+  noopDismiss,
+  noopRetry,
+} from "../lib/dashboard-mock-data"
 
 import { Route as rootRoute } from "./__root"
 
@@ -65,13 +80,32 @@ export function OverviewRoute() {
   }
 
   return (
-    <ActivityFeed
-      items={filtered}
-      totalItems={normalized.length}
-      selectedFilters={selectedFilters}
-      onSelectedFiltersChange={handleSelectedFiltersChange}
-      title="Activity"
-    />
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <ErrorBanner errors={mockBannerErrors} onDismiss={noopDismiss} />
+        <FetchErrorBanner error={mockFetchError} onRetry={noopRetry} />
+      </div>
+
+      <Card className="max-w-2xl">
+        <CardHeader>
+          <CardTitle>Chrome primitive mock wiring</CardTitle>
+          <CardDescription>
+            Header chips and page banners are rendered from mock data.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button>It works</Button>
+        </CardContent>
+      </Card>
+
+      <ActivityFeed
+        items={filtered}
+        totalItems={normalized.length}
+        selectedFilters={selectedFilters}
+        onSelectedFiltersChange={handleSelectedFiltersChange}
+        title="Activity"
+      />
+    </div>
   )
 }
 
