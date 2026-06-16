@@ -988,11 +988,10 @@ export async function startOrchestrator(
                     section.queue.inbox,
                     fileName
                   );
-                  await Bun.write(
-                    inboxPath,
-                    JSON.stringify(workpiece, null, 2)
-                  );
+                  const tmp = `${inboxPath}.tmp.${process.pid}`;
+                  writeFileSync(tmp, JSON.stringify(workpiece, null, 2));
                   recordEmit(section.queue.inbox, fileName, "transition");
+                  renameSync(tmp, inboxPath);
                   // Move retry sidecar: write at inbox (no longer in backoff), clear from output
                   const classPolicy2 = retryPolicy[failureClass] ?? retryPolicy.unknown;
                   writeRetryState(inboxPath, {
@@ -2257,19 +2256,16 @@ export async function triggerDownstream(
         // Stable, collision-free filename even when many tasks fan out in the
         // same millisecond.
         const taskFileName = `task-${baseTs}-${i.toString().padStart(3, "0")}-from-${config.name}.json`;
-        await Bun.write(
-          resolve(targetInbox, taskFileName),
-          JSON.stringify(
-            {
-              schema_version: CURRENT_INBOX_PAYLOAD_VERSION,
-              task: `Triggered by ${config.name} (${workpiece.id}) — fanout ${i + 1}/${sourceArr.length}`,
-              input,
-            },
-            null,
-            2
-          )
-        );
+        const taskFilePath = resolve(targetInbox, taskFileName);
+        const payload = {
+          schema_version: CURRENT_INBOX_PAYLOAD_VERSION,
+          task: `Triggered by ${config.name} (${workpiece.id}) — fanout ${i + 1}/${sourceArr.length}`,
+          input,
+        };
+        const tmp = `${taskFilePath}.tmp.${process.pid}`;
+        writeFileSync(tmp, JSON.stringify(payload, null, 2));
         recordEmit(targetInbox, taskFileName, "fanout");
+        renameSync(tmp, taskFilePath);
         emitted++;
       }
 
@@ -2285,19 +2281,15 @@ export async function triggerDownstream(
     // Single-task path — original behaviour preserved.
     const taskFileName = `task-${Date.now()}-from-${config.name}.json`;
     const taskFilePath = resolve(targetInbox, taskFileName);
-    await Bun.write(
-      taskFilePath,
-      JSON.stringify(
-        {
-          schema_version: CURRENT_INBOX_PAYLOAD_VERSION,
-          task: `Triggered by ${config.name} (${workpiece.id})`,
-          input: sharedInput,
-        },
-        null,
-        2
-      )
-    );
+    const payload = {
+      schema_version: CURRENT_INBOX_PAYLOAD_VERSION,
+      task: `Triggered by ${config.name} (${workpiece.id})`,
+      input: sharedInput,
+    };
+    const tmp = `${taskFilePath}.tmp.${process.pid}`;
+    writeFileSync(tmp, JSON.stringify(payload, null, 2));
     recordEmit(targetInbox, taskFileName, "trigger");
+    renameSync(tmp, taskFilePath);
 
     log("trigger_fired", {
       source: config.name,
