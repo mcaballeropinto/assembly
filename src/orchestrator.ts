@@ -34,6 +34,16 @@ import { StationName } from './ids';
 
 // ─── Process-group helpers ────────────────────────────────────────
 
+export function buildWorkerEnv(
+  sectionName: string,
+  baseEnv: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  return {
+    ...baseEnv,
+    ASSEMBLY_WORKER: sectionName,
+  };
+}
+
 /**
  * Send a signal to an entire process group.
  * Asserts pid > 1 to prevent catastrophic mis-signaling
@@ -1299,7 +1309,7 @@ export async function startOrchestrator(
     const proc = Bun.spawn(["bun", "run", workerPath, section.dir, processingPath], {
       stdout: "pipe",
       stderr: stderrFd !== undefined ? stderrFd : "pipe",
-      env: { ...process.env },
+      env: buildWorkerEnv(section.name),
       cwd: resolve(options.linePath, ".."),
       detached: true, // setsid() — worker becomes session + process group leader (pgid === pid)
     });
