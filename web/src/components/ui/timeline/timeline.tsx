@@ -1,7 +1,7 @@
 // Vendored from ReUI Radix timeline component docs, retrieved 2026-06-09; do not edit without noting upstream.
 import * as React from "react"
 
-import { cn } from "@/lib/utils"
+import { cn } from "../../../lib/utils"
 
 type TimelineContextValue = {
   orientation: "horizontal" | "vertical"

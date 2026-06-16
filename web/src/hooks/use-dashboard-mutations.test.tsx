@@ -8,17 +8,6 @@ import {
   retryWorkpiece,
   undismissErrors,
 } from "../lib/api"
-mock.module("@tanstack/react-query", () => ({
-  QueryClient: class {
-    getDefaultOptions() {
-      return {}
-    }
-  },
-  queryOptions: (options: unknown) => options,
-  useMutation: () => ({}),
-  useQueryClient: () => ({}),
-}))
-
 mock.module("sonner", () => ({
   toast: {
     error: () => {},
