@@ -120,9 +120,8 @@ afterEach(() => {
 });
 
 describe("global dashboard snapshot cache", () => {
-  test("caches state, line state, kanban, and flow metrics until their TTLs expire", async () => {
-    const fixture = await createFixture("ttl");
-    const linePath = `/api/line/${encodeURIComponent(fixture.lineName)}`;
+  test("caches global state until its TTL expires", async () => {
+    const fixture = await createFixture("global-ttl");
 
     const firstGlobal = await (await request("/api/state")).json() as any;
     writeQueueFile(fixture.lineDir, "done", "done-1.json", workpiece("done-1"));
@@ -134,7 +133,13 @@ describe("global dashboard snapshot cache", () => {
     const refreshedGlobal = await (await request("/api/state")).json() as any;
     expect(refreshedGlobal.timestamp).not.toBe(firstGlobal.timestamp);
     expect(refreshedGlobal.totals.totalDone).toBe(1);
+  }, 7_000);
 
+  test("caches per-line state until its TTL expires", async () => {
+    const fixture = await createFixture("line-ttl");
+    const linePath = `/api/line/${encodeURIComponent(fixture.lineName)}`;
+
+    writeQueueFile(fixture.lineDir, "done", "done-1.json", workpiece("done-1"));
     const firstLine = await (await request(linePath)).json() as any;
     writeQueueFile(fixture.lineDir, "done", "done-2.json", workpiece("done-2"));
     const cachedLine = await (await request(linePath)).json() as any;
@@ -145,6 +150,11 @@ describe("global dashboard snapshot cache", () => {
     const refreshedLine = await (await request(linePath)).json() as any;
     expect(refreshedLine.timestamp).not.toBe(firstLine.timestamp);
     expect(refreshedLine.lineQueue.done).toBe(2);
+  }, 7_000);
+
+  test("caches kanban state until its TTL expires", async () => {
+    const fixture = await createFixture("kanban-ttl");
+    const linePath = `/api/line/${encodeURIComponent(fixture.lineName)}`;
 
     const firstKanban = await (await request(`${linePath}/kanban`)).json() as any;
     writeQueueFile(fixture.lineDir, "inbox", "inbox-1.json", workpiece("inbox-1"));
@@ -156,6 +166,11 @@ describe("global dashboard snapshot cache", () => {
     const refreshedKanban = await (await request(`${linePath}/kanban`)).json() as any;
     expect(refreshedKanban.lastUpdated).not.toBe(firstKanban.lastUpdated);
     expect(findColumn(refreshedKanban, "inbox").cards.some((c: { id: string }) => c.id === "inbox-1")).toBe(true);
+  }, 7_000);
+
+  test("caches flow metrics until its TTL expires", async () => {
+    const fixture = await createFixture("flow-ttl");
+    const linePath = `/api/line/${encodeURIComponent(fixture.lineName)}`;
 
     const firstFlow = await (await request(`${linePath}/flow-metrics`)).json() as any;
     writeQueueFile(fixture.lineDir, "inbox", "inbox-2.json", workpiece("inbox-2"));
@@ -167,7 +182,7 @@ describe("global dashboard snapshot cache", () => {
     const refreshedFlow = await (await request(`${linePath}/flow-metrics`)).json() as any;
     expect(refreshedFlow.timestamp).not.toBe(firstFlow.timestamp);
     expect(itemsInFlight(refreshedFlow)).toBe(itemsInFlight(firstFlow) + 1);
-  });
+  }, 10_000);
 
   test("invalidates affected snapshots after successful mutations only", async () => {
     const fixture = await createFixture("mutations");

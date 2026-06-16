@@ -218,6 +218,8 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
   port: number;
   fetch?: (req: Request) => Promise<Response>;
 } {
+  snapCache.clear();
+
   const webDistDir = resolve(process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
   const webDistIndex = resolve(webDistDir, "index.html");
   const webDistAssetsDir = resolve(webDistDir, "assets");
