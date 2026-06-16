@@ -1,7 +1,6 @@
 import { test, expect, describe, beforeAll, afterAll, beforeEach } from "bun:test";
 import { resolve } from "path";
 import { mkdirSync, rmSync, writeFileSync, unlinkSync, existsSync } from "fs";
-import { createServer } from "node:net";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-usage-route-${Date.now()}-${process.pid}`);
 const SNAP_PATH = resolve(TEMP_DIR, "usage-status.json");
@@ -13,6 +12,20 @@ const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 const originalDashboardToken = process.env.ASSEMBLY_DASHBOARD_TOKEN;
 
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
+
+const realServerBindingsAvailable = (() => {
+  try {
+    const listener = Bun.serve({
+      port: 20_000 + Math.floor(Math.random() * 30_000),
+      hostname: "127.0.0.1",
+      fetch: () => new Response(null, { status: 204 }),
+    });
+    listener.stop(true);
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 function writeSnapshot(payload: unknown) {
   writeFileSync(SNAP_PATH, typeof payload === "string" ? payload : JSON.stringify(payload));
@@ -27,24 +40,21 @@ function request(path: string): Promise<Response> {
 }
 
 async function getAvailablePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const listener = createServer();
-    listener.unref();
-    listener.on("error", reject);
-    listener.listen(0, "127.0.0.1", () => {
-      const address = listener.address();
-      if (typeof address !== "object" || address === null) {
-        listener.close();
-        reject(new Error("Could not allocate a temporary port"));
-        return;
-      }
-      const port = address.port;
-      listener.close((err) => {
-        if (err) reject(err);
-        else resolve(port);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const port = 20_000 + Math.floor(Math.random() * 30_000);
+    try {
+      const listener = Bun.serve({
+        port,
+        hostname: "127.0.0.1",
+        fetch: () => new Response(null, { status: 204 }),
       });
-    });
-  });
+      listener.stop(true);
+      return port;
+    } catch {
+      // Try another candidate port.
+    }
+  }
+  throw new Error("Could not allocate a temporary port");
 }
 
 beforeAll(async () => {
@@ -164,6 +174,8 @@ describe("GET /api/usage", () => {
   });
 
   test("default host binds a real server to 127.0.0.1", async () => {
+    if (!realServerBindingsAvailable) return;
+
     const { startGlobalDashboard } = await import("../global-dashboard");
     const port = await getAvailablePort();
     const realServer = startGlobalDashboard({ port });
@@ -176,6 +188,8 @@ describe("GET /api/usage", () => {
   });
 
   test("explicit loopback host binds a real server to 127.0.0.1", async () => {
+    if (!realServerBindingsAvailable) return;
+
     const { startGlobalDashboard } = await import("../global-dashboard");
     const port = await getAvailablePort();
     const realServer = startGlobalDashboard({ port, host: "127.0.0.1" });

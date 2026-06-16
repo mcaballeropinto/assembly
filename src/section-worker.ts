@@ -36,7 +36,6 @@ const HEARTBEAT_MS = 30_000;
 
 /** Atomic workpiece write: the on-disk file is never torn, so the signal
  *  handler (gracefulFlush) and orchestrator recovery always parse cleanly. */
-// eslint-disable-next-line unused-imports/no-unused-vars -- Step 1 adds the helper; call sites move in Step 2.
 function writeWorkpieceAtomic(path: string, wp: Workpiece): void {
   const tmp = `${path}.tmp.${process.pid}`;
   writeFileSync(tmp, JSON.stringify(wp, null, 2));
