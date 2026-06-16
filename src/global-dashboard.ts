@@ -25,6 +25,40 @@ interface DiscoveredLine {
   lineName: string;
 }
 
+const GLOBAL_STATE_CACHE_KEY = "global:state";
+const STATE_TTL_MS = 2000;
+const KANBAN_TTL_MS = 2000;
+const FLOW_METRICS_TTL_MS = 5000;
+
+const snapCache = new Map<string, { at: number; value: unknown }>();
+
+async function cached<T>(key: string, ttlMs: number, build: () => Promise<T>): Promise<T> {
+  const hit = snapCache.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.value as T;
+  const value = await build();
+  snapCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+function fullStateCacheKey(linePath: string): string {
+  return `line:${linePath}:full`;
+}
+
+function kanbanCacheKey(linePath: string): string {
+  return `line:${linePath}:kanban`;
+}
+
+function flowMetricsCacheKey(linePath: string): string {
+  return `line:${linePath}:flow-metrics`;
+}
+
+function invalidateLineSnapshot(linePath: string): void {
+  snapCache.delete(fullStateCacheKey(linePath));
+  snapCache.delete(kanbanCacheKey(linePath));
+  snapCache.delete(flowMetricsCacheKey(linePath));
+  snapCache.delete(GLOBAL_STATE_CACHE_KEY);
+}
+
 // ─── Line Discovery ─────────────────────────────────────────────────
 
 async function discoverAndMapLines(): Promise<DiscoveredLine[]> {
@@ -59,7 +93,7 @@ async function buildGlobalState(lines: DiscoveredLine[]): Promise<GlobalState> {
   for (const dl of lines) {
     totals.lines++;
     try {
-      const state = await getFullState(dl.linePath);
+      const state = await cached(fullStateCacheKey(dl.linePath), STATE_TTL_MS, () => getFullState(dl.linePath));
       if ("error" in state) {
         totals.linesErrored++;
         lineStates.push({
@@ -209,7 +243,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
 
       // Global state API
       if (url.pathname === "/api/state") {
-        const state = await buildGlobalState(discoveredLines);
+        const state = await cached(GLOBAL_STATE_CACHE_KEY, STATE_TTL_MS, () => buildGlobalState(discoveredLines));
         return Response.json(state);
       }
 
@@ -240,6 +274,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
             return Response.json({ error: "fileNames array required" }, { status: 400 });
           }
           const updated = dismissFilenames(dl.linePath, body.fileNames);
+          invalidateLineSnapshot(dl.linePath);
           return Response.json({ dismissed: updated });
         } catch (err) {
           return Response.json({ error: (err as Error).message }, { status: 500 });
@@ -257,6 +292,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
             return Response.json({ error: "fileNames array required" }, { status: 400 });
           }
           const updated = undismissFilenames(dl.linePath, body.fileNames);
+          invalidateLineSnapshot(dl.linePath);
           return Response.json({ dismissed: updated });
         } catch (err) {
           return Response.json({ error: (err as Error).message }, { status: 500 });
@@ -287,6 +323,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
             }
           }
           const result = releaseHeldTasks(dl.linePath, { file: taskFile, all });
+          invalidateLineSnapshot(dl.linePath);
           return Response.json(result);
         } catch (err) {
           if (err instanceof InvalidTaskFileError) {
@@ -323,6 +360,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
               }) + "\n"
             );
           } catch {}
+          invalidateLineSnapshot(dl.linePath);
           return Response.json({ ok: true, newId: result.newId, newFileName: result.newFileName });
         } catch (err) {
           if (err instanceof InvalidRetryFileNameError) {
@@ -385,7 +423,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
         const dl = linesByName.get(lineName);
         if (!dl) return Response.json({ error: `Line "${lineName}" not found` }, { status: 404 });
         try {
-          const kb = await getKanbanState(dl.linePath);
+          const kb = await cached(kanbanCacheKey(dl.linePath), KANBAN_TTL_MS, () => getKanbanState(dl.linePath));
           return Response.json(kb);
         } catch (err) {
           return Response.json({ error: (err as Error).message }, { status: 500 });
@@ -420,14 +458,16 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
         const dl = linesByName.get(lineName);
         if (!dl) return Response.json({ error: `Line "${lineName}" not found` }, { status: 404 });
         try {
-          const { config } = await loadLine(dl.linePath);
-          const sequence: string[] = [];
-          for (const step of config.sequence) {
-            if (typeof step === "string") sequence.push(step);
-            else if ("parallel" in step) sequence.push(...step.parallel);
-            else if ("station" in step) sequence.push((step as { station: { name: string } }).station.name);
-          }
-          const metrics = computeFlowMetrics(dl.linePath, sequence);
+          const metrics = await cached(flowMetricsCacheKey(dl.linePath), FLOW_METRICS_TTL_MS, async () => {
+            const { config } = await loadLine(dl.linePath);
+            const sequence: string[] = [];
+            for (const step of config.sequence) {
+              if (typeof step === "string") sequence.push(step);
+              else if ("parallel" in step) sequence.push(...step.parallel);
+              else if ("station" in step) sequence.push((step as { station: { name: string } }).station.name);
+            }
+            return computeFlowMetrics(dl.linePath, sequence);
+          });
           return Response.json(metrics);
         } catch (err) {
           return Response.json({ error: (err as Error).message }, { status: 500 });
@@ -447,7 +487,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
           );
         }
         try {
-          const state = await getFullState(dl.linePath);
+          const state = await cached(fullStateCacheKey(dl.linePath), STATE_TTL_MS, () => getFullState(dl.linePath));
           return Response.json(state);
         } catch (err) {
           return Response.json(
@@ -588,4 +628,3 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
     port: server.port ?? options.port,
   };
 }
-
