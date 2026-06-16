@@ -34,6 +34,14 @@ import { WorkpieceSchema } from "./schemas/workpiece";
 
 const HEARTBEAT_MS = 30_000;
 
+/** Atomic workpiece write: the on-disk file is never torn, so the signal
+ *  handler (gracefulFlush) and orchestrator recovery always parse cleanly. */
+function writeWorkpieceAtomic(path: string, wp: Workpiece): void {
+  const tmp = `${path}.tmp.${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(wp, null, 2));
+  renameSync(tmp, path);
+}
+
 // ─── Repair Helpers ──────────────────────────────────────────────────
 
 export type RepairTransport =
