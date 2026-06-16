@@ -45,6 +45,8 @@ const CLK_TCK = 100;
 export function scanAndReap(opts: {
   binaryAllowlist: RegExp;
   olderThanMs: number;
+  procRoot?: string;
+  kill?: (pid: number, sig: string) => void;
   /**
    * Set of pids the caller wants protected from reaping — and any process
    * whose ppid is in this set (so a worker's child claude/MCP processes are
@@ -55,11 +57,16 @@ export function scanAndReap(opts: {
    */
   protectedPids?: Set<number>;
 }): ReapedProcess[] {
-  const { binaryAllowlist, olderThanMs } = opts;
+  const { binaryAllowlist, olderThanMs, procRoot = "/proc" } = opts;
+  const kill =
+    opts.kill ??
+    ((pid: number, sig: string) => {
+      process.kill(pid, sig);
+    });
   const protectedPids = opts.protectedPids ?? new Set<number>();
 
   // Bail on non-Linux — /proc doesn't exist
-  if (!existsSync("/proc/uptime")) {
+  if (!existsSync(`${procRoot}/uptime`)) {
     return [];
   }
 
@@ -67,15 +74,15 @@ export function scanAndReap(opts: {
 
   try {
     // Read system uptime (seconds since boot)
-    const uptimeStr = readFileSync("/proc/uptime", "utf-8");
+    const uptimeStr = readFileSync(`${procRoot}/uptime`, "utf-8");
     const uptimeSeconds = parseFloat(uptimeStr.split(" ")[0]);
     const nowMs = Date.now();
 
-    const entries = readdirSync("/proc").filter((e) => /^\d+$/.test(e));
+    const entries = readdirSync(procRoot).filter((e) => /^\d+$/.test(e));
 
     for (const entry of entries) {
       try {
-        const stat = readFileSync(`/proc/${entry}/stat`, "utf-8");
+        const stat = readFileSync(`${procRoot}/${entry}/stat`, "utf-8");
 
         // Parse /proc/<pid>/stat
         // Field 2 (comm) is enclosed in parens and can contain spaces/parens
@@ -118,7 +125,7 @@ export function scanAndReap(opts: {
 
         // All filters passed — kill the orphan
         try {
-          process.kill(pid, "SIGKILL");
+          kill(pid, "SIGKILL");
         } catch (err: any) {
           // ESRCH = already dead, EPERM = can't kill (shouldn't happen for our own children)
           if (err?.code !== "ESRCH") continue;

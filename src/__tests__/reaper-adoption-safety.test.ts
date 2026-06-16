@@ -1,6 +1,41 @@
 import { test, expect, describe } from "bun:test";
-import { existsSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { scanAndReap } from "../reaper";
+
+function createProcFixture() {
+  const procRoot = mkdtempSync(join(tmpdir(), "reaper-proc-"));
+  writeFileSync(join(procRoot, "uptime"), "1000.00 0.00\n");
+  return procRoot;
+}
+
+function writeProcStat(
+  procRoot: string,
+  pid: number,
+  comm: string,
+  ppid: number,
+  startTimeJiffies: number
+) {
+  const pidDir = join(procRoot, String(pid));
+  mkdirSync(pidDir);
+  const afterComm = [
+    "S",
+    String(ppid),
+    ...Array(17).fill("0"),
+    String(startTimeJiffies),
+  ];
+  writeFileSync(
+    join(pidDir, "stat"),
+    `${pid} (${comm}) ${afterComm.join(" ")}\n`
+  );
+}
 
 /**
  * The reaper kills PPID=1 processes whose comm matches an allowlist (claude,
@@ -11,6 +46,56 @@ import { scanAndReap } from "../reaper";
  * workers or their LLM children. These tests exercise scanAndReap directly.
  */
 describe("reaper safety against adopted workers", () => {
+  test("scanAndReap uses injected procRoot and kill for matching old orphans", () => {
+    const procRoot = createProcFixture();
+    try {
+      writeProcStat(procRoot, 4242, "claude", 1, 100);
+      const kills: Array<{ pid: number; sig: string }> = [];
+
+      const reaped = scanAndReap({
+        binaryAllowlist: /^claude$/,
+        olderThanMs: 60_000,
+        procRoot,
+        kill: (pid, sig) => {
+          kills.push({ pid, sig });
+        },
+      });
+
+      expect(kills).toEqual([{ pid: 4242, sig: "SIGKILL" }]);
+      expect(reaped).toHaveLength(1);
+      expect(reaped[0]).toMatchObject({
+        pid: 4242,
+        comm: "claude",
+        ppid: 1,
+        startTimeJiffies: 100,
+      });
+    } finally {
+      rmSync(procRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("scanAndReap returns [] for incomplete injected procRoot without killing", () => {
+    const procRoot = mkdtempSync(join(tmpdir(), "reaper-proc-empty-"));
+    try {
+      mkdirSync(join(procRoot, "self"));
+      const kills: Array<{ pid: number; sig: string }> = [];
+
+      const reaped = scanAndReap({
+        binaryAllowlist: /^claude$/,
+        olderThanMs: 0,
+        procRoot,
+        kill: (pid, sig) => {
+          kills.push({ pid, sig });
+        },
+      });
+
+      expect(reaped).toEqual([]);
+      expect(kills).toEqual([]);
+    } finally {
+      rmSync(procRoot, { recursive: true, force: true });
+    }
+  });
+
   test("protectedPids is honored and scanAndReap accepts the option", () => {
     // scanAndReap is the production reaper — it actually SIGKILLs every
     // PPID=1 process on the host whose comm matches the allowlist and which
