@@ -6,7 +6,6 @@
 
 # Dependencies
 node_modules/
-bun.lock
 
 # Runtime state (per-line queues, memory, envelopes, per-line outputs)
 lines/*/queues/
