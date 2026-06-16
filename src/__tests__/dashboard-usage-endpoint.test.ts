@@ -1,6 +1,7 @@
 import { test, expect, describe, beforeAll, afterAll, beforeEach } from "bun:test";
 import { resolve } from "path";
 import { mkdirSync, rmSync, writeFileSync, unlinkSync, existsSync } from "fs";
+import { createServer } from "node:net";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-usage-route-${Date.now()}-${process.pid}`);
 const SNAP_PATH = resolve(TEMP_DIR, "usage-status.json");
@@ -9,6 +10,7 @@ const LINE_DIR = resolve(TEMP_DIR, "lines");
 const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalSnapEnv = process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
+const originalDashboardToken = process.env.ASSEMBLY_DASHBOARD_TOKEN;
 
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
 
@@ -22,6 +24,27 @@ function removeSnapshot() {
 
 function request(path: string): Promise<Response> {
   return server!.fetch!(new Request(`http://localhost${path}`));
+}
+
+async function getAvailablePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const listener = createServer();
+    listener.unref();
+    listener.on("error", reject);
+    listener.listen(0, "127.0.0.1", () => {
+      const address = listener.address();
+      if (typeof address !== "object" || address === null) {
+        listener.close();
+        reject(new Error("Could not allocate a temporary port"));
+        return;
+      }
+      const port = address.port;
+      listener.close((err) => {
+        if (err) reject(err);
+        else resolve(port);
+      });
+    });
+  });
 }
 
 beforeAll(async () => {
@@ -43,6 +66,8 @@ afterAll(() => {
   else process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = originalSnapEnv;
   if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
   else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
+  if (originalDashboardToken === undefined) delete process.env.ASSEMBLY_DASHBOARD_TOKEN;
+  else process.env.ASSEMBLY_DASHBOARD_TOKEN = originalDashboardToken;
   try {
     rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}
@@ -136,5 +161,52 @@ describe("GET /api/usage", () => {
     const body = await res.json() as { checkedAt: string; ageMs: number | null };
     expect(body.checkedAt).toBe("not-a-date");
     expect(body.ageMs).toBeNull();
+  });
+
+  test("default host binds a real server to 127.0.0.1", async () => {
+    const { startGlobalDashboard } = await import("../global-dashboard");
+    const port = await getAvailablePort();
+    const realServer = startGlobalDashboard({ port });
+    try {
+      const res = await fetch(`http://127.0.0.1:${realServer.port}/api/usage`);
+      expect(res.status).toBe(200);
+    } finally {
+      realServer.stop();
+    }
+  });
+
+  test("explicit loopback host binds a real server to 127.0.0.1", async () => {
+    const { startGlobalDashboard } = await import("../global-dashboard");
+    const port = await getAvailablePort();
+    const realServer = startGlobalDashboard({ port, host: "127.0.0.1" });
+    try {
+      const res = await fetch(`http://127.0.0.1:${realServer.port}/api/usage`);
+      expect(res.status).toBe(200);
+    } finally {
+      realServer.stop();
+    }
+  });
+
+  test("non-loopback host without token warns but does not refuse yet", async () => {
+    const { startGlobalDashboard } = await import("../global-dashboard");
+    const originalWarn = console.warn;
+    const warnings: string[] = [];
+    delete process.env.ASSEMBLY_DASHBOARD_TOKEN;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+
+    let warningServer: { stop: () => void } | null = null;
+    try {
+      warningServer = startGlobalDashboard({ port: 0, host: "0.0.0.0" });
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain("non-loopback");
+      expect(warnings[0]).toContain("ASSEMBLY_DASHBOARD_TOKEN");
+    } finally {
+      if (warningServer) warningServer.stop();
+      console.warn = originalWarn;
+      if (originalDashboardToken === undefined) delete process.env.ASSEMBLY_DASHBOARD_TOKEN;
+      else process.env.ASSEMBLY_DASHBOARD_TOKEN = originalDashboardToken;
+    }
   });
 });

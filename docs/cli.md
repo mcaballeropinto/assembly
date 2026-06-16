@@ -123,12 +123,12 @@ Signals:
 ## `dashboard` — web UI
 
 ```bash
-assembly dashboard [start] [--port 4111]
+assembly dashboard [start] [--port 4111] [--host 127.0.0.1]
 assembly dashboard stop
 assembly dashboard status
 ```
 
-Independent of the daemon — reads disk directly. Defaults to port 4111 (set via `--port`). PID written to `~/.assembly/dashboard.pid`. See [`dashboard.md`](./dashboard.md).
+Independent of the daemon — reads disk directly. Defaults to port `4111` and host `127.0.0.1`, configurable via `--port` and `--host`. PID written to `~/.assembly/dashboard.pid`. See [`dashboard.md`](./dashboard.md).
 
 ---
 

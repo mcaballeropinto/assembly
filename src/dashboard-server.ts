@@ -8,7 +8,7 @@
  * startGlobalDashboard() for the actual HTTP server.
  *
  * Usage:
- *   bun run src/dashboard-server.ts [--port 4111]
+ *   bun run src/dashboard-server.ts [--host 127.0.0.1] [--port 4111]
  */
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
@@ -25,9 +25,18 @@ function getPort(): number {
   return 4111;
 }
 
+function getHost(): string {
+  const idx = process.argv.indexOf("--host");
+  if (idx !== -1 && idx + 1 < process.argv.length) {
+    return process.argv[idx + 1];
+  }
+  return "127.0.0.1";
+}
+
 loadEnvFiles();
 
 const port = getPort();
+const host = getHost();
 
 // PID file management — prevent double-start
 if (existsSync(DASHBOARD_PID_FILE)) {
@@ -49,11 +58,11 @@ if (existsSync(DASHBOARD_PID_FILE)) {
   }
 }
 
-const dashboard = startGlobalDashboard({ port });
+const dashboard = startGlobalDashboard({ port, host });
 
 writeFileSync(
   DASHBOARD_PID_FILE,
-  JSON.stringify({ pid: process.pid, port })
+  JSON.stringify({ pid: process.pid, port, host })
 );
 
 const cleanup = () => {

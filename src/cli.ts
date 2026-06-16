@@ -32,7 +32,7 @@ Usage:
   assembly daemon stop                              Stop the running daemon
   assembly daemon reload [--timeout 30]             Graceful reload — pick up new code/config without killing workers
   assembly daemon status                            Show daemon status
-  assembly dashboard [--port N]                     Start dashboard server (default: 4111)
+  assembly dashboard [--port N] [--host HOST]       Start dashboard server (default: 127.0.0.1:4111)
   assembly dashboard stop                           Stop the dashboard server
   assembly dashboard status                         Show dashboard status
   assembly enqueue <line> --task "..." [--hold] [--key <name>] [--depends-on a,b]
@@ -72,7 +72,7 @@ Environment:
 
 Examples:
   assembly daemon start
-  assembly dashboard --port 4111
+  assembly dashboard --host 127.0.0.1 --port 4111
   assembly enqueue hello-world --task "Greet a new contributor"
   assembly enqueue repo-health-digest --task "Audit Anthropic SDKs" \\
     --input '{"repos":["anthropics/anthropic-sdk-python"]}'
@@ -929,7 +929,7 @@ async function handleDaemonStatus() {
       try {
         const dashPid = JSON.parse(readFileSync(DASHBOARD_PID_FILE, "utf-8"));
         process.kill(dashPid.pid, 0);
-        console.log(`  Dashboard: http://localhost:${dashPid.port} (PID: ${dashPid.pid})`);
+        console.log(`  Dashboard: http://${dashPid.host ?? "localhost"}:${dashPid.port} (PID: ${dashPid.pid})`);
       } catch {
         console.log(`  Dashboard: not running`);
       }
@@ -964,7 +964,7 @@ async function handleDashboardCommand(args: string[]) {
         await handleDashboardStart(args);
       } else {
         console.error(`Unknown dashboard subcommand: ${subcommand}`);
-        console.log("Usage: assembly dashboard [start|stop|status] [--port N]");
+        console.log("Usage: assembly dashboard [start|stop|status] [--port N] [--host HOST]");
         process.exit(1);
       }
   }
@@ -973,6 +973,7 @@ async function handleDashboardCommand(args: string[]) {
 async function handleDashboardStart(args: string[]) {
   const portStr = getFlag(args, "--port");
   const port = portStr ? parseInt(portStr, 10) : 4111;
+  const host = getFlag(args, "--host") ?? "127.0.0.1";
 
   console.log(`\n🏭 Assembly — Dashboard\n`);
 
@@ -997,11 +998,11 @@ async function handleDashboardStart(args: string[]) {
     } catch {}
   }
 
-  const dashboard = startGlobalDashboard({ port });
+  const dashboard = startGlobalDashboard({ port, host });
 
   writeFileSync(
     DASHBOARD_PID_FILE,
-    JSON.stringify({ pid: process.pid, port })
+    JSON.stringify({ pid: process.pid, port, host })
   );
 
   const cleanup = () => {
@@ -1011,7 +1012,7 @@ async function handleDashboardStart(args: string[]) {
   };
   process.on("exit", cleanup);
 
-  console.log(`  Dashboard: http://localhost:${port}`);
+  console.log(`  Dashboard: http://${host}:${port}`);
   console.log(`  Press Ctrl+C to stop.\n`);
 
   process.on("SIGINT", () => {
@@ -1068,7 +1069,7 @@ function handleDashboardStatusCmd() {
     }
     console.log(`\n🏭 Assembly Dashboard`);
     console.log(`  PID: ${pidData.pid}`);
-    console.log(`  URL: http://localhost:${pidData.port}\n`);
+    console.log(`  URL: http://${pidData.host ?? "localhost"}:${pidData.port}\n`);
   } catch (err) {
     console.error(`Error reading dashboard status: ${(err as Error).message}`);
   }

@@ -22,12 +22,14 @@ Key implementation files:
 ## Running It
 
 ```bash
-assembly dashboard [--port 4111]
+assembly dashboard [--port 4111] [--host 127.0.0.1]
 ```
 
-The default port is `4111`. Browse to `http://localhost:4111`.
+The default bind host is `127.0.0.1` and the default port is `4111`. Browse to `http://127.0.0.1:4111` or `http://localhost:4111`.
 
-The process writes `~/.assembly/dashboard.pid` with `{ pid, port }`. The CLI refuses to double-start when that PID still points at a live process.
+Remote exposure requires an explicit `--host` value and, after the auth hardening step lands, `ASSEMBLY_DASHBOARD_TOKEN`.
+
+The process writes `~/.assembly/dashboard.pid` with `{ pid, port, host }`. The CLI refuses to double-start when that PID still points at a live process.
 
 To stop it:
 

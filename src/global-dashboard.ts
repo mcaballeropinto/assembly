@@ -18,6 +18,7 @@ const DEFAULT_WEB_DIST_DIR = resolve(import.meta.dir, "..", "web", "dist");
 
 export interface GlobalDashboardOptions {
   port: number;
+  host?: string;
 }
 
 interface DiscoveredLine {
@@ -209,6 +210,10 @@ function getRawPathname(requestUrl: string): string {
   return path || "/";
 }
 
+function isLoopbackDashboardHost(host: string): boolean {
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+}
+
 /**
  * Start the unified multi-line dashboard HTTP server.
  * Discovers lines independently and reads all state from the filesystem.
@@ -219,7 +224,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
   fetch?: (req: Request) => Promise<Response>;
 } {
   snapCache.clear();
-
+  const host = options.host ?? "127.0.0.1";
   const webDistDir = resolve(process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
   const webDistIndex = resolve(webDistDir, "index.html");
   const webDistAssetsDir = resolve(webDistDir, "assets");
@@ -607,6 +612,12 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
       });
   };
 
+  if (!isLoopbackDashboardHost(host) && !process.env.ASSEMBLY_DASHBOARD_TOKEN) {
+    console.warn(
+      "Warning: dashboard host is non-loopback; Step 2 will require ASSEMBLY_DASHBOARD_TOKEN for this binding."
+    );
+  }
+
   if (options.port === 0) {
     return {
       stop: () => clearInterval(refreshInterval),
@@ -617,10 +628,11 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
 
   const server = Bun.serve({
     port: options.port,
+    hostname: host,
     fetch: handleRequest,
   });
 
-  console.log(`\n  Dashboard: http://localhost:${server.port}\n`);
+  console.log(`\n  Dashboard: http://${host}:${server.port}\n`);
 
   return {
     stop: () => {
