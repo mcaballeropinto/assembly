@@ -338,6 +338,7 @@ export type ApiWorkpieceResponse =
   | (Workpiece & {
       _source?: string;
       _activity?: unknown[];
+      _activityMeta?: { bounded: true; maxBytes: number; note: string };
       _taskEventStations?: StationMeta[];
     })
   | ApiErrorResponse;

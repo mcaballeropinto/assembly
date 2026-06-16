@@ -231,4 +231,36 @@ sequence:
     expect(freshness["station-a"].state).toBe("fresh");
     expect(freshness["station-a"].last_updated_at).toBe(recentTs);
   });
+
+  it("uses the newest retained heartbeat from the last 200 activity lines", () => {
+    const now = Date.now();
+    const oldTs = new Date(now - 200_000).toISOString();
+    const recentTs = new Date(now - 20_000).toISOString();
+    const logPath = resolve(TMP, "queues", "activity.jsonl");
+
+    appendFileSync(
+      logPath,
+      JSON.stringify({ ts: oldTs, event: "station_heartbeat", station: "station-a" }) + "\n"
+    );
+    for (let i = 0; i < 210; i++) {
+      appendFileSync(
+        logPath,
+        JSON.stringify({
+          ts: i === 205 ? recentTs : new Date(now - 180_000 + i).toISOString(),
+          event: "station_heartbeat",
+          station: i === 205 ? "station-a" : "station-b",
+        }) + "\n"
+      );
+    }
+
+    const freshness = computeStationFreshness(
+      TMP,
+      ["station-a"],
+      { "station-a": { inbox: 0, processing: 1, output: 0 } },
+      { "station-a": { started_at: recentTs, running: true } }
+    );
+
+    expect(freshness["station-a"].state).toBe("fresh");
+    expect(freshness["station-a"].last_updated_at).toBe(recentTs);
+  });
 });

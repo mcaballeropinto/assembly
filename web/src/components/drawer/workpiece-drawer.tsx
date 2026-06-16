@@ -163,7 +163,7 @@ function DrawerBody({
         ) : (
           <p className="text-sm text-muted-foreground">
             {workpiece?._activity?.length
-              ? `${workpiece._activity.length} events recorded.`
+              ? `${workpiece._activity.length} events shown.${workpiece._activityMeta?.note ? ` ${workpiece._activityMeta.note}` : ""}`
               : "No events recorded for this workpiece."}
           </p>
         )}

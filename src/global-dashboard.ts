@@ -1,5 +1,5 @@
 import { discoverLines, type GlobalState } from "./global-orchestrator";
-import { getFullState, findWorkpiece, getWorkpieceActivity, getHistory, getKanbanState, getDoneCards, getTaskEventStations, getTaskEvents, computeFlowMetrics, getWorkpieceSidecarTails } from "./dashboard-data";
+import { getFullState, findWorkpiece, getWorkpieceActivity, getWorkpieceActivityMeta, getHistory, getKanbanState, getDoneCards, getTaskEventStations, getTaskEvents, computeFlowMetrics, getWorkpieceSidecarTails } from "./dashboard-data";
 import { dismissFilenames, undismissFilenames } from "./error-dismiss";
 import { releaseHeldTasks, InvalidTaskFileError } from "./held";
 import {
@@ -571,7 +571,7 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
           if (wp) {
             const activity = getWorkpieceActivity(dl.linePath, wp.id);
             const taskEventStations = getTaskEventStations(dl.linePath, wp.id);
-            return Response.json({ ...wp, _activity: activity, _taskEventStations: taskEventStations });
+            return Response.json({ ...wp, _activity: activity, _activityMeta: getWorkpieceActivityMeta(), _taskEventStations: taskEventStations });
           }
           return Response.json(
             { error: "Workpiece not found" },

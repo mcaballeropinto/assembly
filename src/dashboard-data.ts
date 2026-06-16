@@ -13,6 +13,7 @@ import { readDismissed } from "./error-dismiss";
 import { readRetryState } from "./retry-state";
 import { listHeld } from "./held";
 import { WorkpieceSchema } from "./schemas/workpiece";
+import { readTailLines } from "./log-tail";
 
 // ─── Health State ──────────────────────────────────────────────────
 
@@ -191,25 +192,15 @@ export function computeStationFreshness(
   const logPath = resolve(linePath, "queues", "activity.jsonl");
   const lastHeartbeatByStation: Record<string, { ts: string; event: string }> = {};
 
-  if (existsSync(logPath)) {
+  const recent = readTailLines(logPath, { maxLines: 200 }).reverse();
+  for (const line of recent) {
     try {
-      const lines = readFileSync(logPath, "utf-8")
-        .trim()
-        .split("\n")
-        .filter(Boolean);
+      const entry = JSON.parse(line);
+      const stationName = entry.station;
+      if (!stationName || lastHeartbeatByStation[stationName]) continue;
 
-      // Scan last 200 lines in reverse
-      const recent = lines.slice(-200).reverse();
-      for (const line of recent) {
-        try {
-          const entry = JSON.parse(line);
-          const stationName = entry.station;
-          if (!stationName || lastHeartbeatByStation[stationName]) continue;
-
-          if (entry.event === "station_heartbeat" || entry.event === "station_done") {
-            lastHeartbeatByStation[stationName] = { ts: entry.ts, event: entry.event };
-          }
-        } catch {}
+      if (entry.event === "station_heartbeat" || entry.event === "station_done") {
+        lastHeartbeatByStation[stationName] = { ts: entry.ts, event: entry.event };
       }
     } catch {}
   }
@@ -383,25 +374,16 @@ export async function getFullState(linePath: string) {
   // Activity log (last 50 entries)
   const logPath = resolve(linePath, "queues", "activity.jsonl");
   let activity: unknown[] = [];
-  if (existsSync(logPath)) {
-    try {
-      const lines = readFileSync(logPath, "utf-8")
-        .trim()
-        .split("\n")
-        .filter(Boolean);
-      activity = lines
-        .slice(-50)
-        .reverse()
-        .map((l) => {
-          try {
-            return JSON.parse(l);
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean);
-    } catch {}
-  }
+  activity = readTailLines(logPath, { maxLines: 50 })
+    .reverse()
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
 
   // Session cost/token totals (accumulated across done, error, review workpieces)
   let sessionTokensIn = 0;
@@ -736,19 +718,32 @@ export function getStationTimings(
 /**
  * Get activity log entries related to a specific workpiece.
  */
+export const WORKPIECE_ACTIVITY_TAIL_BYTES = 8 * 1024 * 1024;
+export const WORKPIECE_ACTIVITY_TAIL_LABEL =
+  "Recent activity from the last 8 MiB of activity.jsonl";
+
+export interface WorkpieceActivityMeta {
+  bounded: true;
+  maxBytes: number;
+  note: string;
+}
+
+export function getWorkpieceActivityMeta(): WorkpieceActivityMeta {
+  return {
+    bounded: true,
+    maxBytes: WORKPIECE_ACTIVITY_TAIL_BYTES,
+    note: WORKPIECE_ACTIVITY_TAIL_LABEL,
+  };
+}
+
 export function getWorkpieceActivity(
   linePath: string,
   workpieceId: string
 ): unknown[] {
   const logPath = resolve(linePath, "queues", "activity.jsonl");
-  if (!existsSync(logPath)) return [];
 
   try {
-    const lines = readFileSync(logPath, "utf-8")
-      .trim()
-      .split("\n")
-      .filter(Boolean);
-    return lines
+    return readTailLines(logPath, { maxBytes: WORKPIECE_ACTIVITY_TAIL_BYTES })
       .map((l) => {
         try {
           return JSON.parse(l);
@@ -1092,11 +1087,8 @@ function sumStationCost(wp: Workpiece): number {
 function loadRetryCounts(linePath: string): Map<string, number> {
   const counts = new Map<string, number>();
   const logPath = resolve(linePath, "queues", "activity.jsonl");
-  if (!existsSync(logPath)) return counts;
   try {
-    const lines = readFileSync(logPath, "utf-8").trim().split("\n").filter(Boolean);
-    // Cap scan at last 500 entries for speed
-    const scan = lines.slice(-500);
+    const scan = readTailLines(logPath, { maxLines: 500 });
     for (const line of scan) {
       try {
         const entry = JSON.parse(line) as { event?: string; workpiece?: string };

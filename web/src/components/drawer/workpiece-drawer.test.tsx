@@ -92,6 +92,13 @@ describe("workpiece drawer shell contract", () => {
     expect(source).toContain('queryKey: ["workpiece", lineName, fileName]');
   });
 
+  test("activity count includes bounded-history metadata when available", () => {
+    const source = drawerSource();
+
+    expect(source).toContain("_activityMeta?.note");
+    expect(source).toContain("events shown");
+  });
+
   test("root route validates drawer search params", () => {
     const source = routerSource();
 

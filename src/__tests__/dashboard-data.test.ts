@@ -2,7 +2,7 @@ import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import { StationName } from "../ids";
 import { resolve } from "path";
 import { mkdirSync, rmSync, writeFileSync, existsSync, utimesSync, readFileSync, renameSync } from "fs";
-import { getFullState, findWorkpiece, getWorkpieceActivity, computeHealth, computeErrorSeverity, BANNER_ERROR_MAX_AGE_MS, computeThroughput, connectionHealth, CONNECTION_LIVE_THRESHOLD_MS, CONNECTION_STALE_THRESHOLD_MS, getHistory, HISTORY_DEFAULT_LIMIT, HISTORY_MAX_LIMIT, getKanbanState, type KanbanState, computeFlowMetrics } from "../dashboard-data";
+import { getFullState, findWorkpiece, getWorkpieceActivity, computeHealth, computeErrorSeverity, BANNER_ERROR_MAX_AGE_MS, computeThroughput, connectionHealth, CONNECTION_LIVE_THRESHOLD_MS, CONNECTION_STALE_THRESHOLD_MS, getHistory, HISTORY_DEFAULT_LIMIT, HISTORY_MAX_LIMIT, getKanbanState, type KanbanState, computeFlowMetrics, WORKPIECE_ACTIVITY_TAIL_BYTES } from "../dashboard-data";
 import { initSectionQueue, initLineQueue } from "../queue";
 import { dismissFilenames, undismissFilenames } from "../error-dismiss";
 import {
@@ -176,6 +176,28 @@ describe("getFullState", () => {
     const state = await getFullState("/nonexistent/path/to/line");
 
     expect(state).toHaveProperty("error", "Failed to load line");
+  });
+
+  test("activity feed is limited to the newest 50 entries in reverse order", async () => {
+    const lineDir = resolve(TEMP_DIR, "activity-tail-line");
+    mkdirSync(resolve(lineDir, "stations", "station-a"), { recursive: true });
+    writeFileSync(
+      resolve(lineDir, "line.yaml"),
+      "name: activity-tail-line\nsequence:\n  - station-a\n"
+    );
+    writeFileSync(resolve(lineDir, "stations", "station-a", "AGENT.md"), "---\n---\nTest");
+    initSectionQueue(resolve(lineDir, "stations", "station-a"));
+    initLineQueue(lineDir);
+    const entries = Array.from({ length: 75 }, (_, index) =>
+      JSON.stringify({ ts: `2026-04-01T10:${String(index).padStart(2, "0")}:00Z`, event: "tick", seq: index })
+    );
+    writeFileSync(resolve(lineDir, "queues", "activity.jsonl"), entries.join("\n") + "\n");
+
+    const state = (await getFullState(lineDir)) as any;
+
+    expect(state.activity).toHaveLength(50);
+    expect(state.activity[0].seq).toBe(74);
+    expect(state.activity[49].seq).toBe(25);
   });
 
   test("includes stationTimings with duration data from done workpieces", async () => {
@@ -424,6 +446,31 @@ describe("getWorkpieceActivity", () => {
     // Should be reversed: task_done first, routed last
     expect((entries[0] as any).event).toBe("task_done");
     expect((entries[2] as any).event).toBe("routed");
+  });
+
+  test("returns only matching workpiece entries from the bounded recent tail", () => {
+    const lineDir = resolve(TEMP_DIR, "bounded-workpiece-activity-line");
+    mkdirSync(resolve(lineDir, "queues"), { recursive: true });
+    const oldEntry = JSON.stringify({
+      ts: "2026-04-01T10:00:00Z",
+      event: "old",
+      workpiece: "wp-bounded",
+    });
+    const filler = "x".repeat(WORKPIECE_ACTIVITY_TAIL_BYTES + 1024);
+    const recentEntry = JSON.stringify({
+      ts: "2026-04-01T11:00:00Z",
+      event: "recent",
+      workpiece: "wp-bounded",
+    });
+    writeFileSync(
+      resolve(lineDir, "queues", "activity.jsonl"),
+      `${oldEntry}\n${filler}\n${recentEntry}\n`
+    );
+
+    const entries = getWorkpieceActivity(lineDir, "wp-bounded");
+
+    expect(entries).toHaveLength(1);
+    expect((entries[0] as any).event).toBe("recent");
   });
 });
 
@@ -1642,6 +1689,32 @@ describe("getKanbanState", () => {
     const card = out.columns
       .find((c) => c.key === "station-a:processing")!
       .cards.find((x) => x.id === "wp-retry")!;
+    expect(card.retries).toBe(2);
+    expect(card.state).toBe("retrying");
+  });
+
+  test("retry count aggregation scans the newest 500 activity entries", async () => {
+    const dir = setupKanbanLine("kanban-retry-tail");
+    writeFileSync(
+      resolve(dir, "stations", "station-a", "queue", "processing", "wp-retry-tail.json"),
+      makeWorkpiece("wp-retry-tail", "retrying recent work")
+    );
+    const log = [
+      JSON.stringify({ ts: "2026-04-20T09:00:00Z", event: "retry", workpiece: "wp-retry-tail" }),
+      ...Array.from({ length: 510 }, (_, index) =>
+        JSON.stringify({
+          ts: `2026-04-20T10:${String(index % 60).padStart(2, "0")}:00Z`,
+          event: index >= 508 ? "retry" : "heartbeat",
+          workpiece: index >= 508 ? "wp-retry-tail" : "wp-other",
+        })
+      ),
+    ];
+    writeFileSync(resolve(dir, "queues", "activity.jsonl"), log.join("\n") + "\n");
+
+    const out = (await getKanbanState(dir)) as KanbanState;
+    const card = out.columns
+      .find((c) => c.key === "station-a:processing")!
+      .cards.find((x) => x.id === "wp-retry-tail")!;
     expect(card.retries).toBe(2);
     expect(card.state).toBe("retrying");
   });

@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { initSectionQueue, initLineQueue } from "../queue";
 import { appendTaskEvent, initTaskEventDir, updateTaskEventIndex } from "../task-events";
 import { WorkpieceId, StationName } from "../ids";
+import { WORKPIECE_ACTIVITY_TAIL_BYTES } from "../dashboard-data";
 
 /**
  * Integration tests for the workpiece detail drawer API.
@@ -278,6 +279,11 @@ describe("Workpiece API with _activity", () => {
     for (const entry of data._activity) {
       expect(entry.workpiece).toBe("drawer-wp-1");
     }
+    expect(data._activityMeta).toEqual({
+      bounded: true,
+      maxBytes: WORKPIECE_ACTIVITY_TAIL_BYTES,
+      note: "Recent activity from the last 8 MiB of activity.jsonl",
+    });
   });
 
   test("_activity is in reverse chronological order", async () => {
