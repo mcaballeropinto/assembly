@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { buildRepairPlan } from "../section-worker";
+import { buildRepairPlan, shouldSalvageFallback } from "../section-worker";
 import type { LLMMessage } from "../types";
 
 const originalMessages: LLMMessage[] = [
@@ -79,5 +79,50 @@ describe("buildRepairPlan", () => {
     );
     expect(plan.seedSource).toBe("none");
     expect(plan.messages).toHaveLength(4);
+  });
+
+  it("seeds repair from malformed sidecar content before incomplete fallback JSON", () => {
+    const sidecar = '{"summary":"bad\\q"}';
+    const fallback = '{"summary":"Plan envelope written","data":{}}';
+    const plan = buildRepairPlan(
+      originalMessages,
+      {
+        content: sidecar,
+        fallbackContent: fallback,
+        envelopeFileError: {
+          path: "/tmp/work.json.envelope.json",
+          message: "Invalid escape character",
+          bytes: sidecar.length,
+          preview: sidecar,
+        },
+      },
+      "Envelope sidecar /tmp/work.json.envelope.json is malformed JSON: Invalid escape character"
+    );
+
+    expect(plan.seedSource).toBe("content");
+    expect(plan.seedBytes).toBe(sidecar.length);
+    expect(plan.messages[2].content).toBe(sidecar);
+    expect(plan.messages[3].content).toContain(sidecar);
+    expect(plan.messages[3].content).not.toContain(fallback);
+  });
+});
+
+describe("shouldSalvageFallback", () => {
+  it("allows fallback salvage when no malformed sidecar diagnostic exists", () => {
+    expect(shouldSalvageFallback({ fallbackContent: '{"summary":"ok"}' })).toBe(true);
+  });
+
+  it("skips fallback salvage when a malformed sidecar diagnostic exists", () => {
+    expect(
+      shouldSalvageFallback({
+        fallbackContent: '{"summary":"Plan envelope written","data":{}}',
+        envelopeFileError: {
+          path: "/tmp/work.json.envelope.json",
+          message: "Invalid escape character",
+          bytes: 20,
+          preview: "{...}",
+        },
+      })
+    ).toBe(false);
   });
 });

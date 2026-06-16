@@ -75,6 +75,12 @@ export interface RepairPlan {
   seedBytes: number;
 }
 
+export function shouldSalvageFallback(
+  response: Pick<LLMResult, "fallbackContent" | "envelopeFileError">
+): boolean {
+  return Boolean(response.fallbackContent && !response.envelopeFileError);
+}
+
 /**
  * Build the message stack and seed telemetry for a repair call.
  *
@@ -86,7 +92,7 @@ export interface RepairPlan {
  */
 export function buildRepairPlan(
   originalMessages: LLMMessage[],
-  response: Pick<LLMResult, "content" | "fallbackContent">,
+  response: Pick<LLMResult, "content" | "fallbackContent" | "envelopeFileError">,
   errorMessage: string
 ): RepairPlan {
   const content = response.content ?? "";
@@ -781,17 +787,34 @@ async function main() {
         throw err;
       }
 
+      const sidecarError = response.envelopeFileError;
+      const primaryErrorMessage = sidecarError
+        ? `Envelope sidecar ${sidecarError.path} is malformed JSON: ${sidecarError.message}`
+        : err.message;
+      activityLogger("envelope_parse_failed", {
+        error: primaryErrorMessage,
+        content_bytes: response.content.length,
+        fallback_bytes: response.fallbackContent?.length ?? 0,
+        envelope_file_error: sidecarError,
+      });
+
       // Stage 1: salvage from streamed assistant text
-      if (response.fallbackContent) {
+      if (shouldSalvageFallback(response)) {
         try {
-          envelope = parseEnvelope(response.fallbackContent);
+          envelope = parseEnvelope(response.fallbackContent!);
           activityLogger("envelope_salvaged_from_stream", {
             file_empty: !response.content,
-            fallback_bytes: response.fallbackContent.length,
+            fallback_bytes: response.fallbackContent!.length,
           });
         } catch {
           // Fall through to repair path below
         }
+      } else if (sidecarError && response.fallbackContent) {
+        activityLogger("envelope_salvage_skipped", {
+          reason: "malformed_sidecar",
+          envelope_path: sidecarError.path,
+          fallback_bytes: response.fallbackContent.length,
+        });
       }
 
       // Stage 1.5: in-session nudge — replay message history + one JSON-only turn.
@@ -810,7 +833,7 @@ async function main() {
             const nudgeResult = await nudgeForEnvelope({
               sessionLogPath,
               station,
-              errorMessage: err.message,
+              errorMessage: primaryErrorMessage,
               model,
             });
             if (nudgeResult) {
@@ -851,7 +874,7 @@ async function main() {
 
       // Stage 2: repair prompt (only if salvage didn't produce an envelope).
       if (!envelope) {
-        const plan = buildRepairPlan(messages, response, err.message);
+        const plan = buildRepairPlan(messages, response, primaryErrorMessage);
         activityLogger("envelope_repair_started", {
           seed_source: plan.seedSource,
           seed_bytes: plan.seedBytes,
@@ -873,7 +896,7 @@ async function main() {
         } else {
           activityLogger("repair_skipped_direct_api", { reason: transport.reason });
           writeProgress(progressPath, startedAtMs, lastActivityRef, "repair", "failed", `skipped: ${transport.reason}`);
-          throw err;
+          throw new EnvelopeError(primaryErrorMessage);
         }
 
         const repairCost = calculateCostWithCache(
@@ -897,6 +920,7 @@ async function main() {
           activityLogger("repair_parse_failed", {
             error: (parseErr as Error).message,
             response_bytes: retryResponse.content.length,
+            envelope_file_error: sidecarError,
           });
           throw parseErr;
         }

@@ -615,6 +615,7 @@ describe("diagnoseFailure", () => {
     expect(diagnosis.confidence).toBe("high");
     expect(diagnosis.action).toBe("enqueue_repair");
     expect(diagnosis.evidence.some((e) => e.includes("invalid JSON"))).toBe(true);
+    expect(diagnosis.evidence.some((e) => e.includes("fallback assistant JSON omitted content"))).toBe(true);
   });
 });
 

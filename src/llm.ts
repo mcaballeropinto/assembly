@@ -89,6 +89,36 @@ export function getPromptWarnThreshold(): number {
   return Number.isFinite(n) && n > 0 ? n : CLAUDE_PROMPT_WARN_DEFAULT;
 }
 
+type EnvelopeFileInspection =
+  | { ok: true; content: string }
+  | { ok: false; content: string; error: Error };
+
+async function inspectEnvelopeFile(path: string): Promise<EnvelopeFileInspection | null> {
+  try {
+    const f = Bun.file(path);
+    if (!(await f.exists())) return null;
+    const content = (await f.text()).trim();
+    if (!content) return null;
+    try {
+      JSON.parse(content);
+      return { ok: true, content };
+    } catch (err) {
+      return { ok: false, content, error: err as Error };
+    }
+  } catch {
+    return null;
+  }
+}
+
+function envelopeFileError(path: string, inspection: Extract<EnvelopeFileInspection, { ok: false }>) {
+  return {
+    path,
+    message: inspection.error.message,
+    bytes: Buffer.byteLength(inspection.content, "utf8"),
+    preview: inspection.content.slice(0, 500),
+  };
+}
+
 export function mergeClaudeEnv(
   lineEnv?: Record<string, string>,
   stationEnv?: Record<string, string>
@@ -1000,25 +1030,19 @@ async function callClaudeCode(
   // appeared — a successful envelope file always wins over a later stream
   // error, because the file is the contract.
   let envelopeFromWatcher: string | null = null;
+  let malformedEnvelopeFromWatcher: Extract<EnvelopeFileInspection, { ok: false }> | null = null;
   if (usingWatcher) {
     const pollAbort = { aborted: false };
     const envelopeWatch: Promise<string | null> = (async () => {
       const intervalMs = 250;
       while (!pollAbort.aborted) {
-        try {
-          const f = Bun.file(outputFile);
-          if (await f.exists()) {
-            const text = (await f.text()).trim();
-            if (text) {
-              try {
-                JSON.parse(text);
-                return text;
-              } catch {
-                // Partial write or not-yet-valid JSON; wait + retry.
-              }
-            }
-          }
-        } catch {}
+        const inspected = await inspectEnvelopeFile(outputFile);
+        if (inspected?.ok) {
+          return inspected.content;
+        }
+        if (inspected && !inspected.ok) {
+          malformedEnvelopeFromWatcher = inspected;
+        }
         await new Promise((r) => setTimeout(r, intervalMs));
       }
       return null;
@@ -1051,18 +1075,12 @@ async function callClaudeCode(
       // a final synchronous check before giving up on the file path. This
       // eliminates a sub-250ms race window where the poller wouldn't tick
       // again in time.
-      try {
-        const f = Bun.file(outputFile);
-        if (await f.exists()) {
-          const text = (await f.text()).trim();
-          if (text) {
-            try {
-              JSON.parse(text);
-              envelopeFromWatcher = text;
-            } catch {}
-          }
-        }
-      } catch {}
+      const inspected = await inspectEnvelopeFile(outputFile);
+      if (inspected?.ok) {
+        envelopeFromWatcher = inspected.content;
+      } else if (inspected && !inspected.ok) {
+        malformedEnvelopeFromWatcher = inspected;
+      }
     }
 
     // Stop the poller either way.
@@ -1137,10 +1155,13 @@ async function callClaudeCode(
   if (envelopeFromWatcher) {
     content = envelopeFromWatcher.trim();
   } else {
-    try {
-      const file = Bun.file(outputFile);
-      content = (await file.text()).trim();
-    } catch {
+    const inspected = await inspectEnvelopeFile(outputFile);
+    if (inspected?.ok) {
+      content = inspected.content;
+    } else if (inspected && !inspected.ok) {
+      content = inspected.content;
+      malformedEnvelopeFromWatcher = inspected;
+    } else {
       content = "";
     }
   }
@@ -1155,6 +1176,10 @@ async function callClaudeCode(
   } catch {}
 
   const fallback = textFallback.trim();
+  const sidecarError =
+    usingWatcher && malformedEnvelopeFromWatcher
+      ? envelopeFileError(outputFile, malformedEnvelopeFromWatcher)
+      : undefined;
 
   // If the stream died before the `result` event, totals from `event.usage`
   // were never applied. Back-fill from per-message accumulators so the
@@ -1173,6 +1198,7 @@ async function callClaudeCode(
       duration_ms: Date.now() - sessionStartedAt,
       content_bytes: content.length,
       fallback_bytes: fallback.length,
+      envelope_file_error: sidecarError,
       stderr_preview: stderr.slice(0, 1000),
       tokens: { in: totalInputTokens, out: totalOutputTokens, cache_read: totalCacheRead, cache_creation: totalCacheCreation },
       tokens_from_fallback: !streamSawResult,
@@ -1183,6 +1209,7 @@ async function callClaudeCode(
   return {
     content,
     fallbackContent: fallback ? fallback : undefined,
+    envelopeFileError: sidecarError,
     tokens: { in: totalInputTokens, out: totalOutputTokens, cache_read: totalCacheRead, cache_creation: totalCacheCreation },
     model: `claude-code:${model}`,
     cost_usd: costUsd,
@@ -1564,19 +1591,18 @@ async function callCodex(
 
   // ─── Envelope watcher race (identical strategy to callClaudeCode) ────
   let envelopeFromWatcher: string | null = null;
+  let malformedEnvelopeFromWatcher: Extract<EnvelopeFileInspection, { ok: false }> | null = null;
   if (usingWatcher) {
     const pollAbort = { aborted: false };
     const envelopeWatch: Promise<string | null> = (async () => {
       while (!pollAbort.aborted) {
-        try {
-          const f = Bun.file(outputFile);
-          if (await f.exists()) {
-            const text = (await f.text()).trim();
-            if (text) {
-              try { JSON.parse(text); return text; } catch {}
-            }
-          }
-        } catch {}
+        const inspected = await inspectEnvelopeFile(outputFile);
+        if (inspected?.ok) {
+          return inspected.content;
+        }
+        if (inspected && !inspected.ok) {
+          malformedEnvelopeFromWatcher = inspected;
+        }
         await new Promise((r) => setTimeout(r, 250));
       }
       return null;
@@ -1598,15 +1624,12 @@ async function callCodex(
       // the stall watchdog backstops a genuine hang.
     } else {
       // Final check for a file written in the sub-poll-interval window.
-      try {
-        const f = Bun.file(outputFile);
-        if (await f.exists()) {
-          const text = (await f.text()).trim();
-          if (text) {
-            try { JSON.parse(text); envelopeFromWatcher = text; } catch {}
-          }
-        }
-      } catch {}
+      const inspected = await inspectEnvelopeFile(outputFile);
+      if (inspected?.ok) {
+        envelopeFromWatcher = inspected.content;
+      } else if (inspected && !inspected.ok) {
+        malformedEnvelopeFromWatcher = inspected;
+      }
     }
 
     pollAbort.aborted = true;
@@ -1656,7 +1679,15 @@ async function callCodex(
   if (envelopeFromWatcher) {
     content = envelopeFromWatcher.trim();
   } else {
-    try { content = (await Bun.file(outputFile).text()).trim(); } catch { content = ""; }
+    const inspected = await inspectEnvelopeFile(outputFile);
+    if (inspected?.ok) {
+      content = inspected.content;
+    } else if (inspected && !inspected.ok) {
+      content = inspected.content;
+      malformedEnvelopeFromWatcher = inspected;
+    } else {
+      content = "";
+    }
     if (!usingWatcher) {
       try { Bun.spawn(["rm", "-f", outputFile]); } catch {}
     }
@@ -1672,6 +1703,11 @@ async function callCodex(
   }
   try { unlinkSync(lastMsgFile); } catch {}
 
+  const sidecarError =
+    usingWatcher && malformedEnvelopeFromWatcher
+      ? envelopeFileError(outputFile, malformedEnvelopeFromWatcher)
+      : undefined;
+
   if (sessionLogPath) {
     closeSessionLog(sessionLogPath, {
       outcome: "success",
@@ -1679,6 +1715,7 @@ async function callCodex(
       duration_ms: Date.now() - sessionStartedAt,
       content_bytes: content.length,
       fallback_bytes: fallback.length,
+      envelope_file_error: sidecarError,
       stderr_preview: stderr.slice(0, 1000),
       tokens: { in: totalInputTokens, out: totalOutputTokens, cache_read: totalCacheRead, cache_creation: 0 },
       cost_usd: costUsd,
@@ -1688,6 +1725,7 @@ async function callCodex(
   return {
     content,
     fallbackContent: fallback ? fallback : undefined,
+    envelopeFileError: sidecarError,
     tokens: { in: totalInputTokens, out: totalOutputTokens, cache_read: totalCacheRead, cache_creation: 0 },
     model: `codex:${model}`,
     cost_usd: costUsd,

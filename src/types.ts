@@ -342,6 +342,12 @@ export interface LLMResult extends LLMResponse {
   // (oldest trimmed). Used as a salvage source when the envelope file was not
   // written. See src/section-worker.ts for the fallback parse.
   fallbackContent?: string;
+  envelopeFileError?: {
+    path: string;
+    message: string;
+    bytes: number;
+    preview: string;
+  };
 }
 
 // === Log Events ===

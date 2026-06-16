@@ -42,7 +42,7 @@ if (sysFlagIdx !== -1 && argv[sysFlagIdx + 1]) {
   try { systemFromFile = await Bun.file(argv[sysFlagIdx + 1]).text(); } catch {}
 }
 const allText = systemFromFile + "\\n" + (msg.system ?? "") + "\\n" + (msg.message?.content ?? "");
-const fileMatch = allText.match(/\\/tmp\\/assembly-envelope-[\\w-]+\\.json/);
+const fileMatch = allText.match(/\\/[\\w\\-\\/\\.]+(?:assembly-envelope-[\\w-]+\\.json|envelope\\.json)/);
 const outputFile = fileMatch ? fileMatch[0] : null;
 
 function emit(obj) {
@@ -65,6 +65,12 @@ if (mode === "file_only") {
 } else if (mode === "multi_block_stream") {
   emit({ type: "assistant", message: { content: [{ type: "text", text: "Thinking step 1..." }] } });
   emit({ type: "assistant", message: { content: [{ type: "text", text: "Final: " + JSON.stringify(streamEnvelope) }] } });
+} else if (mode === "malformed_file_and_incomplete_stream") {
+  if (outputFile) {
+    const malformed = '{"summary":"bad' + String.fromCharCode(92) + 'q"}';
+    await Bun.write(outputFile, malformed);
+  }
+  emit({ type: "assistant", message: { content: [{ type: "text", text: JSON.stringify({ summary: "Plan envelope written", data: { envelope_path: "x" } }) }] } });
 }
 
 emit({
@@ -156,6 +162,38 @@ describe("callClaudeCode fallback content", () => {
     expect(res.fallbackContent).toContain("Final:");
     const envelope = parseEnvelope(res.fallbackContent!);
     expect(envelope.summary).toBe("from stream");
+  });
+
+  it("malformed sidecar remains primary when fallback JSON omits content", async () => {
+    setMode("malformed_file_and_incomplete_stream");
+    const envelopePath = join(tmpDir, "run-malformed", "envelope.json");
+    await Bun.write(envelopePath + ".init", "");
+
+    const res = await callLLM(
+      messages,
+      "sonnet",
+      4096,
+      [],
+      "claude-code",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      envelopePath
+    );
+
+    expect(res.content).toBe('{"summary":"bad\\q"}');
+    expect(res.fallbackContent).toContain("Plan envelope written");
+    expect(res.envelopeFileError).toBeDefined();
+    expect(res.envelopeFileError?.path).toBe(envelopePath);
+    expect(res.envelopeFileError?.message.length).toBeGreaterThan(0);
+    expect(res.envelopeFileError?.bytes).toBe(res.content.length);
+    expect(res.envelopeFileError?.preview).toBe(res.content);
+
+    const fallbackEnvelope = parseEnvelope(res.fallbackContent!);
+    expect(fallbackEnvelope.summary).toBe("Plan envelope written");
+    expect(fallbackEnvelope.content).toBeUndefined();
   });
 });
 
