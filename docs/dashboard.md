@@ -124,6 +124,28 @@ bun run build:web
 
 That runs the `web` workspace build and writes `web/dist/index.html` plus `web/dist/assets/`.
 
+Before calling dashboard work done, run the release guard:
+
+```bash
+bun run check:dashboard:release
+```
+
+That verifies the committed `web/dist/` bundle exists, references real assets, contains current dashboard markers, and does not contain known placeholder/smoke strings. To verify the public deployment too:
+
+```bash
+bun run check:dashboard:release -- --public
+```
+
+The public check fetches `https://assembly.14seven.dev/` and its referenced Vite assets, so stale JavaScript bundles fail even when `index.html` looks healthy.
+
+If repo-wide TypeScript errors temporarily block `bun run build:web`, use the explicit assets-only escape hatch:
+
+```bash
+bun run build:web:assets
+```
+
+That path is for unblocking a dashboard deploy only. Track the TypeScript failure separately and still run `bun run check:dashboard:release -- --public` before marking the work done.
+
 `web/dist/` is intentionally committed so globally installed copies of Assembly can serve the React SPA without requiring users to build frontend assets locally. The package `prepublishOnly` script runs `bun run build:web` before publishing.
 
 Run `bun run build:web` when:
@@ -230,11 +252,11 @@ This means:
 
 | Symptom | Check |
 |---------|-------|
-| Dashboard shows an old UI | Rebuild with `bun run build:web`; stale `web/dist/` is usually the cause |
+| Dashboard shows an old UI | Rebuild with `bun run build:web`, then run `bun run check:dashboard:release -- --public`; stale `web/dist/` is usually the cause |
 | Source checkout serves the fallback shell | `web/dist/index.html` is missing; run `bun run build:web` |
 | Vite app cannot load data | Confirm `assembly dashboard --port 4111` is running and Vite is proxying `/api` to that port |
 | Port collision | Start the dashboard on a different port and align the Vite proxy if needed |
-| Static assets 404 | Rebuild `web/dist/` and confirm `web/dist/assets/` exists |
+| Static assets 404 | Rebuild `web/dist/` and confirm `web/dist/assets/` exists; `bun run check:dashboard:release` verifies index asset references |
 | API data looks stale | Inspect the underlying queue files; dashboard APIs read disk state on demand |
 | Cannot start dashboard | Check `~/.assembly/dashboard.pid`; a live PID prevents double-start |
 

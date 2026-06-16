@@ -78,19 +78,26 @@ cd {develop.data.worktree_path} && bun run src/cli.ts validate lines/repo-health
 ### 6. Verify Dashboard (If Affected)
 
 If `plan.data.dashboard_affected` is true:
-1. Start the dashboard from the worktree
-2. Take a screenshot
-3. Compare against the plan's acceptance criteria
-4. Check for visual regressions (broken layout, missing elements, JS errors)
+1. Rebuild the dashboard bundle, preferring `bun run build:web`.
+2. If `bun run build:web` is blocked by unrelated TypeScript errors, run `bun run build:web:assets` and record the typecheck blocker in the eval.
+3. Run `bun run check:dashboard:release` to catch stale `web/dist` bundles and placeholder/smoke content.
+4. Start the dashboard from the worktree.
+5. Take a screenshot.
+6. Compare against the plan's acceptance criteria.
+7. Check for visual regressions (broken layout, missing elements, JS errors).
 
 ```bash
 cd {develop.data.worktree_path}
+bun run build:web
+bun run check:dashboard:release
 timeout 10 bun run src/cli.ts dashboard --port 4198 &
 sleep 4
 # Screenshot
 chromium --headless --screenshot=/tmp/eval-dashboard-screenshot.png --window-size=1280,900 http://localhost:4198 2>/dev/null || true
 kill %1 2>/dev/null || true
 ```
+
+Never mark dashboard work done when the served page still contains known placeholder content such as `shadcn/ui smoke check`, `Chrome primitive mock wiring`, or `It works`.
 
 ### 7. Check Acceptance Criteria
 

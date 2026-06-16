@@ -35,7 +35,7 @@ export function WorkpieceDrawerPlaceholder({
         onOpenChange={(open) => {
           if (!open) {
             void navigate({
-              search: (prev) => closeWorkpieceSearch(prev),
+              search: ((prev: Record<string, unknown>) => closeWorkpieceSearch(prev)) as never,
               replace: false,
             })
           }

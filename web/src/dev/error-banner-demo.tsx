@@ -5,6 +5,7 @@ import { mockBannerErrors, noopDismiss } from "../lib/dashboard-mock-data"
 
 export function ErrorBannerDemo() {
   const [critical, warning] = mockBannerErrors
+  if (!critical || !warning) return null
 
   return (
     <AppShell>

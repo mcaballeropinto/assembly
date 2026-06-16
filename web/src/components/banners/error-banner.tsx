@@ -34,11 +34,11 @@ function formatFailedStation(error: DashboardErrorBannerItem): string | null {
 
 export function ErrorBanner({ errors, onDismiss, className }: ErrorBannerProps) {
   const visibleErrors = errors.filter((error) => error.severity !== "suppressed")
-  if (visibleErrors.length === 0) {
+  const firstError = visibleErrors[0]
+  if (!firstError) {
     return null
   }
 
-  const firstError = visibleErrors[0]
   const extraCount = visibleErrors.length - 1
   const failedStation = formatFailedStation(firstError)
   const hasCritical = visibleErrors.some((error) => error.severity === "critical")

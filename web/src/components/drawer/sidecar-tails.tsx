@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchWorkpieceSidecars } from "@/lib/api"
-import type { ApiSidecarTail } from "../../../../src/dashboard-api"
+import type { ApiSidecarTail } from "@/lib/api-types"
 
 interface SidecarTailsProps {
   lineName: string

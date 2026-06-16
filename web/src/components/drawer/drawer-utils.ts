@@ -1,9 +1,9 @@
-import type { ApiWorkpieceResponse, StationMeta } from "../../../../src/dashboard-api"
-import type { StationResult, StationRounds } from "../../../../src/types"
+import type { ApiWorkpieceResponse, StationMeta, StationResult, StationRounds, Workpiece } from "@/lib/api"
 
 export type StationEntry = [string, StationResult]
+type WorkpieceData = Extract<ApiWorkpieceResponse, Workpiece>
 
-export function sortStationEntries(stations: ApiWorkpieceResponse["stations"]): StationEntry[] {
+export function sortStationEntries(stations: WorkpieceData["stations"]): StationEntry[] {
   return Object.entries(stations ?? {}).sort(([aName, a], [bName, b]) => {
     const aTime = Date.parse(a.started_at ?? "") || Number.MAX_SAFE_INTEGER
     const bTime = Date.parse(b.started_at ?? "") || Number.MAX_SAFE_INTEGER
@@ -80,7 +80,7 @@ export function stationStatusVariant(status?: string): string {
   return stationStatusClass(status)
 }
 
-export function getWorkpieceOutcome(workpiece: ApiWorkpieceResponse): {
+export function getWorkpieceOutcome(workpiece: WorkpieceData): {
   state: "failed" | "completed" | "active" | "held" | "review" | "inbox";
   failedStation?: string;
   summary?: string;

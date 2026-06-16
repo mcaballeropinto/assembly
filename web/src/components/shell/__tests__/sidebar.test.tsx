@@ -4,7 +4,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { act } from "react-dom/test-utils"
 import { createRoot } from "react-dom/client"
 
-import type { ApiStateResponse } from "../../../../../src/dashboard-api"
+import type { ApiStateResponse } from "../../../lib/api"
 
 mock.module("../../ui/badge", () => {
   return {

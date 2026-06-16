@@ -126,7 +126,7 @@ The envelope wrapper (`summary`, `content`, `data`) and the file-write protocol 
   - `test_plan`: Array of `{ test: string, expected: string, type: "unit" | "integration" | "manual" }`
   - `acceptance_criteria`: Array of strings, each a verifiable condition
   - `concerns`: Array of strings — any ambiguities, unresolved design decisions, or questions that need user input. Empty array if everything is clear. Do NOT leave this out — if you have zero concerns, return `[]`.
-  - `dashboard_affected`: Boolean — true if changes touch dashboard.ts or the dashboard UI
+  - `dashboard_affected`: Boolean — true if changes touch `src/global-dashboard.ts`, dashboard APIs, `web/src/**`, `web/dist/**`, dashboard docs, or the dashboard UI
   - `estimated_complexity`: "low" | "medium" | "high"
 
 ## No-op short-circuit

@@ -1,4 +1,4 @@
-import type { StationStatusState } from "../../../../src/dashboard-api"
+import type { StationStatusState } from "../../lib/api"
 
 import { cn } from "../../lib/utils"
 

@@ -7,11 +7,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import type { ApiWorkpieceResponse } from "../../../../src/dashboard-api"
+import type { ApiWorkpieceResponse, Workpiece } from "@/lib/api"
 import { getWorkpieceOutcome } from "./drawer-utils"
 
+type WorkpieceData = Extract<ApiWorkpieceResponse, Workpiece>
+
 interface DrawerFooterProps {
-  workpiece: ApiWorkpieceResponse
+  workpiece: WorkpieceData
   fileName: string
 }
 

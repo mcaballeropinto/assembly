@@ -37,7 +37,8 @@ const DEFAULT_ICON: EventIconConfig = { icon: Activity, className: 'text-muted-f
 
 export function getEventIcon(event: string): EventIconConfig {
   // Check for exact match first, then check if event contains 'error'
-  if (EVENT_ICON_MAP[event]) return EVENT_ICON_MAP[event];
-  if (event.includes('error')) return EVENT_ICON_MAP.error;
+  const exact = EVENT_ICON_MAP[event];
+  if (exact) return exact;
+  if (event.includes('error')) return EVENT_ICON_MAP.error ?? DEFAULT_ICON;
   return DEFAULT_ICON;
 }

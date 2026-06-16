@@ -6,7 +6,7 @@ import { Button } from "../ui/button"
 import { fetchApiState } from "../../lib/api"
 import { cn } from "../../lib/utils"
 
-import type { ApiStateLineEntry } from "../../../../src/dashboard-api"
+import type { ApiStateLineEntry } from "../../lib/api"
 
 export const SIDEBAR_COLLAPSE_STORAGE_KEY =
   "assembly-dashboard-sidebar-collapsed"

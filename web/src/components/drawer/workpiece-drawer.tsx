@@ -11,8 +11,7 @@ import {
 } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchWorkpiece, isApiError } from "@/lib/api"
-import type { ApiWorkpieceResponse } from "../../../../src/dashboard-api"
-import type { StationResult, Workpiece } from "../../../../src/types"
+import type { ApiWorkpieceResponse, StationResult, Workpiece } from "@/lib/api"
 
 type WorkpieceData = Extract<ApiWorkpieceResponse, Workpiece>
 type StationEntry = [string, StationResult]
@@ -47,11 +46,11 @@ export function WorkpieceDrawer({ lineName }: WorkpieceDrawerProps) {
 
   function closeDrawer() {
     void navigate({
-      search: (prev) => {
+      search: ((prev: Record<string, unknown>) => {
         const next = { ...(prev as Record<string, unknown>) }
         delete next.wp
         return next
-      },
+      }) as never,
       replace: true,
     })
   }

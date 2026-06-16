@@ -83,7 +83,6 @@ export function KpiTile({
               index="index"
               colors={[sparkline.color ?? "zinc"]}
               className="h-10 w-24 shrink-0"
-              showAnimation={false}
               autoMinValue
               aria-label={sparkline.label}
             />

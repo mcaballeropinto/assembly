@@ -4,14 +4,19 @@ import type {
   ApiTaskEventStationsResponse,
   ApiWorkpieceResponse,
   ApiWorkpieceSidecarsResponse,
-} from "../../../src/dashboard-api"
+} from "./api-types"
 
 export type {
   ActivityEntry,
   ApiStateLineEntry,
   ApiStateResponse,
   ApiStateTotals,
-} from "../../../src/dashboard-api"
+  ApiWorkpieceResponse,
+  StationMeta,
+  StationResult,
+  StationRounds,
+  Workpiece,
+} from "./api-types"
 
 export type KanbanLane = "inbox" | "processing" | "output"
 

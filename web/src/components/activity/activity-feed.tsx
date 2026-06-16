@@ -142,20 +142,24 @@ export function ActivityFeed({ entries, onWorkpieceClick }: ActivityFeedProps) {
                   position: 'relative',
                 }}
               >
-                {virtualizer.getVirtualItems().map((virtualRow) => (
-                  <div
-                    key={virtualRow.key}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      transform: `translateY(${virtualRow.start}px)`,
-                    }}
-                  >
-                    <ActivityRow entry={entries[virtualRow.index]} onWorkpieceClick={onWorkpieceClick} />
-                  </div>
-                ))}
+                {virtualizer.getVirtualItems().map((virtualRow) => {
+                  const entry = entries[virtualRow.index];
+                  if (!entry) return null;
+                  return (
+                    <div
+                      key={virtualRow.key}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                    >
+                      <ActivityRow entry={entry} onWorkpieceClick={onWorkpieceClick} />
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               entries.map((entry, index) => (

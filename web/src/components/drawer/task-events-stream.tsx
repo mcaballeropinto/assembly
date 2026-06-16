@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { fetchTaskEvents, fetchTaskEventStations } from "@/lib/api"
-import type { StationMeta } from "../../../../src/dashboard-api"
+import type { StationMeta } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { sortStationMeta, stationStatusClass, stringifyDetail } from "./drawer-utils"
 

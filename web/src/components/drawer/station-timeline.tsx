@@ -10,7 +10,7 @@ import {
   TimelineSeparator,
   TimelineTitle,
 } from "@/components/ui/timeline"
-import type { ApiWorkpieceResponse } from "../../../../src/dashboard-api"
+import type { ApiWorkpieceResponse, Workpiece } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import {
   formatCost,
@@ -37,7 +37,9 @@ function StatusIcon({ status }: { status?: string }) {
   }
 }
 
-export function StationTimeline({ workpiece }: { workpiece: ApiWorkpieceResponse }) {
+type WorkpieceData = Extract<ApiWorkpieceResponse, Workpiece>
+
+export function StationTimeline({ workpiece }: { workpiece: WorkpieceData }) {
   const stations = sortStationEntries(workpiece.stations)
 
   if (stations.length === 0) {

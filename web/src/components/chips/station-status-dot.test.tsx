@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { renderToString } from "react-dom/server"
 
-import type { StationStatusState } from "../../../../src/dashboard-api"
+import type { StationStatusState } from "../../lib/api"
 
 import { StationStatusDot } from "./station-status-dot"
 
