@@ -8,6 +8,7 @@
  *
  * Fails (exit 1) if:
  *   - any test in the worktree fails
+ *   - the dashboard web bundle fails to build from source
  *   - the branch is missing or not ahead of BASE (ASSEMBLY_DEPLOY_BRANCH)
  *   - rebase onto origin/BASE can't be completed (AI resolver exhausted,
  *     markers left over, agent crashed)
@@ -68,6 +69,19 @@ function fatal(msg: string, extra = ""): never {
   process.stderr.write(`[deploy] FATAL: ${msg}\n`);
   if (extra) process.stderr.write(extra.slice(-3000) + "\n");
   process.exit(1);
+}
+
+function buildDashboardBundle(cwd: string, label: string): void {
+  log(`building dashboard bundle in ${label}`);
+  const buildR = spawnSync("bun", ["run", "build:web"], {
+    cwd,
+    encoding: "utf-8",
+    maxBuffer: 1024 * 1024 * 20,
+  });
+  const buildOut = (buildR.stdout ?? "") + "\n" + (buildR.stderr ?? "");
+  if (buildR.status !== 0) {
+    fatal(`dashboard web build failed in ${label}`, buildOut);
+  }
 }
 
 function emit(envelope: { summary: string; content?: string; data: Record<string, unknown> }): never {
@@ -581,6 +595,8 @@ if (postCount === 0) {
 }
 log(`post-rebase HEAD=${mergeSha.slice(0, 8)} (${postCount} commits ahead of origin/${BASE}, was ${preFeatureCount})`);
 
+buildDashboardBundle(deployWtRoot, "deploy worktree");
+
 // ─── 4. Push to origin ────────────────────────────────────────────────
 //
 // Plain push, no --force / --force-with-lease. If origin/${BASE} moved
@@ -644,6 +660,8 @@ const liveHeadR = spawnSync("git", ["-C", LIVE, "rev-parse", "HEAD"], { encoding
 if ((liveHeadR.stdout ?? "").trim() !== mergeSha) {
   log(`warning: LIVE HEAD ${(liveHeadR.stdout ?? "").trim()} != merge ${mergeSha} after reset (non-fatal)`);
 }
+
+buildDashboardBundle(LIVE, "LIVE");
 
 // ─── 4c. Sync line-discovery root ─────────────────────────────────────
 //

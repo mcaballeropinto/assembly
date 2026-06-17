@@ -8,21 +8,55 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRoute } from './routes/__root'
+import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LineNameRouteImport } from './routes/line.$name'
+import { Route as LineNameKanbanRouteImport } from './routes/line.$name.kanban'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-
 const LineNameRoute = LineNameRouteImport.update({
   id: '/line/$name',
   path: '/line/$name',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
+const LineNameKanbanRoute = LineNameKanbanRouteImport.update({
+  id: '/kanban',
+  path: '/kanban',
+  getParentRoute: () => LineNameRoute,
+} as any)
+
+export interface FileRoutesByFullPath {
+  '/': typeof IndexRoute
+  '/line/$name': typeof LineNameRouteWithChildren
+  '/line/$name/kanban': typeof LineNameKanbanRoute
+}
+export interface FileRoutesByTo {
+  '/': typeof IndexRoute
+  '/line/$name': typeof LineNameRouteWithChildren
+  '/line/$name/kanban': typeof LineNameKanbanRoute
+}
+export interface FileRoutesById {
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/line/$name': typeof LineNameRouteWithChildren
+  '/line/$name/kanban': typeof LineNameKanbanRoute
+}
+export interface FileRouteTypes {
+  fileRoutesByFullPath: FileRoutesByFullPath
+  fullPaths: '/' | '/line/$name' | '/line/$name/kanban'
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/line/$name' | '/line/$name/kanban'
+  id: '__root__' | '/' | '/line/$name' | '/line/$name/kanban'
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  LineNameRoute: typeof LineNameRouteWithChildren
+}
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
@@ -31,46 +65,41 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRoute
+      parentRoute: typeof rootRouteImport
     }
     '/line/$name': {
       id: '/line/$name'
       path: '/line/$name'
       fullPath: '/line/$name'
       preLoaderRoute: typeof LineNameRouteImport
-      parentRoute: typeof rootRoute
+      parentRoute: typeof rootRouteImport
+    }
+    '/line/$name/kanban': {
+      id: '/line/$name/kanban'
+      path: '/kanban'
+      fullPath: '/line/$name/kanban'
+      preLoaderRoute: typeof LineNameKanbanRouteImport
+      parentRoute: typeof LineNameRoute
     }
   }
 }
 
-export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/line/$name': typeof LineNameRoute
+interface LineNameRouteChildren {
+  LineNameKanbanRoute: typeof LineNameKanbanRoute
 }
 
-export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/line/$name': typeof LineNameRoute
+const LineNameRouteChildren: LineNameRouteChildren = {
+  LineNameKanbanRoute: LineNameKanbanRoute,
 }
 
-export interface FileRoutesById {
-  __root__: typeof rootRoute
-  '/': typeof IndexRoute
-  '/line/$name': typeof LineNameRoute
-}
+const LineNameRouteWithChildren = LineNameRoute._addFileChildren(
+  LineNameRouteChildren,
+)
 
-export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/line/$name'
-  fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/line/$name'
-  id: '__root__' | '/' | '/line/$name'
-  fileRoutesById: FileRoutesById
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  LineNameRoute: LineNameRouteWithChildren,
 }
-
-export const routeTree = rootRoute
-  ._addFileChildren({
-    IndexRoute,
-    LineNameRoute,
-  })
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()

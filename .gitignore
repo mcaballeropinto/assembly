@@ -1,7 +1,6 @@
 # Build output
 /dist/
-!web/dist/
-!web/dist/**
+web/dist/
 *.tsbuildinfo
 
 # Dependencies

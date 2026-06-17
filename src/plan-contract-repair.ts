@@ -64,8 +64,11 @@ function isSafeAutoRepairPath(path: string, workpiece: Workpiece): boolean {
   return false;
 }
 
+function isIgnoredGeneratedOutput(path: string): boolean {
+  return path === "web/dist" || path.startsWith("web/dist/");
+}
+
 function compressedPlanSpec(path: string): string {
-  if (path.startsWith("web/dist/")) return "web/dist/";
   if (path.startsWith("web/src/components/ui/")) return "web/src/components/ui/";
   if (path.startsWith("web/src/components/drawer/")) return "web/src/components/drawer/";
   if (path.startsWith("web/src/components/") && basename(path).includes(".test.")) {
@@ -127,7 +130,8 @@ export function repairPlanAlignmentContract(workpiece: Workpiece): PlanContractR
     return { repaired: false, reason: "no off-plan paths found in feedback", added: [], workpiece };
   }
 
-  const unsafe = offPlan.filter((path) => !isSafeAutoRepairPath(path, workpiece));
+  const repairable = offPlan.filter((path) => !isIgnoredGeneratedOutput(path));
+  const unsafe = repairable.filter((path) => !isSafeAutoRepairPath(path, workpiece));
   if (unsafe.length > 0) {
     return {
       repaired: false,
@@ -142,7 +146,10 @@ export function repairPlanAlignmentContract(workpiece: Workpiece): PlanContractR
     return { repaired: false, reason: "plan data missing", added: [], workpiece };
   }
 
-  const added = [...new Set(offPlan.map(compressedPlanSpec))];
+  const added = [...new Set(repairable.map(compressedPlanSpec))];
+  if (added.length === 0) {
+    return { repaired: false, reason: "only ignored generated output was off-plan", added: [], workpiece };
+  }
   const repairedPlan = {
     ...plan,
     files_to_change: appendUnique(plan.files_to_change, added),

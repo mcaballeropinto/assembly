@@ -37,7 +37,7 @@ To stop it:
 assembly dashboard stop
 ```
 
-When `web/dist/index.html` exists, the Bun server serves the built Vite SPA and its assets from `web/dist/assets/`. If the bundle is absent, `global-dashboard.ts` serves the embedded legacy fallback shell for compatibility only.
+When `web/dist/index.html` exists, the Bun server serves the built Vite SPA and its assets from `web/dist/assets/`. If the bundle is absent, `global-dashboard.ts` returns a build-missing error with the command to regenerate it.
 
 ---
 
@@ -126,14 +126,14 @@ bun run build:web
 
 That runs the `web` workspace build and writes `web/dist/index.html` plus `web/dist/assets/`.
 
-`web/dist/` is intentionally committed so globally installed copies of Assembly can serve the React SPA without requiring users to build frontend assets locally. The package `prepublishOnly` script runs `bun run build:web` before publishing.
+`web/dist/` is generated output and is intentionally ignored by git. Production deploys and local source checkouts should rebuild it from the current `web/` sources instead of committing hashed bundles.
 
 Run `bun run build:web` when:
 
 - `web/dist/` is missing.
 - Frontend source under `web/` changed.
 - The dashboard shows stale UI after a checkout, merge, or install.
-- You are preparing a publish or global install path.
+- You are preparing a deploy, publish, or global install path.
 
 ---
 

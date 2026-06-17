@@ -102,7 +102,8 @@ git -C ${ASSEMBLY_REPO_ROOT} branch -d {develop.data.branch_name}
 ### 5. Reload Live Services With New Build
 
 ```bash
-# Dashboard: clean restart picks up the new bundle on next ExecStart.
+# Dashboard: rebuild ignored web/dist output, then restart cleanly.
+bun run build:web
 systemctl restart assembly-dashboard 2>/dev/null || true
 sleep 1
 systemctl is-active assembly-dashboard || echo "assembly-dashboard not active"

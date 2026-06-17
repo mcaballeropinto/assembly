@@ -58,12 +58,12 @@ describe("repairPlanAlignmentContract", () => {
     const result = repairPlanAlignmentContract(makeWorkpiece(feedback));
 
     expect(result.repaired).toBe(true);
-    expect(result.added).toContain("web/dist/");
+    expect(result.added).not.toContain("web/dist/");
     expect(result.added).toContain("web/src/components/ui/");
     expect(result.added).toContain("web/src/components/drawer/");
 
     const plan = result.workpiece.stations[StationName("plan")].data as any;
-    expect(plan.files_to_change).toContain("web/dist/");
+    expect(plan.files_to_change).not.toContain("web/dist/");
     expect(plan.files_to_change).toContain("web/src/components/ui/");
     expect(plan.files_to_change).toContain("web/src/components/drawer/");
     expect((result.workpiece.input as any).plan_contract_repair.count).toBe(1);

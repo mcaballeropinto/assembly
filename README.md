@@ -35,12 +35,11 @@ Run installs from the repository root; Bun installs the root package and the `we
 
 ```bash
 bun install
-bun run build:web       # rebuild web/dist when missing or after dashboard changes
 ./install.sh             # builds `assembly` and drops it in ~/.local/bin
 ```
 
-Global installs and publishes ship the prebuilt `web/dist/` dashboard bundle, so
-users do not need a local frontend build step after installation.
+The dashboard bundle is generated locally into ignored `web/dist/` output.
+Build it when running the dashboard from a source checkout or before packaging.
 
 Or run uncompiled:
 

@@ -77,8 +77,8 @@ You MUST explore the codebase before planning — never assume file contents or 
      directories that may be imported or regenerated, especially
      `web/src/components/ui/` and relevant component folders such as
      `web/src/components/drawer/`.
-   - If the task builds the dashboard bundle, include `web/dist/` instead of
-     guessing hashed asset filenames.
+   - Do not include `web/dist/`; it is generated build output and should stay
+     ignored.
    - Include colocated tests (`*.test.ts`, `*.test.tsx`), route tests, and
      config files (`web/tsconfig.app.json`, `web/vite.config.ts`,
      `tsconfig.json`, `package.json`, `bun.lock`) when the steps can touch them.
@@ -136,7 +136,7 @@ The envelope wrapper (`summary`, `content`, `data`) and the file-write protocol 
   - `branch_name`: Git branch name for the worktree
   - `problem_statement`: 1-2 sentence problem description
   - `files_to_change`: Array of existing file paths (relative to `${ASSEMBLY_REPO_ROOT}/`)
-  - `files_to_create`: Array of new file paths to create (can be empty). Use a trailing slash for generated directories, e.g. `web/dist/assets/`, when exact child filenames are not known until build time.
+  - `files_to_create`: Array of new file paths to create (can be empty). Do not list ignored build output such as `web/dist/`.
   - `implementation_steps`: Array of `{ step: number, description: string, files: string[], details: string }`
   - `test_plan`: Array of `{ test: string, expected: string, type: "unit" | "integration" | "manual" }`
   - `acceptance_criteria`: Array of strings, each a verifiable condition
