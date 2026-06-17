@@ -275,6 +275,7 @@ export interface LineConfig {
   description?: string;
   sequence: SequenceStep[];
   concurrency?: number; // max workers per station (default: unlimited)
+  drip?: number; // auto-release up to N held tasks when the first station is idle; omit to disable
   timeout?: number; // seconds of idle (no output) before SIGTERM — 0 or omitted = unlimited
   max_wall_clock?: number; // seconds — hard ceiling regardless of activity; omit = no cap
   flush_grace?: number; // seconds — SIGTERM-to-SIGKILL window (default 30)

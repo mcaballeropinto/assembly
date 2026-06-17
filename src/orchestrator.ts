@@ -19,6 +19,7 @@ import type { Workpiece, LineConfig, FailureClass, RetryPolicy, RetryPolicyMap, 
 import { autoArchiveOld } from "./error-dismiss";
 import { writeRetryState, clearRetryState, cleanupOrphanedRetryStates } from "./retry-state";
 import { startFlowSnapshotWriter } from "./flow-snapshot";
+import { listHeld, releaseHeldTasks } from "./held";
 import { evaluateAndSnapshotForProviders } from "./usage";
 import { computeRoundsFromProgress } from "./tool-rounds";
 import { recordEmit, isEmitted, quarantineUnverified, bootstrapManifest } from "./emit-manifest";
@@ -1653,6 +1654,41 @@ export async function startOrchestrator(
    * decision, spawning is suppressed for this tick — the 60s resume poll
    * will re-drain when the limit clears.
    */
+  function maybeDripRelease(section: SectionInfo): boolean {
+    if (config.drip === undefined) return false;
+    if (section !== sections[0]) return false;
+    if (section.orphan) return false;
+    if ((activeWorkers.get(section.name) ?? 0) >= concurrencyLimit) return false;
+    if (listQueue(section.queue.inbox).length !== 0) return false;
+    if (listQueue(lineQueue.inbox).length !== 0) return false;
+
+    const heldTasks = listHeld(linePath).slice(0, config.drip);
+    if (heldTasks.length === 0) return false;
+
+    const releasedFiles: string[] = [];
+    const skippedFiles: string[] = [];
+    const errors: { file: string; message: string }[] = [];
+    for (const task of heldTasks) {
+      const result = releaseHeldTasks(linePath, { file: task.fileName });
+      releasedFiles.push(...result.released);
+      skippedFiles.push(...result.skipped);
+      errors.push(...result.errors);
+    }
+
+    if (releasedFiles.length > 0 || skippedFiles.length > 0 || errors.length > 0) {
+      log("held_drip_release", {
+        line: config.name,
+        drip: config.drip,
+        released: releasedFiles,
+        skipped: skippedFiles,
+        errors,
+      });
+      return true;
+    }
+
+    return false;
+  }
+
   function drainInbox(section: SectionInfo) {
     // Orphan sections never spawn new workers — the only reason they exist
     // is to drain an adopted predecessor's processing/ via the output watcher.
@@ -1680,7 +1716,10 @@ export async function startOrchestrator(
     }
 
     const waiting = listQueue(section.queue.inbox);
-    if (waiting.length === 0) return;
+    if (waiting.length === 0) {
+      maybeDripRelease(section);
+      return;
+    }
 
     for (const filePath of waiting) {
       try {

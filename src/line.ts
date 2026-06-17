@@ -38,6 +38,13 @@ export async function loadLine(linePath: string): Promise<{
     }
   }
 
+  // Validate drip if present
+  if (config.drip !== undefined) {
+    if (typeof config.drip !== 'number' || config.drip < 1 || !Number.isInteger(config.drip)) {
+      throw new Error("line.yaml 'drip' must be a positive integer");
+    }
+  }
+
   // Validate timeout if present
   if (config.timeout !== undefined) {
     if (typeof config.timeout !== 'number' || config.timeout < 0 || !Number.isInteger(config.timeout)) {
