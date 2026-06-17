@@ -19,7 +19,6 @@ type Fixture = {
   server: TestServer;
 };
 
-const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 let currentFixture: Fixture | null = null;
 
@@ -28,8 +27,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 function restoreEnv(): void {
-  if (originalLineDirs === undefined) delete process.env.ASSEMBLY_LINE_DIRS;
-  else process.env.ASSEMBLY_LINE_DIRS = originalLineDirs;
   if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
   else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
 }
