@@ -799,6 +799,12 @@ export async function startOrchestrator(
           parsedMessage.data.task,
           parsedMessage.data.input
         );
+        if (parsedMessage.data.taskKey) {
+          workpiece.taskKey = parsedMessage.data.taskKey;
+        }
+        if (parsedMessage.data.dependsOn) {
+          workpiece.dependsOn = parsedMessage.data.dependsOn;
+        }
         const tmp = `${filePath}.tmp.${process.pid}`;
         writeFileSync(tmp, JSON.stringify(workpiece, null, 2));
         renameSync(tmp, filePath);

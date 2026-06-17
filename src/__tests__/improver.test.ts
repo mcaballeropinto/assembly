@@ -28,6 +28,7 @@ import {
 import { diagnoseFailure } from "../improver/diagnosis";
 import { startImproverWatcher, type ImproverWatcherHandle } from "../improver/watcher";
 import { isEmitted, _resetCacheForTests } from "../emit-manifest";
+import { InboxPayloadSchema } from "../schemas/inbox-payload";
 
 const TEMP_ROOT = resolve("/tmp", `improver-test-${process.pid}`);
 let caseId = 0;
@@ -706,6 +707,7 @@ describe("devline", () => {
     const payload = JSON.parse(readFileSync(filePath, "utf-8"));
     expect(payload.schema_version).toBe(1);
     expect(payload.taskKey).toBe(taskKey);
+    expect(InboxPayloadSchema.safeParse(payload).success).toBe(true);
     expect(payload.task).toContain("Fix slow fetch");
     expect(payload.task).toContain("Harden the fetch.");
     expect(payload.input.improver.proposal_id).toBe("imp_1");

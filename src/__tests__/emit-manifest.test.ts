@@ -80,15 +80,19 @@ describe("manifest persistence", () => {
   it("writes one JSONL line per emit with source + ts", () => {
     recordEmit(workDir, "a.json", "fanout");
     recordEmit(workDir, "b.json", "cli");
+    recordEmit(workDir, "c.json", "improver");
     const text = readFileSync(resolve(workDir, ".emitted.jsonl"), "utf8");
     const lines = text.trim().split("\n");
-    expect(lines.length).toBe(2);
+    expect(lines.length).toBe(3);
     const a = JSON.parse(lines[0]);
     const b = JSON.parse(lines[1]);
+    const c = JSON.parse(lines[2]);
     expect(a.filename).toBe("a.json");
     expect(a.source).toBe("fanout");
     expect(typeof a.ts).toBe("string");
     expect(b.source).toBe("cli");
+    expect(c.filename).toBe("c.json");
+    expect(c.source).toBe("improver");
   });
 
   it("isEmitted re-reads the manifest on cache miss so sibling-process appends are visible", () => {
@@ -115,6 +119,15 @@ describe("manifest persistence", () => {
     expect(isEmitted(workDir, "old.json")).toBe(true);
     // Truly unknown entries still return false (no false positives).
     expect(isEmitted(workDir, "actually-rogue.json")).toBe(false);
+  });
+
+  it("persists improver emits so dev-line repairs survive daemon cache resets", () => {
+    recordEmit(workDir, "repair.json", "improver");
+    expect(isEmitted(workDir, "repair.json")).toBe(true);
+
+    _resetCacheForTests();
+
+    expect(isEmitted(workDir, "repair.json")).toBe(true);
   });
 
   it("tolerates a torn trailing line in the manifest", () => {

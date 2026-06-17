@@ -41,6 +41,8 @@ export const InboxPayloadSchema = z.object({
   schema_version: InboxPayloadVersionSchema.optional().default(CURRENT_INBOX_PAYLOAD_VERSION),
   task: z.string(),
   input: z.record(z.unknown()),
+  taskKey: z.string().optional(),
+  dependsOn: z.array(z.string()).optional(),
   source_workpiece_id: z.string().transform((s) => WorkpieceId(s)).optional(),
 }).strict();
 

@@ -9,6 +9,7 @@ export const EmitSourceSchema = z.enum([
   "transition",
   "bootstrap",
   "recovery",
+  "improver",
 ]);
 
 export const EmitRecordSchema = z.object({
