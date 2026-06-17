@@ -16,6 +16,9 @@
     "prepublishOnly": "bun run build:web",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "typecheck:web": "cd web && bunx tsc -p tsconfig.app.json --noEmit",
+    "typecheck:lines": "bunx tsc -p tsconfig.lines.json --noEmit",
+    "verify": "bun run typecheck && bun run typecheck:web && bun run typecheck:lines && bun run lint && bun test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
