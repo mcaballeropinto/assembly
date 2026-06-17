@@ -19,16 +19,10 @@ type Fixture = {
   server: TestServer;
 };
 
-const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 let currentFixture: Fixture | null = null;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function restoreEnv(): void {
-  if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
-  else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
 }
 
 function workpiece(id: string, status: "done" | "failed" = "done") {
@@ -82,11 +76,12 @@ async function createFixture(testName: string): Promise<Fixture> {
   initSectionQueue(stationDir);
   initLineQueue(lineDir);
 
-  process.env.ASSEMBLY_LINE_DIRS = resolve(root, "lines");
-  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(root, "missing-web-dist");
-
   const { startGlobalDashboard } = await import("../global-dashboard");
-  const server = startGlobalDashboard({ port: 0 });
+  const server = startGlobalDashboard({
+    port: 0,
+    lineDirs: [resolve(root, "lines")],
+    webDistDir: resolve(root, "missing-web-dist"),
+  });
   currentFixture = { root, lineName, lineDir, server };
 
   await sleep(STATE_TTL_WAIT_MS);
@@ -113,7 +108,6 @@ afterEach(() => {
     rmSync(currentFixture.root, { recursive: true, force: true });
     currentFixture = null;
   }
-  restoreEnv();
 });
 
 describe("global dashboard snapshot cache", () => {

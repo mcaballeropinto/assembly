@@ -7,8 +7,6 @@ import { initSectionQueue, initLineQueue } from "../queue";
 const TEMP_DIR = resolve("/tmp", `assembly-test-activity-log-${Date.now()}`);
 const LINE_DIR = resolve(TEMP_DIR, "lines", "activity-test-line");
 
-const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
-
 let server: { stop: () => void; port: number } | null = null;
 
 function request(path: string): Promise<Response> {
@@ -88,22 +86,17 @@ beforeAll(async () => {
   const activityJsonl = activityEntries.map((e) => JSON.stringify(e)).join("\n") + "\n";
   writeFileSync(resolve(LINE_DIR, "queues", "activity.jsonl"), activityJsonl);
 
-  // Set env for line discovery
-  process.env.ASSEMBLY_LINE_DIRS = resolve(TEMP_DIR, "lines");
-  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
-
   // Start dashboard server on an OS-assigned port to avoid parallel test collisions.
   const { startGlobalDashboard } = await import("../global-dashboard");
-  server = startGlobalDashboard({ port: 0 });
-
-  // Wait for server to be ready and lines discovered
-  await new Promise((r) => setTimeout(r, 1500));
+  server = startGlobalDashboard({
+    port: 0,
+    lineDirs: [resolve(TEMP_DIR, "lines")],
+    webDistDir: resolve(TEMP_DIR, "missing-web-dist"),
+  });
 });
 
 afterAll(() => {
   if (server) server.stop();
-  if (originalWebDistDir) process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
-  else delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
   try {
     rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}

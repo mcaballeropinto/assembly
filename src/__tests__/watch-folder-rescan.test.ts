@@ -1,5 +1,5 @@
 import { test, expect, describe, afterEach, beforeEach } from "bun:test";
-import { resolve, join } from "path";
+import { resolve } from "path";
 import {
   mkdirSync,
   rmSync,
@@ -7,7 +7,6 @@ import {
   unlinkSync,
   existsSync,
 } from "fs";
-import { homedir } from "os";
 import { watchFolder } from "../queue";
 import { startOrchestrator } from "../orchestrator";
 import { __resetUsageGateStateForTest } from "../usage";
@@ -133,8 +132,8 @@ describe("watchFolder rescan", () => {
 // --- End-to-end burst test ---
 
 const orchestrators: Array<{ stop: () => void | Promise<void> }> = [];
-const originalFetch = globalThis.fetch;
 const originalSnapEnv = process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
+const originalDisableUsageGate = process.env.ASSEMBLY_DISABLE_USAGE_GATE;
 
 function createScriptLine(linePath: string, stationNames: string[]): void {
   mkdirSync(resolve(linePath, "queues", "inbox"), { recursive: true });
@@ -167,47 +166,7 @@ describe("end-to-end burst", () => {
       snapDir,
       "usage-status.json"
     );
-
-    try {
-      const credsDir = join(homedir(), ".claude");
-      const credsPath = join(credsDir, ".credentials.json");
-      mkdirSync(credsDir, { recursive: true });
-      const existing = Bun.file(credsPath);
-      if (!(existing.size && existing.size > 0)) {
-        writeFileSync(
-          credsPath,
-          JSON.stringify({ claudeAiOauth: { accessToken: "test-token" } })
-        );
-      }
-    } catch {}
-
-    globalThis.fetch = (async (url: string | URL | Request) => {
-      const urlStr =
-        typeof url === "string"
-          ? url
-          : url instanceof URL
-            ? url.toString()
-            : String(url);
-      if (urlStr.includes("/api/oauth/usage")) {
-        return new Response(
-          JSON.stringify({
-            five_hour: {
-              utilization: 1,
-              resets_at: "2099-01-01T00:00:00Z",
-            },
-            seven_day: {
-              utilization: 1,
-              resets_at: "2099-01-01T00:00:00Z",
-            },
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
-      return originalFetch(url as any);
-    }) as typeof fetch;
+    process.env.ASSEMBLY_DISABLE_USAGE_GATE = "1";
 
     __resetUsageGateStateForTest();
   });
@@ -219,10 +178,12 @@ describe("end-to-end burst", () => {
       } catch {}
     }
     await new Promise((r) => setTimeout(r, 200));
-    globalThis.fetch = originalFetch;
     if (originalSnapEnv === undefined)
       delete process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
     else process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = originalSnapEnv;
+    if (originalDisableUsageGate === undefined)
+      delete process.env.ASSEMBLY_DISABLE_USAGE_GATE;
+    else process.env.ASSEMBLY_DISABLE_USAGE_GATE = originalDisableUsageGate;
     __resetUsageGateStateForTest();
   });
 

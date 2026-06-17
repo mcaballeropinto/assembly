@@ -9,8 +9,6 @@ const INDEX_PATH = resolve(WEB_DIST_DIR, "index.html");
 const ASSETS_DIR = resolve(WEB_DIST_DIR, "assets");
 const CSS_PATH = resolve(ASSETS_DIR, "test-dashboard.css");
 
-const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
-
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
 
 function writeTestBundle() {
@@ -26,19 +24,13 @@ beforeAll(async () => {
   mkdirSync(LINE_DIR, { recursive: true });
   writeTestBundle();
 
-  process.env.ASSEMBLY_LINE_DIRS = LINE_DIR;
-  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = WEB_DIST_DIR;
-
   const { startGlobalDashboard } = await import("../global-dashboard");
-  server = startGlobalDashboard({ port: 0 });
+  server = startGlobalDashboard({ port: 0, lineDirs: [LINE_DIR], webDistDir: WEB_DIST_DIR });
   if (!server) throw new Error("Unable to start dashboard test server");
-  await new Promise((r) => setTimeout(r, 300));
 });
 
 afterAll(() => {
   if (server) server.stop();
-  if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
-  else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
   try {
     rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}

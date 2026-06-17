@@ -6,9 +6,8 @@
  */
 
 import { test, expect, describe, afterEach, beforeEach } from "bun:test";
-import { resolve, join } from "path";
+import { resolve } from "path";
 import { mkdirSync, rmSync, existsSync, writeFileSync, readdirSync } from "fs";
-import { homedir } from "os";
 import { startOrchestrator } from "../orchestrator";
 import { createWorkpiece } from "../workpiece";
 import { __resetUsageGateStateForTest } from "../usage";
@@ -49,38 +48,15 @@ async function waitFor(
 
 const orchestrators: Array<{ stop: () => void | Promise<void> }> = [];
 const tempDirs: string[] = [];
-const originalFetch = globalThis.fetch;
 const originalSnapEnv = process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
+const originalDisableUsageGate = process.env.ASSEMBLY_DISABLE_USAGE_GATE;
 
 beforeEach(() => {
   const snapDir = resolve("/tmp", `assembly-test-rogue-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(snapDir, { recursive: true });
   tempDirs.push(snapDir);
   process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = resolve(snapDir, "usage-status.json");
-
-  try {
-    const credsDir = join(homedir(), ".claude");
-    const credsPath = join(credsDir, ".credentials.json");
-    mkdirSync(credsDir, { recursive: true });
-    const existing = Bun.file(credsPath);
-    if (!(existing.size && existing.size > 0)) {
-      writeFileSync(credsPath, JSON.stringify({ claudeAiOauth: { accessToken: "test-token" } }));
-    }
-  } catch {}
-
-  globalThis.fetch = (async (url: string | URL | Request) => {
-    const urlStr = typeof url === "string" ? url : url instanceof URL ? url.toString() : String(url);
-    if (urlStr.includes("/api/oauth/usage")) {
-      return new Response(
-        JSON.stringify({
-          five_hour: { utilization: 1, resets_at: "2099-01-01T00:00:00Z" },
-          seven_day: { utilization: 1, resets_at: "2099-01-01T00:00:00Z" },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    }
-    return originalFetch(url as any);
-  }) as typeof fetch;
+  process.env.ASSEMBLY_DISABLE_USAGE_GATE = "1";
 
   __resetUsageGateStateForTest();
 });
@@ -93,9 +69,10 @@ afterEach(async () => {
   for (const d of tempDirs.splice(0)) {
     try { rmSync(d, { recursive: true, force: true }); } catch {}
   }
-  globalThis.fetch = originalFetch;
   if (originalSnapEnv === undefined) delete process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
   else process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = originalSnapEnv;
+  if (originalDisableUsageGate === undefined) delete process.env.ASSEMBLY_DISABLE_USAGE_GATE;
+  else process.env.ASSEMBLY_DISABLE_USAGE_GATE = originalDisableUsageGate;
   __resetUsageGateStateForTest();
 });
 

@@ -8,8 +8,6 @@ const TEMP_DIR = resolve("/tmp", `assembly-test-held-route-${Date.now()}`);
 const LINE_NAME = "held-route-test-line";
 const LINE_DIR = resolve(TEMP_DIR, "lines", LINE_NAME);
 
-const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
-
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
 
 function writeHeldFile(name: string, task: string) {
@@ -49,22 +47,17 @@ beforeAll(async () => {
   writeHeldFile("task-1.json", "First held task");
   writeHeldFile("task-2.json", "Second held task");
 
-  // Set env so the dashboard discovers our temp line
-  process.env.ASSEMBLY_LINE_DIRS = resolve(TEMP_DIR, "lines");
-  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
-
   // Start dashboard server on an OS-assigned port to avoid parallel test collisions.
   const { startGlobalDashboard } = await import("../global-dashboard");
-  server = startGlobalDashboard({ port: 0 });
-
-  // Wait for server to discover lines
-  await new Promise((r) => setTimeout(r, 1500));
+  server = startGlobalDashboard({
+    port: 0,
+    lineDirs: [resolve(TEMP_DIR, "lines")],
+    webDistDir: resolve(TEMP_DIR, "missing-web-dist"),
+  });
 });
 
 afterAll(() => {
   if (server) server.stop();
-  if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
-  else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
   try {
     rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}

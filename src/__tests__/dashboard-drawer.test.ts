@@ -14,8 +14,6 @@ import { WORKPIECE_ACTIVITY_TAIL_BYTES } from "../dashboard-data";
 const TEMP_DIR = resolve("/tmp", `assembly-test-drawer-${Date.now()}`);
 const LINE_DIR = resolve(TEMP_DIR, "lines", "drawer-test-line");
 
-const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
-
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
 
 function request(path: string): Promise<Response> {
@@ -163,25 +161,18 @@ beforeAll(async () => {
     activity.join("\n") + "\n"
   );
 
-  // Point discovery at this test's fixture line directory.
-  process.env.ASSEMBLY_LINE_DIRS = resolve(TEMP_DIR, "lines");
-  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
-
-  // Dynamic import to pick up the env var
   const { startGlobalDashboard } = await import("../global-dashboard");
 
   // Use an OS-assigned port to avoid parallel test collisions.
-  server = startGlobalDashboard({ port: 0 });
-
-  // Wait for server to be ready and lines to be discovered
-  // The refreshLines() call is async, give it time to complete
-  await new Promise((r) => setTimeout(r, 1500));
+  server = startGlobalDashboard({
+    port: 0,
+    lineDirs: [resolve(TEMP_DIR, "lines")],
+    webDistDir: resolve(TEMP_DIR, "missing-web-dist"),
+  });
 });
 
 afterAll(() => {
   if (server) server.stop();
-  if (originalWebDistDir) process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
-  else delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
   try {
     rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}

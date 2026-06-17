@@ -7,7 +7,6 @@ const SNAP_PATH = resolve(TEMP_DIR, "usage-status.json");
 const LINE_DIR = resolve(TEMP_DIR, "lines");
 
 const originalSnapEnv = process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
-const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 const originalDashboardToken = process.env.ASSEMBLY_DASHBOARD_TOKEN;
 
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
@@ -58,21 +57,20 @@ async function getAvailablePort(): Promise<number> {
 
 beforeAll(async () => {
   mkdirSync(LINE_DIR, { recursive: true });
-  process.env.ASSEMBLY_LINE_DIRS = LINE_DIR;
   process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = SNAP_PATH;
-  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
 
   const { startGlobalDashboard } = await import("../global-dashboard");
-  server = startGlobalDashboard({ port: 0 });
-  await new Promise((r) => setTimeout(r, 300));
+  server = startGlobalDashboard({
+    port: 0,
+    lineDirs: [LINE_DIR],
+    webDistDir: resolve(TEMP_DIR, "missing-web-dist"),
+  });
 });
 
 afterAll(() => {
   if (server) server.stop();
   if (originalSnapEnv === undefined) delete process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
   else process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = originalSnapEnv;
-  if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
-  else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
   if (originalDashboardToken === undefined) delete process.env.ASSEMBLY_DASHBOARD_TOKEN;
   else process.env.ASSEMBLY_DASHBOARD_TOKEN = originalDashboardToken;
   try {

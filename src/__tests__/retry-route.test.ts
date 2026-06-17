@@ -14,8 +14,6 @@ const TEMP_DIR = resolve("/tmp", `assembly-test-retry-route-${Date.now()}`);
 const LINE_NAME = "retry-route-test-line";
 const LINE_DIR = resolve(TEMP_DIR, "lines", LINE_NAME);
 
-const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
-
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
 
 function seedErrorFile(name: string, id: string) {
@@ -99,19 +97,16 @@ beforeAll(async () => {
   initSectionQueue(stationDir);
   initLineQueue(LINE_DIR);
 
-  process.env.ASSEMBLY_LINE_DIRS = resolve(TEMP_DIR, "lines");
-  process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
-
   const { startGlobalDashboard } = await import("../global-dashboard");
-  server = startGlobalDashboard({ port: 0 });
-
-  await new Promise((r) => setTimeout(r, 1500));
+  server = startGlobalDashboard({
+    port: 0,
+    lineDirs: [resolve(TEMP_DIR, "lines")],
+    webDistDir: resolve(TEMP_DIR, "missing-web-dist"),
+  });
 });
 
 afterAll(() => {
   if (server) server.stop();
-  if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
-  else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
   try {
     rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch {}

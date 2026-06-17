@@ -22,6 +22,8 @@ const DEFAULT_WEB_DIST_DIR = resolve(import.meta.dir, "..", "web", "dist");
 export interface GlobalDashboardOptions {
   port: number;
   host?: string;
+  webDistDir?: string;
+  lineDirs?: string[];
 }
 
 interface DiscoveredLine {
@@ -65,8 +67,29 @@ function invalidateLineSnapshot(linePath: string): void {
 
 // ─── Line Discovery ─────────────────────────────────────────────────
 
-async function discoverAndMapLines(): Promise<DiscoveredLine[]> {
-  const paths = discoverLines();
+function discoverLinesInDirs(searchDirs: string[]): string[] {
+  const paths: string[] = [];
+  for (const dir of searchDirs) {
+    if (!existsSync(dir)) continue;
+    if (existsSync(resolve(dir, "line.yaml"))) {
+      paths.push(resolve(dir));
+      continue;
+    }
+    try {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory() && existsSync(resolve(dir, entry.name, "line.yaml"))) {
+          paths.push(resolve(dir, entry.name));
+        }
+      }
+    } catch {
+      // Ignore unreadable test/provided directories.
+    }
+  }
+  return [...new Set(paths)];
+}
+
+async function discoverAndMapLines(lineDirs?: string[]): Promise<DiscoveredLine[]> {
+  const paths = lineDirs ? discoverLinesInDirs(lineDirs) : discoverLines();
   const lines: DiscoveredLine[] = [];
   for (const linePath of paths) {
     try {
@@ -228,26 +251,31 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
 } {
   snapCache.clear();
   const host = options.host ?? "127.0.0.1";
-  const webDistDir = resolve(process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
+  const webDistDir = resolve(options.webDistDir ?? process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
   const webDistIndex = resolve(webDistDir, "index.html");
   const webDistAssetsDir = resolve(webDistDir, "assets");
+  const lineDirs = options.lineDirs?.map((dir) => resolve(dir));
 
   // Discover lines on startup and refresh periodically
   let discoveredLines: DiscoveredLine[] = [];
   let linesByName: Map<string, DiscoveredLine> = new Map();
+  let discoveryReady: Promise<void>;
 
   async function refreshLines() {
-    discoveredLines = await discoverAndMapLines();
+    discoveredLines = await discoverAndMapLines(lineDirs);
     linesByName = new Map(discoveredLines.map(dl => [dl.lineName, dl]));
   }
 
   // Initial discovery (async, but server starts immediately)
-  refreshLines();
+  discoveryReady = refreshLines();
 
   // Re-discover lines every 30 seconds
-  const refreshInterval = setInterval(refreshLines, 30000);
+  const refreshInterval = setInterval(() => {
+    discoveryReady = refreshLines();
+  }, 30000);
 
   const handleRequest = async (req: Request): Promise<Response> => {
+      await discoveryReady;
       const url = new URL(req.url);
       const rawPathname = getRawPathname(req.url);
 
