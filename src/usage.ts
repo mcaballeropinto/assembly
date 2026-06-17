@@ -311,11 +311,19 @@ async function checkCodexUsage(): Promise<UsageStatus> {
   if (!snapshot) return { canProcess: true };
 
   const limit = getEffectiveThreshold();
+  const now = Date.now();
   let worst: { label: string; utilization: number; resetAt: Date } | null = null;
   for (const window of codexWindows(snapshot)) {
+    const resetAt = new Date(window.resets_at * 1000);
+    if (!Number.isFinite(resetAt.getTime())) continue;
+
+    // Codex writes rate-limit windows opportunistically while agents run. If
+    // the CLI does not emit a fresh healthy snapshot after the window resets,
+    // this file can stay at 100% forever. Treat expired windows as cleared so
+    // the orchestrator's resume poll can actually resume.
+    if (resetAt.getTime() <= now) continue;
+
     if (window.used_percent >= limit) {
-      const resetAt = new Date(window.resets_at * 1000);
-      if (!Number.isFinite(resetAt.getTime())) continue;
       if (!worst || resetAt.getTime() < worst.resetAt.getTime()) {
         worst = {
           label: codexWindowLabel(window.window_minutes),

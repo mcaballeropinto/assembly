@@ -60,6 +60,14 @@ function writeCodexUsage(payload: unknown) {
   writeFileSync(CODEX_USAGE_PATH, JSON.stringify(payload));
 }
 
+function futureEpoch(seconds = 3600): number {
+  return Math.floor((Date.now() + seconds * 1000) / 1000);
+}
+
+function pastEpoch(seconds = 60): number {
+  return Math.floor((Date.now() - seconds * 1000) / 1000);
+}
+
 beforeEach(() => {
   mkdirSync(TMP_DIR, { recursive: true });
   process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = SNAP_PATH;
@@ -184,8 +192,8 @@ describe("checkProviderUsage (codex)", () => {
   test("canProcess true when codex windows are under threshold", async () => {
     writeCodexUsage({
       checkedAt: "2026-06-11T10:00:00Z",
-      primary: { used_percent: 20, window_minutes: 300, resets_at: 1780898307 },
-      secondary: { used_percent: 30, window_minutes: 10080, resets_at: 1781485107 },
+      primary: { used_percent: 20, window_minutes: 300, resets_at: futureEpoch() },
+      secondary: { used_percent: 30, window_minutes: 10080, resets_at: futureEpoch(7200) },
       plan_type: "prolite",
     });
     const status = await checkProviderUsage("codex");
@@ -194,16 +202,27 @@ describe("checkProviderUsage (codex)", () => {
 
   test("canProcess false when codex window crosses threshold", async () => {
     process.env.ASSEMBLY_USAGE_THRESHOLD = "75";
+    const resetAt = futureEpoch();
     writeCodexUsage({
       checkedAt: "2026-06-11T10:00:00Z",
-      primary: { used_percent: 92, window_minutes: 300, resets_at: 1780898307 },
-      secondary: { used_percent: 10, window_minutes: 10080, resets_at: 1781485107 },
+      primary: { used_percent: 92, window_minutes: 300, resets_at: resetAt },
+      secondary: { used_percent: 10, window_minutes: 10080, resets_at: futureEpoch(7200) },
     });
     const status = await checkProviderUsage("codex");
     expect(status.canProcess).toBe(false);
     expect(status.reason).toMatch(/5h session at 92\.0%/);
     expect(status.reason).toMatch(/>= 75%/);
-    expect(status.resetAt?.toISOString()).toBe(new Date(1780898307 * 1000).toISOString());
+    expect(status.resetAt?.toISOString()).toBe(new Date(resetAt * 1000).toISOString());
+  });
+
+  test("ignores expired codex windows even when utilization is over threshold", async () => {
+    process.env.ASSEMBLY_USAGE_THRESHOLD = "75";
+    writeCodexUsage({
+      checkedAt: "2026-06-11T10:00:00Z",
+      primary: { used_percent: 100, window_minutes: 300, resets_at: pastEpoch() },
+    });
+    const status = await checkProviderUsage("codex");
+    expect(status.canProcess).toBe(true);
   });
 });
 
@@ -256,8 +275,8 @@ describe("evaluateAndSnapshot", () => {
     stubFetch({ five_hour: { utilization: 99, resets_at: null } });
     writeCodexUsage({
       checkedAt: "2026-06-11T10:00:00Z",
-      primary: { used_percent: 20, window_minutes: 300, resets_at: 1780898307 },
-      secondary: { used_percent: 30, window_minutes: 10080, resets_at: 1781485107 },
+      primary: { used_percent: 20, window_minutes: 300, resets_at: futureEpoch() },
+      secondary: { used_percent: 30, window_minutes: 10080, resets_at: futureEpoch(7200) },
       plan_type: "prolite",
     });
     const decision = await evaluateAndSnapshotForProviders(["codex", "script"]);
@@ -272,8 +291,8 @@ describe("evaluateAndSnapshot", () => {
     process.env.ASSEMBLY_USAGE_THRESHOLD = "70";
     writeCodexUsage({
       checkedAt: "2026-06-11T10:00:00Z",
-      primary: { used_percent: 50, window_minutes: 300, resets_at: 1781485107 },
-      secondary: { used_percent: 80, window_minutes: 10080, resets_at: 1780898307 },
+      primary: { used_percent: 50, window_minutes: 300, resets_at: futureEpoch(7200) },
+      secondary: { used_percent: 80, window_minutes: 10080, resets_at: futureEpoch() },
     });
     const decision = await evaluateAndSnapshotForProviders(["codex"]);
     expect(decision.blocked).toBe(true);
@@ -286,7 +305,7 @@ describe("evaluateAndSnapshot", () => {
   test("default evaluateAndSnapshot uses codex provider", async () => {
     writeCodexUsage({
       checkedAt: "2026-06-11T10:00:00Z",
-      primary: { used_percent: 10, window_minutes: 300, resets_at: 1780898307 },
+      primary: { used_percent: 10, window_minutes: 300, resets_at: futureEpoch() },
     });
     const decision = await evaluateAndSnapshot();
     expect(decision.blocked).toBe(false);
