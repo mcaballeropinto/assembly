@@ -157,6 +157,19 @@ async function waitFor(check: () => boolean, timeoutMs: number, intervalMs = 100
   return check();
 }
 
+function findSectionWorkerPid(workpiecePath: string): number | null {
+  const procs = readdirSync("/proc").filter((e) => /^\d+$/.test(e));
+  for (const p of procs) {
+    try {
+      const cmd = readFileSync(`/proc/${p}/cmdline`, "utf-8");
+      if (cmd.includes("section-worker.ts") && cmd.includes(workpiecePath)) {
+        return parseInt(p, 10);
+      }
+    } catch {}
+  }
+  return null;
+}
+
 describe("daemon reload end-to-end", () => {
   test("worker survives reload, finishes under successor, PID file flips", async () => {
     // 1. Start daemon as a subprocess.
@@ -191,16 +204,10 @@ describe("daemon reload end-to-end", () => {
     const procFiles = readdirSync(procDir).filter((f) => f.endsWith(".json"));
     const wpFile = resolve(procDir, procFiles[0]);
     let workerPid: number | null = null;
-    const procs = readdirSync("/proc").filter((e) => /^\d+$/.test(e));
-    for (const p of procs) {
-      try {
-        const cmd = readFileSync(`/proc/${p}/cmdline`, "utf-8");
-        if (cmd.includes("section-worker.ts") && cmd.includes(wpFile)) {
-          workerPid = parseInt(p, 10);
-          break;
-        }
-      } catch {}
-    }
+    await waitFor(() => {
+      workerPid = findSectionWorkerPid(wpFile);
+      return workerPid !== null;
+    }, 5_000);
     expect(workerPid).not.toBeNull();
 
     // 5. Reload.
