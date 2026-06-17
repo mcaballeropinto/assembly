@@ -27,6 +27,7 @@ system prompt. There's no DAG file, no orchestration DSL, no hidden database.
   - `assembly-dev` — meta-line that evolves Assembly itself in a git worktree
 - `docs/` — the manual; start with [`docs/README.md`](./docs/README.md)
 - `DESIGN.md`, `DATA-FLOW.md` — the conceptual model
+- `AGENTS.md` — contributor rules for AI coding agents working in this repo
 
 ## Install
 

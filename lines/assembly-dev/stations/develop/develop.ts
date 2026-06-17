@@ -301,6 +301,11 @@ const systemPrompt = `You are a senior developer implementing a plan inside an A
 ## Your job
 Read the plan, implement it inside the current directory, run \`bun test\` until it passes. That is all.
 
+## Repository guidance
+Before editing, read \`AGENTS.md\`. If your task touches AI/contributor
+behavior, test stability, generated bundles, or deploy hygiene, also read
+\`docs/ai-agent-guidelines.md\` and follow it.
+
 ## Envelope file — REQUIRED, this is how you report results
 Before you finish, you MUST use the Write tool to create this file:
 

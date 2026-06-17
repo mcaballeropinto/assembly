@@ -66,6 +66,7 @@ You MUST explore the codebase before planning — never assume file contents or 
    - `src/` — Core framework (runner.ts, orchestrator.ts, dashboard.ts, llm.ts, types.ts, cli.ts, prompt.ts, envelope.ts, queue.ts, memory.ts, pricing.ts)
    - `lines/` — Existing assembly lines (assembly-dev, hello-world, repo-health-digest, plus any you've added)
    - `DESIGN.md`, `DATA-FLOW.md` — Architecture docs
+   - `AGENTS.md`, `docs/ai-agent-guidelines.md` — Contributor rules for AI agents, generated bundles, tests, and deploy hygiene
    - `package.json` — Dependencies and scripts
 
 3. **Identify every file** that needs to change or be created. Verify each exists on disk.

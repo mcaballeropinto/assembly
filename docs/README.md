@@ -59,6 +59,7 @@ If you only have time for two pages: read [`overview.md`](./overview.md) and [`c
 | Doc | What it covers |
 |-----|----------------|
 | [`development-guide.md`](./development-guide.md) | How to build a new line end-to-end, common pitfalls (scratch leakage, inbox fabrication, neutral task titles), testing |
+| [`ai-agent-guidelines.md`](./ai-agent-guidelines.md) | Repo rules for AI agents and automation: git hygiene, generated bundles, parallel-safe tests, deploy discipline |
 
 ---
 
