@@ -4,8 +4,11 @@ import { dismissFilenames, undismissFilenames } from "./error-dismiss";
 import { releaseHeldTasks, InvalidTaskFileError } from "./held";
 import {
   retryErroredWorkpiece,
+  retryReviewWorkpiece,
   InvalidRetryFileNameError,
   ErrorFileNotFoundError,
+  ReviewFileNotFoundError,
+  ReviewRetryTargetError,
 } from "./retry-manual";
 import { loadLine } from "./line";
 import { basename, extname, normalize, resolve, sep } from "path";
@@ -385,6 +388,46 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
             return Response.json({ error: err.message }, { status: 400 });
           }
           if (err instanceof ErrorFileNotFoundError) {
+            return Response.json({ error: err.message }, { status: 404 });
+          }
+          return Response.json({ error: (err as Error).message }, { status: 500 });
+        }
+      }
+
+      // Retry a review/escalated workpiece at the station that escalated it.
+      if (url.pathname.match(/^\/api\/line\/[^/]+\/retry-review$/) && req.method === "POST") {
+        const lineName = decodeURIComponent(url.pathname.split("/")[3]);
+        const dl = linesByName.get(lineName);
+        if (!dl) return Response.json({ error: `Line "${lineName}" not found` }, { status: 404 });
+        try {
+          const body = await req.json() as { fileName?: string; station?: string };
+          const fileName = body?.fileName;
+          if (!fileName || typeof fileName !== "string") {
+            return Response.json({ error: "fileName required" }, { status: 400 });
+          }
+          const result = retryReviewWorkpiece(dl.linePath, fileName, body.station);
+          try {
+            const logDir = resolve(dl.linePath, "queues");
+            mkdirSync(logDir, { recursive: true });
+            const logPath = resolve(logDir, "activity.jsonl");
+            appendFileSync(
+              logPath,
+              JSON.stringify({
+                ts: new Date().toISOString(),
+                event: "review_retry_manual",
+                workpiece: result.originalId,
+                source_file: fileName,
+                station: result.station,
+              }) + "\n"
+            );
+          } catch {}
+          invalidateLineSnapshot(dl.linePath);
+          return Response.json({ ok: true, fileName: result.fileName, station: result.station });
+        } catch (err) {
+          if (err instanceof InvalidRetryFileNameError || err instanceof ReviewRetryTargetError) {
+            return Response.json({ error: err.message }, { status: 400 });
+          }
+          if (err instanceof ReviewFileNotFoundError) {
             return Response.json({ error: err.message }, { status: 404 });
           }
           return Response.json({ error: (err as Error).message }, { status: 500 });

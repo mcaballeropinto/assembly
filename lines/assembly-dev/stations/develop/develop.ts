@@ -842,6 +842,20 @@ if (planSet.size > 0) {
       if (planned.endsWith("/")) {
         if (normalizedPath.startsWith(planned) && normalizedPath.length > planned.length) return true;
       }
+      // Directory specs are sometimes normalized without a trailing slash
+      // (`web/dist` instead of `web/dist/`). Treat extensionless planned
+      // paths as directory prefixes so generated assets do not false-positive.
+      if (!planned.split("/").pop()?.includes(".")) {
+        const prefix = planned + "/";
+        if (normalizedPath.startsWith(prefix) && normalizedPath.length > prefix.length) return true;
+      }
+    }
+
+    // Dashboard builds generate hashed asset names. Any explicit web/dist
+    // plan entry should cover all descendants, even if the planner omitted
+    // the trailing slash.
+    if ((planSet.has("web/dist") || planSet.has("web/dist/")) && normalizedPath.startsWith("web/dist/")) {
+      return true;
     }
 
     // Direct stem pair: src/foo.{ts,js} → src/__tests__/foo.test.ts

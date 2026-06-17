@@ -23,6 +23,7 @@ import { listHeld, releaseHeldTasks } from "./held";
 import { evaluateAndSnapshotForProviders } from "./usage";
 import { computeRoundsFromProgress } from "./tool-rounds";
 import { recordEmit, isEmitted, quarantineUnverified, bootstrapManifest } from "./emit-manifest";
+import { repairPlanAlignmentContract } from "./plan-contract-repair";
 import type { HandoffWorker, HandoffLineSnapshot, HandoffState } from "./handoff";
 import { isPidAlive } from "./handoff";
 import { tailStderrSink, appendStderrMarker } from "./stderr-log";
@@ -1107,6 +1108,32 @@ export async function startOrchestrator(
               feedback: (stationResult.eval?.feedback ?? stationResult.summary ?? "").slice(0, 200),
             });
             clearRetryState(filePath);
+
+            if (config.name === "assembly-dev" && section.name === "develop") {
+              const repair = repairPlanAlignmentContract(workpiece);
+              if (repair.repaired) {
+                await Bun.write(filePath, JSON.stringify(repair.workpiece, null, 2));
+                recordEmit(section.queue.inbox, fileName, "transition");
+                moveFile(filePath, section.queue.inbox);
+                log("plan_contract_repair_requeued", {
+                  station: section.name,
+                  workpiece: wpId,
+                  added: repair.added,
+                  reason: repair.reason,
+                });
+                retryCounts.delete(retryKey);
+                drainInbox(section);
+                return;
+              }
+              if (/plan-alignment/i.test(stationResult.eval?.feedback ?? stationResult.summary ?? "")) {
+                log("plan_contract_repair_skipped", {
+                  station: section.name,
+                  workpiece: wpId,
+                  reason: repair.reason,
+                });
+              }
+            }
+
             moveFile(filePath, lineQueue.review);
             retryCounts.delete(retryKey);
           } else if (stationResult?.status === "done") {

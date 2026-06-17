@@ -43,6 +43,42 @@ function seedErrorFile(name: string, id: string) {
   );
 }
 
+function seedReviewFile(name: string, id: string) {
+  const reviewDir = resolve(LINE_DIR, "queues", "review");
+  mkdirSync(reviewDir, { recursive: true });
+  writeFileSync(
+    resolve(reviewDir, name),
+    JSON.stringify({
+      id,
+      line: LINE_NAME,
+      task: "Task needing review retry",
+      input: { key: "review" },
+      stations: {
+        plan: {
+          summary: "planned",
+          status: "done",
+          started_at: "2026-04-01T00:00:00Z",
+          finished_at: "2026-04-01T00:00:05Z",
+          model: "sonnet",
+          tokens: { in: 10, out: 5 },
+          cost_usd: 0.001,
+        },
+        develop: {
+          summary: "Escalated: tests failed",
+          status: "escalated",
+          data: { escalation_reason: "Tests failed in develop worktree" },
+          eval: { pass: false, feedback: "Tests failed in develop worktree", action: "retry" },
+          started_at: "2026-04-01T00:00:05Z",
+          finished_at: "2026-04-01T00:00:10Z",
+          model: "script",
+          tokens: { in: 0, out: 0 },
+          cost_usd: 0,
+        },
+      },
+    })
+  );
+}
+
 async function post(path: string, body: unknown) {
   return server!.fetch!(new Request(`http://localhost${path}`, {
     method: "POST",
@@ -156,5 +192,28 @@ describe("POST /api/line/:name/retry", () => {
       fileName: "wp.json",
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/line/:name/retry-review", () => {
+  test("requeues a review workpiece at the escalated station", async () => {
+    seedReviewFile("wp-review-route-1.json", "run-review-route-1");
+
+    const res = await post(
+      `/api/line/${encodeURIComponent(LINE_NAME)}/retry-review`,
+      { fileName: "wp-review-route-1.json" }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; fileName: string; station: string };
+    expect(body.ok).toBe(true);
+    expect(body.fileName).toBe("wp-review-route-1.json");
+    expect(body.station).toBe("develop");
+
+    const inboxPath = resolve(LINE_DIR, "stations", "develop", "queue", "inbox", "wp-review-route-1.json");
+    expect(existsSync(inboxPath)).toBe(true);
+    const written = JSON.parse(readFileSync(inboxPath, "utf-8"));
+    expect(written.stations.develop.previous_attempts[0].eval.feedback).toContain("Tests failed");
+    expect(existsSync(resolve(LINE_DIR, "queues", "review", ".retried", "wp-review-route-1.json"))).toBe(true);
   });
 });

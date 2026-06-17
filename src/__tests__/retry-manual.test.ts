@@ -10,14 +10,17 @@ import {
 } from "fs";
 import {
   retryErroredWorkpiece,
+  retryReviewWorkpiece,
   InvalidRetryFileNameError,
   ErrorFileNotFoundError,
+  ReviewFileNotFoundError,
 } from "../retry-manual";
 import { readDismissed } from "../error-dismiss";
 
 const TEMP_DIR = resolve("/tmp", `assembly-test-retry-manual-${Date.now()}`);
 const LINE_DIR = resolve(TEMP_DIR, "line");
 const ERROR_DIR = resolve(LINE_DIR, "queues", "error");
+const REVIEW_DIR = resolve(LINE_DIR, "queues", "review");
 const INBOX_DIR = resolve(LINE_DIR, "queues", "inbox");
 
 function seedErrorFile(fileName: string, id: string) {
@@ -38,6 +41,45 @@ function seedErrorFile(fileName: string, id: string) {
           model: "sonnet",
           tokens: { in: 100, out: 50 },
           cost_usd: 0.002,
+        },
+      },
+    })
+  );
+}
+
+function seedReviewFile(fileName: string, id: string) {
+  mkdirSync(REVIEW_DIR, { recursive: true });
+  writeFileSync(
+    resolve(REVIEW_DIR, fileName),
+    JSON.stringify({
+      id,
+      line: "retry-test-line",
+      task: "Do the reviewed thing",
+      input: { foo: "review" },
+      stations: {
+        plan: {
+          summary: "planned",
+          status: "done",
+          started_at: "2026-04-01T10:00:00Z",
+          finished_at: "2026-04-01T10:00:10Z",
+          model: "sonnet",
+          tokens: { in: 100, out: 50 },
+          cost_usd: 0.002,
+        },
+        develop: {
+          summary: "Escalated: tests failed",
+          status: "escalated",
+          data: { escalation_reason: "Tests failed in develop worktree" },
+          eval: {
+            pass: false,
+            feedback: "Tests failed in develop worktree",
+            action: "retry",
+          },
+          started_at: "2026-04-01T10:00:10Z",
+          finished_at: "2026-04-01T10:00:20Z",
+          model: "script",
+          tokens: { in: 0, out: 0 },
+          cost_usd: 0,
         },
       },
     })
@@ -125,5 +167,32 @@ describe("retryErroredWorkpiece", () => {
     expect(() =>
       retryErroredWorkpiece(LINE_DIR, "nope.json")
     ).toThrow(ErrorFileNotFoundError);
+  });
+});
+
+describe("retryReviewWorkpiece", () => {
+  test("moves review workpiece to escalated station inbox and preserves feedback", () => {
+    seedReviewFile("wp-review-1.json", "run-review-1");
+
+    const result = retryReviewWorkpiece(LINE_DIR, "wp-review-1.json");
+
+    expect(result.originalId).toBe("run-review-1");
+    expect(result.station).toBe("develop");
+
+    const inboxPath = resolve(LINE_DIR, "stations", "develop", "queue", "inbox", "wp-review-1.json");
+    expect(existsSync(inboxPath)).toBe(true);
+    const written = JSON.parse(readFileSync(inboxPath, "utf-8"));
+    expect(written.input.review_retry.station).toBe("develop");
+    expect(written.stations.develop.previous_attempts).toHaveLength(1);
+    expect(written.stations.develop.previous_attempts[0].eval.feedback).toContain("Tests failed");
+
+    expect(existsSync(resolve(REVIEW_DIR, "wp-review-1.json"))).toBe(false);
+    expect(existsSync(resolve(REVIEW_DIR, ".retried", "wp-review-1.json"))).toBe(true);
+  });
+
+  test("throws ReviewFileNotFoundError when review source missing", () => {
+    expect(() =>
+      retryReviewWorkpiece(LINE_DIR, "missing-review.json")
+    ).toThrow(ReviewFileNotFoundError);
   });
 });

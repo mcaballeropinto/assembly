@@ -70,6 +70,21 @@ You MUST explore the codebase before planning — never assume file contents or 
 
 3. **Identify every file** that needs to change or be created. Verify each exists on disk.
 
+   Dashboard migration plans need a slightly wider contract than ordinary source
+   changes because the develop station enforces `files_to_change ∪
+   files_to_create` exactly:
+   - If the task touches the React dashboard or shadcn UI, include shared UI
+     directories that may be imported or regenerated, especially
+     `web/src/components/ui/` and relevant component folders such as
+     `web/src/components/drawer/`.
+   - If the task builds the dashboard bundle, include `web/dist/` instead of
+     guessing hashed asset filenames.
+   - Include colocated tests (`*.test.ts`, `*.test.tsx`), route tests, and
+     config files (`web/tsconfig.app.json`, `web/vite.config.ts`,
+     `tsconfig.json`, `package.json`, `bun.lock`) when the steps can touch them.
+   - Prefer a trailing slash for generated or shared directories; the
+     plan-alignment gate treats it as allowing descendants.
+
 4. **Write concrete implementation steps.** Each step MUST specify:
    - Which file(s) to modify (non-empty `files` array)
    - What EXACTLY to change — name the function, type, or code block. NOT "update the function" but "add a `retryCount` parameter to `runStation()` in runner.ts:line 84 and thread it through the eval loop at line 112"
