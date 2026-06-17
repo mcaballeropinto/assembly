@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import { resolve } from "path";
-import { mkdirSync, readdirSync, rmSync, writeFileSync, existsSync } from "fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "fs";
 import { initLineQueue } from "../queue";
 import { listHeld, releaseHeldTasks, InvalidTaskFileError } from "../held";
 import { TaskFileName } from "../ids";
@@ -20,6 +20,16 @@ function clearLineQueues() {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
   }
+}
+
+function manifestEntries(queue: "inbox" | "held"): Array<Record<string, string>> {
+  const manifest = resolve(LINE_DIR, "queues", queue, ".emitted.jsonl");
+  if (!existsSync(manifest)) return [];
+  return readFileSync(manifest, "utf-8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 beforeAll(() => {
@@ -143,6 +153,10 @@ describe("releaseHeldTasks", () => {
     ]);
     expect(existsSync(resolve(LINE_DIR, "queues", "inbox", "task-next-1.json"))).toBe(true);
     expect(existsSync(resolve(LINE_DIR, "queues", "inbox", "task-next-2.json"))).toBe(true);
+    expect(manifestEntries("inbox").filter((entry) => entry.source === "release")).toEqual([
+      expect.objectContaining({ filename: "task-next-1.json", source: "release" }),
+      expect.objectContaining({ filename: "task-next-2.json", source: "release" }),
+    ]);
   });
 
   test.each([0, -1, 1.5, Number.NaN])(

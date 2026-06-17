@@ -141,8 +141,13 @@ describe("assembly enqueue", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Line 3:");
     expect(result.stdout).toContain("enqueued 0, held 3, failed 1");
-    expect(jsonFiles("held")).toHaveLength(3);
-    expect(manifestEntries("held").filter((entry) => entry.source === "cli")).toHaveLength(3);
+    const heldFiles = jsonFiles("held").sort();
+    const heldManifestEntries = manifestEntries("held").filter((entry) => entry.source === "cli");
+    expect(heldFiles).toHaveLength(3);
+    expect(heldManifestEntries).toHaveLength(3);
+    expect(heldManifestEntries.every((entry) => heldFiles.includes(entry.filename))).toBe(true);
+    expect(heldFiles).toContain("first.json");
+    expect(heldFiles.some((name) => name.includes(".tmp."))).toBe(false);
   });
 
   test("bulk enqueue to inbox writes all valid rows and summarizes success", async () => {

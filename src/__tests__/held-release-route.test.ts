@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import { resolve } from "path";
-import { mkdirSync, readdirSync, rmSync, writeFileSync, existsSync } from "fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "fs";
 import { initLineQueue } from "../queue";
 import { initSectionQueue } from "../queue";
 
@@ -19,6 +19,24 @@ function writeHeldFile(name: string, task: string) {
 function queueJsonFiles(queue: "held" | "inbox") {
   const dir = resolve(LINE_DIR, "queues", queue);
   return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".json")).sort() : [];
+}
+
+function resetLineQueues() {
+  for (const queue of ["held", "inbox"] as const) {
+    const dir = resolve(LINE_DIR, "queues", queue);
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+  }
+}
+
+function manifestEntries(queue: "held" | "inbox"): Array<Record<string, string>> {
+  const manifest = resolve(LINE_DIR, "queues", queue, ".emitted.jsonl");
+  if (!existsSync(manifest)) return [];
+  return readFileSync(manifest, "utf-8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 async function post(path: string, body: unknown) {
@@ -97,6 +115,7 @@ describe("POST /api/line/:name/release", () => {
   });
 
   test("releases next held tasks oldest first — 200 with released array", async () => {
+    resetLineQueues();
     writeHeldFile("task-next-route-1.json", "First next task");
     await Bun.sleep(10);
     writeHeldFile("task-next-route-2.json", "Second next task");
@@ -112,8 +131,11 @@ describe("POST /api/line/:name/release", () => {
     expect(body.skipped).toHaveLength(0);
     expect(body.errors).toHaveLength(0);
     expect(queueJsonFiles("held")).toEqual(["task-next-route-3.json"]);
-    expect(existsSync(resolve(LINE_DIR, "queues", "inbox", "task-next-route-1.json"))).toBe(true);
-    expect(existsSync(resolve(LINE_DIR, "queues", "inbox", "task-next-route-2.json"))).toBe(true);
+    expect(queueJsonFiles("inbox")).toEqual(["task-next-route-1.json", "task-next-route-2.json"]);
+    expect(manifestEntries("inbox").filter((entry) => entry.source === "release")).toEqual([
+      expect.objectContaining({ filename: "task-next-route-1.json", source: "release" }),
+      expect.objectContaining({ filename: "task-next-route-2.json", source: "release" }),
+    ]);
   });
 
   test.each([
@@ -123,8 +145,7 @@ describe("POST /api/line/:name/release", () => {
     { next: "2" },
     { taskFile: "task-next-invalid.json", next: 1 },
   ])("invalid next body returns 400 without moving files: %p", async (body) => {
-    rmSync(resolve(LINE_DIR, "queues", "held"), { recursive: true, force: true });
-    rmSync(resolve(LINE_DIR, "queues", "inbox"), { recursive: true, force: true });
+    resetLineQueues();
     writeHeldFile("task-next-invalid.json", "Invalid next should not move");
 
     const res = await post(`/api/line/${encodeURIComponent(LINE_NAME)}/release`, body);

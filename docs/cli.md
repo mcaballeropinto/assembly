@@ -84,6 +84,13 @@ Example JSONL:
 {"task":"Summarize findings","dependsOn":["audit-sdk"]}
 ```
 
+Stage a JSONL batch and release a controlled slice:
+
+```bash
+assembly enqueue <line> --from-file tasks.jsonl --hold
+assembly release <line> --next 2
+```
+
 This is the only safe way to feed the daemon. Writing files directly to `queues/inbox/` triggers quarantine to `.unverified/`.
 
 ## `held` — list held tasks
@@ -98,10 +105,11 @@ Lists `queues/held/*.json` for the given line, oldest first.
 
 ```bash
 assembly release <line> <taskFile>         # specific file
+assembly release <line> --next N           # oldest N held tasks
 assembly release <line> --all              # everything in held/
 ```
 
-Atomic rename + producer-allowlist record. Idempotent — already-moved files appear in the `skipped` list.
+Each released file uses an atomic rename plus a producer-allowlist record. `--next N` releases the oldest N held tasks by mtime. Idempotent — already-moved files appear in the `skipped` list.
 
 ---
 
@@ -220,7 +228,7 @@ assembly dashboard --port 4111 &
 assembly enqueue repo-health-digest --task "Audit topic:claude-sdk" \
   --input '{"topic":"claude-sdk","limit":10}' --hold
 assembly held repo-health-digest
-assembly release repo-health-digest --all
+assembly release repo-health-digest --next 2
 ```
 
 **Iterate on one station's prompt:**

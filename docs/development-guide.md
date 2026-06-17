@@ -122,8 +122,10 @@ If `--hold`-ing before release feels safer:
 ```bash
 assembly enqueue my-line --task "..." --hold
 assembly held my-line
-assembly release my-line --all
+assembly release my-line --next 2
 ```
+
+`--next N` is the paced manual batch primitive for concurrency-1 lines. Use `--all` only when you intentionally want to release the entire held backlog.
 
 ---
 
@@ -165,7 +167,7 @@ Reference: [`runtime.md`](./runtime.md#per-worker-isolation), [`queues-and-flow.
 
 **Symptom:** A line with `concurrency: 1` is enqueued with 50 tasks at once. The inbox processes them serially as expected, but you wanted to inspect the inputs first.
 
-**Fix:** Use `--hold` to stage them. Release one at a time or in batches. On concurrency-1 lines the inbox auto-drains as soon as the worker frees, so the held area is the right staging place.
+**Fix:** Stage the batch with `assembly enqueue <line> --from-file tasks.jsonl --hold`, inspect it with `assembly held <line>`, then release a controlled slice with `assembly release <line> --next N`. On concurrency-1 lines the inbox auto-drains as soon as the worker frees, so the held area is the right staging place. Use `--all` only for an intentional full-backlog release.
 
 
 ### Memory-constrained box
