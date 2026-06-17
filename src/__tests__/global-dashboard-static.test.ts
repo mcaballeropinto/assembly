@@ -9,7 +9,6 @@ const INDEX_PATH = resolve(WEB_DIST_DIR, "index.html");
 const ASSETS_DIR = resolve(WEB_DIST_DIR, "assets");
 const CSS_PATH = resolve(ASSETS_DIR, "test-dashboard.css");
 
-const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
@@ -38,8 +37,6 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (server) server.stop();
-  if (originalLineDirs === undefined) delete process.env.ASSEMBLY_LINE_DIRS;
-  else process.env.ASSEMBLY_LINE_DIRS = originalLineDirs;
   if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
   else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
   try {

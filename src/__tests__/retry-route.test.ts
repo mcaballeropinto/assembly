@@ -14,7 +14,6 @@ const TEMP_DIR = resolve("/tmp", `assembly-test-retry-route-${Date.now()}`);
 const LINE_NAME = "retry-route-test-line";
 const LINE_DIR = resolve(TEMP_DIR, "lines", LINE_NAME);
 
-const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
@@ -75,8 +74,6 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (server) server.stop();
-  if (originalLineDirs) process.env.ASSEMBLY_LINE_DIRS = originalLineDirs;
-  else delete process.env.ASSEMBLY_LINE_DIRS;
   if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
   else process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
   try {

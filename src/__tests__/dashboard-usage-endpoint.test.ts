@@ -6,7 +6,6 @@ const TEMP_DIR = resolve("/tmp", `assembly-test-usage-route-${Date.now()}-${proc
 const SNAP_PATH = resolve(TEMP_DIR, "usage-status.json");
 const LINE_DIR = resolve(TEMP_DIR, "lines");
 
-const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalSnapEnv = process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 const originalDashboardToken = process.env.ASSEMBLY_DASHBOARD_TOKEN;
@@ -70,8 +69,6 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (server) server.stop();
-  if (originalLineDirs === undefined) delete process.env.ASSEMBLY_LINE_DIRS;
-  else process.env.ASSEMBLY_LINE_DIRS = originalLineDirs;
   if (originalSnapEnv === undefined) delete process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE;
   else process.env.ASSEMBLY_USAGE_SNAPSHOT_FILE = originalSnapEnv;
   if (originalWebDistDir === undefined) delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;

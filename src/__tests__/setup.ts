@@ -21,5 +21,11 @@ import { mkdirSync } from "fs";
 import { resolve } from "path";
 
 const testHome = resolve("/tmp", `assembly-test-home-${process.pid}`);
+const testLineDirs = resolve(testHome, "line-dirs");
 mkdirSync(testHome, { recursive: true });
+mkdirSync(testLineDirs, { recursive: true });
 process.env.ASSEMBLY_HOME = testHome;
+process.env.ASSEMBLY_LINE_DIRS = testLineDirs;
+
+// GLOBAL_CONFIG is isolated too: src/paths.ts derives it from ASSEMBLY_HOME,
+// so tests can only read a config.yaml deliberately written under testHome.

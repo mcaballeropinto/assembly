@@ -14,8 +14,6 @@ import { WORKPIECE_ACTIVITY_TAIL_BYTES } from "../dashboard-data";
 const TEMP_DIR = resolve("/tmp", `assembly-test-drawer-${Date.now()}`);
 const LINE_DIR = resolve(TEMP_DIR, "lines", "drawer-test-line");
 
-// We need to set ASSEMBLY_LINE_DIRS so discoverLines finds our test line
-const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number; fetch?: (req: Request) => Promise<Response> } | null = null;
@@ -165,7 +163,7 @@ beforeAll(async () => {
     activity.join("\n") + "\n"
   );
 
-  // Set ASSEMBLY_LINE_DIRS so discoverLines picks up our test line directory
+  // Point discovery at this test's fixture line directory.
   process.env.ASSEMBLY_LINE_DIRS = resolve(TEMP_DIR, "lines");
   process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = resolve(TEMP_DIR, "missing-web-dist");
 
@@ -182,8 +180,6 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (server) server.stop();
-  if (originalLineDirs) process.env.ASSEMBLY_LINE_DIRS = originalLineDirs;
-  else delete process.env.ASSEMBLY_LINE_DIRS;
   if (originalWebDistDir) process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
   else delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
   try {

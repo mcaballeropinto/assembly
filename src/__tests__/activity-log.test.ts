@@ -7,7 +7,6 @@ import { initSectionQueue, initLineQueue } from "../queue";
 const TEMP_DIR = resolve("/tmp", `assembly-test-activity-log-${Date.now()}`);
 const LINE_DIR = resolve(TEMP_DIR, "lines", "activity-test-line");
 
-const originalLineDirs = process.env.ASSEMBLY_LINE_DIRS;
 const originalWebDistDir = process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
 
 let server: { stop: () => void; port: number } | null = null;
@@ -103,8 +102,6 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (server) server.stop();
-  if (originalLineDirs) process.env.ASSEMBLY_LINE_DIRS = originalLineDirs;
-  else delete process.env.ASSEMBLY_LINE_DIRS;
   if (originalWebDistDir) process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR = originalWebDistDir;
   else delete process.env.ASSEMBLY_DASHBOARD_WEB_DIST_DIR;
   try {
