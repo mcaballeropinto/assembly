@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import { resolve } from "path";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync, existsSync } from "fs";
 import { initLineQueue } from "../queue";
 import { listHeld, releaseHeldTasks, InvalidTaskFileError } from "../held";
 import { TaskFileName } from "../ids";
@@ -12,6 +12,14 @@ function writeHeldFile(name: string, task: string, input: Record<string, unknown
   const heldDir = resolve(LINE_DIR, "queues", "held");
   mkdirSync(heldDir, { recursive: true });
   writeFileSync(resolve(heldDir, name), JSON.stringify({ task, input }));
+}
+
+function clearLineQueues() {
+  for (const queue of ["held", "inbox"] as const) {
+    const dir = resolve(LINE_DIR, "queues", queue);
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+  }
 }
 
 beforeAll(() => {
@@ -113,6 +121,36 @@ describe("releaseHeldTasks", () => {
   test("throws InvalidTaskFileError when neither file nor all is provided", () => {
     expect(() => releaseHeldTasks(LINE_DIR, {})).toThrow(InvalidTaskFileError);
   });
+
+  test("releases the next N oldest held files by mtime order", async () => {
+    clearLineQueues();
+    writeHeldFile("task-next-1.json", "Next 1");
+    await Bun.sleep(10);
+    writeHeldFile("task-next-2.json", "Next 2");
+    await Bun.sleep(10);
+    writeHeldFile("task-next-3.json", "Next 3");
+    await Bun.sleep(10);
+    writeHeldFile("task-next-4.json", "Next 4");
+
+    const result = releaseHeldTasks(LINE_DIR, { next: 2 });
+
+    expect(result.released).toEqual(["task-next-1.json", "task-next-2.json"]);
+    expect(result.skipped).toHaveLength(0);
+    expect(result.errors).toHaveLength(0);
+    expect(readdirSync(resolve(LINE_DIR, "queues", "held")).filter((f) => f.endsWith(".json")).sort()).toEqual([
+      "task-next-3.json",
+      "task-next-4.json",
+    ]);
+    expect(existsSync(resolve(LINE_DIR, "queues", "inbox", "task-next-1.json"))).toBe(true);
+    expect(existsSync(resolve(LINE_DIR, "queues", "inbox", "task-next-2.json"))).toBe(true);
+  });
+
+  test.each([0, -1, 1.5, Number.NaN])(
+    "throws InvalidTaskFileError for invalid next value %p",
+    (next) => {
+      expect(() => releaseHeldTasks(LINE_DIR, { next })).toThrow(InvalidTaskFileError);
+    }
+  );
 
   test("releases all files with { all: true }", () => {
     writeHeldFile("task-all-1.json", "Task 1");

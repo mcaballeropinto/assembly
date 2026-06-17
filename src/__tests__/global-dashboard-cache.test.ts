@@ -211,12 +211,27 @@ describe("global dashboard snapshot cache", () => {
     expect(afterFailedRelease.timestamp).toBe(preRelease.timestamp);
     expect(afterFailedRelease.held).toHaveLength(preRelease.held.length);
 
+    const failedNextRelease = await post(`${linePath}/release`, { next: 0 });
+    expect(failedNextRelease.status).toBe(400);
+    const afterFailedNextRelease = await (await request(linePath)).json() as any;
+    expect(afterFailedNextRelease.timestamp).toBe(preRelease.timestamp);
+    expect(afterFailedNextRelease.held).toHaveLength(preRelease.held.length);
+
     const release = await post(`${linePath}/release`, { taskFile: "held-1.json" });
     expect(release.status).toBe(200);
     const releasedState = await (await request(linePath)).json() as any;
     expect(releasedState.held).toHaveLength(0);
     expect(releasedState.lineQueue.inbox).toBe(1);
     expect(existsSync(resolve(fixture.lineDir, "queues", "inbox", "held-1.json"))).toBe(true);
+
+    writeQueueFile(fixture.lineDir, "held", "held-next-1.json", { task: "Held next 1", input: {} });
+    writeQueueFile(fixture.lineDir, "held", "held-next-2.json", { task: "Held next 2", input: {} });
+    const nextRelease = await post(`${linePath}/release`, { next: 1 });
+    expect(nextRelease.status).toBe(200);
+    const nextReleasedState = await (await request(linePath)).json() as any;
+    expect(nextReleasedState.timestamp).not.toBe(releasedState.timestamp);
+    expect(nextReleasedState.held).toHaveLength(1);
+    expect(nextReleasedState.lineQueue.inbox).toBe(2);
 
     writeQueueFile(fixture.lineDir, "error", "error-2.json", workpiece("error-2", "failed"));
     await request("/api/state");
@@ -229,9 +244,9 @@ describe("global dashboard snapshot cache", () => {
     const retriedState = await (await request("/api/state")).json() as any;
     const retriedKanban = await (await request(`${linePath}/kanban`)).json() as any;
     const retriedFlow = await (await request(`${linePath}/flow-metrics`)).json() as any;
-    expect(retriedState.totals.totalInbox).toBe(2);
+    expect(retriedState.totals.totalInbox).toBe(3);
     expect(findColumn(retriedKanban, "inbox").cards.some((c: { fileName: string }) => c.fileName === retryBody.newFileName)).toBe(true);
-    expect(itemsInFlight(retriedFlow)).toBe(2);
+    expect(itemsInFlight(retriedFlow)).toBe(3);
 
     const dismissedRaw = readFileSync(resolve(fixture.lineDir, "queues", "error", ".dismissed"), "utf-8");
     expect(Object.keys(JSON.parse(dismissedRaw))).toContain("error-2.json");

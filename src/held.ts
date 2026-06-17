@@ -99,12 +99,22 @@ export function listHeld(linePath: string): HeldTask[] {
  */
 export function releaseHeldTasks(
   linePath: string,
-  opts: { file?: string; all?: boolean }
+  opts: { file?: string; all?: boolean; next?: number }
 ): ReleaseResult {
   const result: ReleaseResult = { released: [], skipped: [], errors: [] };
 
-  if (!opts.file && !opts.all) {
-    throw new InvalidTaskFileError("Must provide file or all");
+  const modeCount = [
+    opts.file !== undefined,
+    opts.all === true,
+    opts.next !== undefined,
+  ].filter(Boolean).length;
+
+  if (modeCount !== 1) {
+    throw new InvalidTaskFileError("Must provide exactly one of file, all, or next");
+  }
+
+  if (opts.next !== undefined && (!Number.isInteger(opts.next) || opts.next <= 0)) {
+    throw new InvalidTaskFileError("next must be a positive integer");
   }
 
   const held = heldDir(linePath);
@@ -113,9 +123,13 @@ export function releaseHeldTasks(
   // Ensure inbox exists (auto-create)
   mkdirSync(inbox, { recursive: true });
 
-  if (opts.file) {
+  if (opts.file !== undefined) {
     const validated = TaskFileName(opts.file); // Validate and brand
     _releaseOne(held, inbox, validated, result);
+  } else if (opts.next !== undefined) {
+    for (const task of listHeld(linePath).slice(0, opts.next)) {
+      _releaseOne(held, inbox, task.fileName, result);
+    }
   } else if (opts.all) {
     let files: string[] = [];
     if (existsSync(held)) {

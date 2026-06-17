@@ -312,10 +312,18 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
         const dl = linesByName.get(lineName);
         if (!dl) return Response.json({ error: `Line "${lineName}" not found` }, { status: 404 });
         try {
-          const body = await req.json() as { taskFile?: string; all?: boolean };
-          const { taskFile, all } = body;
-          if (!taskFile && !all) {
-            return Response.json({ error: "taskFile or all required" }, { status: 400 });
+          const body = await req.json() as { taskFile?: string; all?: boolean; next?: number };
+          const { taskFile, all, next } = body;
+          const modeCount = [
+            taskFile !== undefined,
+            all === true,
+            next !== undefined,
+          ].filter(Boolean).length;
+          if (modeCount === 0) {
+            return Response.json({ error: "taskFile, all, or next required" }, { status: 400 });
+          }
+          if (modeCount !== 1) {
+            return Response.json({ error: "provide exactly one of taskFile, all, or next" }, { status: 400 });
           }
           if (taskFile !== undefined) {
             const base = basename(taskFile);
@@ -329,7 +337,10 @@ export function startGlobalDashboard(options: GlobalDashboardOptions): {
               return Response.json({ error: "Invalid taskFile" }, { status: 400 });
             }
           }
-          const result = releaseHeldTasks(dl.linePath, { file: taskFile, all });
+          if (next !== undefined && (!Number.isInteger(next) || next <= 0)) {
+            return Response.json({ error: "next must be a positive integer" }, { status: 400 });
+          }
+          const result = releaseHeldTasks(dl.linePath, { file: taskFile, all, next });
           invalidateLineSnapshot(dl.linePath);
           return Response.json(result);
         } catch (err) {

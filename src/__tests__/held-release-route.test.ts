@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import { resolve } from "path";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync, existsSync } from "fs";
 import { initLineQueue } from "../queue";
 import { initSectionQueue } from "../queue";
 
@@ -16,6 +16,11 @@ function writeHeldFile(name: string, task: string) {
   const heldDir = resolve(LINE_DIR, "queues", "held");
   mkdirSync(heldDir, { recursive: true });
   writeFileSync(resolve(heldDir, name), JSON.stringify({ task, input: {} }));
+}
+
+function queueJsonFiles(queue: "held" | "inbox") {
+  const dir = resolve(LINE_DIR, "queues", queue);
+  return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".json")).sort() : [];
 }
 
 async function post(path: string, body: unknown) {
@@ -98,6 +103,44 @@ describe("POST /api/line/:name/release", () => {
     expect(remaining.length).toBe(0);
   });
 
+  test("releases next held tasks oldest first — 200 with released array", async () => {
+    writeHeldFile("task-next-route-1.json", "First next task");
+    await Bun.sleep(10);
+    writeHeldFile("task-next-route-2.json", "Second next task");
+    await Bun.sleep(10);
+    writeHeldFile("task-next-route-3.json", "Third next task");
+
+    const res = await post(`/api/line/${encodeURIComponent(LINE_NAME)}/release`, {
+      next: 2,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { released: string[]; skipped: string[]; errors: unknown[] };
+    expect(body.released).toEqual(["task-next-route-1.json", "task-next-route-2.json"]);
+    expect(body.skipped).toHaveLength(0);
+    expect(body.errors).toHaveLength(0);
+    expect(queueJsonFiles("held")).toEqual(["task-next-route-3.json"]);
+    expect(existsSync(resolve(LINE_DIR, "queues", "inbox", "task-next-route-1.json"))).toBe(true);
+    expect(existsSync(resolve(LINE_DIR, "queues", "inbox", "task-next-route-2.json"))).toBe(true);
+  });
+
+  test.each([
+    { next: 0 },
+    { next: -1 },
+    { next: 1.2 },
+    { next: "2" },
+    { taskFile: "task-next-invalid.json", next: 1 },
+  ])("invalid next body returns 400 without moving files: %p", async (body) => {
+    rmSync(resolve(LINE_DIR, "queues", "held"), { recursive: true, force: true });
+    rmSync(resolve(LINE_DIR, "queues", "inbox"), { recursive: true, force: true });
+    writeHeldFile("task-next-invalid.json", "Invalid next should not move");
+
+    const res = await post(`/api/line/${encodeURIComponent(LINE_NAME)}/release`, body);
+
+    expect(res.status).toBe(400);
+    expect(queueJsonFiles("held")).toEqual(["task-next-invalid.json"]);
+    expect(queueJsonFiles("inbox")).toEqual([]);
+  });
+
   test("path traversal returns 400", async () => {
     const res = await post(`/api/line/${encodeURIComponent(LINE_NAME)}/release`, {
       taskFile: "../evil.json",
@@ -129,6 +172,6 @@ describe("POST /api/line/:name/release", () => {
     const res = await post(`/api/line/${encodeURIComponent(LINE_NAME)}/release`, {});
     expect(res.status).toBe(400);
     const body = await res.json() as { error: string };
-    expect(body.error).toContain("taskFile or all required");
+    expect(body.error).toContain("taskFile, all, or next required");
   });
 });

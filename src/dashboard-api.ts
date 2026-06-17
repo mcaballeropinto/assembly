@@ -361,6 +361,8 @@ export interface ApiKanbanDoneResponse {
 /**
  * Response from POST /api/line/:name/release.
  */
+export type ApiReleaseHeldRequest = { all: true } | { taskFile: string } | { next: number };
+
 export interface ApiReleaseHeldResponse {
   released: string[];
   skipped: string[];

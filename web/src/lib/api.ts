@@ -257,7 +257,7 @@ export const fetchDoneCards = getDoneKanbanCards
 
 export function releaseHeldTasks(
   lineName: string,
-  body: { all: true } | { taskFile: string }
+  body: { all: true } | { taskFile: string } | { next: number }
 ): Promise<ApiReleaseHeldResponse> {
   return fetchJson<ApiReleaseHeldResponse>(`/api/line/${enc(lineName)}/release`, {
     method: "POST",
@@ -270,6 +270,13 @@ export function releaseAllHeld(
   lineName: string
 ): Promise<ApiReleaseHeldResponse> {
   return releaseHeldTasks(lineName, { all: true })
+}
+
+export function releaseNextHeld(
+  lineName: string,
+  next: number
+): Promise<ApiReleaseHeldResponse> {
+  return releaseHeldTasks(lineName, { next })
 }
 
 export function releaseHeldTask(

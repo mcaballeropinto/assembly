@@ -41,7 +41,7 @@ Usage:
                                                     --depends-on holds the task in inbox until each key has
                                                     landed in queues/done/.
   assembly held <line>                              List held tasks
-  assembly release <line> <taskFile>|--all          Move held task(s) into inbox
+  assembly release <line> <taskFile>|--all|--next N Move held task(s) into inbox
   assembly run <line> --task "..." [options]         Run a line synchronously (batch mode)
   assembly inspect <workpiece.json> [--station]     Inspect a workpiece
   assembly validate <line>                          Validate a line
@@ -497,20 +497,49 @@ function handleRelease(args: string[]) {
   const lineRef = args[0];
   if (!lineRef) {
     console.error(
-      "Error: line required. Usage: assembly release <line> <taskFile>|--all"
+      "Error: line required. Usage: assembly release <line> <taskFile>|--all|--next N"
     );
     process.exit(1);
   }
 
   const all = args.includes("--all");
-  // Second positional arg (not starting with --) is the file
-  const file =
-    args[1] && !args[1].startsWith("--") ? args[1] : undefined;
+  const nextRaw = getFlag(args, "--next");
+  let next: number | undefined;
 
-  if (!all && !file) {
+  if (args.includes("--next")) {
+    if (nextRaw === null) {
+      console.error("Error: --next requires a positive integer value.");
+      process.exit(1);
+    }
+    next = Number(nextRaw);
+    if (!Number.isInteger(next) || next <= 0) {
+      console.error("Error: --next must be a positive integer.");
+      process.exit(1);
+    }
+  }
+
+  const positional: string[] = [];
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === "--next") {
+      i++;
+      continue;
+    }
+    if (!args[i].startsWith("--")) positional.push(args[i]);
+  }
+  const file = positional[0];
+
+  const modeCount = [all, file !== undefined, next !== undefined].filter(Boolean).length;
+  if (modeCount === 0) {
     console.error(
-      "Error: provide a task filename or --all.\n" +
-        "Usage: assembly release <line> <taskFile>|--all"
+      "Error: provide a task filename, --all, or --next N.\n" +
+        "Usage: assembly release <line> <taskFile>|--all|--next N"
+    );
+    process.exit(1);
+  }
+  if (modeCount !== 1 || positional.length > 1) {
+    console.error(
+      "Error: provide exactly one of a task filename, --all, or --next N.\n" +
+        "Usage: assembly release <line> <taskFile>|--all|--next N"
     );
     process.exit(1);
   }
@@ -519,7 +548,7 @@ function handleRelease(args: string[]) {
 
   let result;
   try {
-    result = releaseHeldTasks(linePath, { file, all });
+    result = releaseHeldTasks(linePath, { file, all, next });
   } catch (err) {
     if (err instanceof InvalidTaskFileError) {
       console.error(`Error: ${(err as Error).message}`);
