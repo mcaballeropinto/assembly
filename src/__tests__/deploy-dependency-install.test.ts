@@ -2,6 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "fs";
 
 const deploySource = readFileSync("lines/assembly-dev/stations/deploy/deploy.ts", "utf-8");
+const rootPackage = JSON.parse(readFileSync("package.json", "utf-8"));
+const webPackage = JSON.parse(readFileSync("web/package.json", "utf-8"));
 
 function expectBefore(before: string, after: string) {
   const beforeIndex = deploySource.indexOf(before);
@@ -32,5 +34,15 @@ describe("deploy dependency installation", () => {
       'installWorkspaceDependencies(LIVE, "LIVE")',
       'buildDashboardBundle(LIVE, "LIVE")'
     );
+  });
+
+  it("uses the web workspace build script so Vite plugins resolve from installed dependencies", () => {
+    const rootBuildScript = rootPackage.scripts["build:web"];
+
+    expect(rootBuildScript).toBe("bun --cwd web run build");
+    expect(rootBuildScript).not.toContain("bunx");
+    expect(webPackage.scripts.build).toContain("vite build");
+    expect(webPackage.devDependencies["@vitejs/plugin-react"]).toBeString();
+    expect(webPackage.devDependencies["@vitejs/plugin-react"].length).toBeGreaterThan(0);
   });
 });
