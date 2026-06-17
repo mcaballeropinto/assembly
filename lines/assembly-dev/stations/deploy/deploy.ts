@@ -71,6 +71,20 @@ function fatal(msg: string, extra = ""): never {
   process.exit(1);
 }
 
+function installWorkspaceDependencies(cwd: string, label: string): void {
+  log(`installing workspace dependencies in ${label}`);
+  const installR = spawnSync("bun", ["install", "--frozen-lockfile"], {
+    cwd,
+    encoding: "utf-8",
+    timeout: 300_000,
+    maxBuffer: 1024 * 1024 * 20,
+  });
+  const installOut = (installR.stdout ?? "") + "\n" + (installR.stderr ?? "");
+  if (installR.status !== 0) {
+    fatal(`bun install failed in ${label}`, installOut);
+  }
+}
+
 function buildDashboardBundle(cwd: string, label: string): void {
   log(`building dashboard bundle in ${label}`);
   const buildR = spawnSync("bun", ["run", "build:web"], {
@@ -181,6 +195,8 @@ if (!existsSync(worktreePath)) {
 }
 
 // ─── 1. Run tests — any failure fails the station ─────────────────────
+
+installWorkspaceDependencies(worktreePath, "develop worktree");
 
 log("running required improver tests");
 const requiredTestR = spawnSync("bun", ["test", "src/__tests__/improver.test.ts"], {
@@ -595,6 +611,7 @@ if (postCount === 0) {
 }
 log(`post-rebase HEAD=${mergeSha.slice(0, 8)} (${postCount} commits ahead of origin/${BASE}, was ${preFeatureCount})`);
 
+installWorkspaceDependencies(deployWtRoot, "deploy worktree");
 buildDashboardBundle(deployWtRoot, "deploy worktree");
 
 // ─── 4. Push to origin ────────────────────────────────────────────────
@@ -661,6 +678,7 @@ if ((liveHeadR.stdout ?? "").trim() !== mergeSha) {
   log(`warning: LIVE HEAD ${(liveHeadR.stdout ?? "").trim()} != merge ${mergeSha} after reset (non-fatal)`);
 }
 
+installWorkspaceDependencies(LIVE, "LIVE");
 buildDashboardBundle(LIVE, "LIVE");
 
 // ─── 4c. Sync line-discovery root ─────────────────────────────────────
