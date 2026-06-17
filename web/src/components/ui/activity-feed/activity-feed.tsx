@@ -60,7 +60,7 @@ export function ActivityFeed({
   const rowVirtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 58,
+    estimateSize: () => 84,
     overscan: 8,
     enabled: shouldVirtualize,
   })
@@ -101,6 +101,8 @@ export function ActivityFeed({
               return (
                 <li
                   key={item.id}
+                  data-index={virtualRow.index}
+                  ref={rowVirtualizer.measureElement}
                   className="absolute left-0 top-0 w-full"
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                 >
@@ -228,7 +230,7 @@ function ActivityRow({ item }: { item: DashboardActivityEvent }) {
 
   return (
     <div
-      className="flex items-start gap-3 border-b py-3 last:border-0"
+      className="flex min-h-20 items-start gap-3 border-b py-3 last:border-0"
       aria-label={`${item.event} on ${item.line}`}
     >
       <div
