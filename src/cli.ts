@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { resolve } from "path";
-import { existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, unlinkSync } from "fs";
 import { homedir } from "os";
 import { run } from "./runner";
 import { validateLine } from "./line";
@@ -36,6 +36,7 @@ Usage:
   assembly dashboard stop                           Stop the dashboard server
   assembly dashboard status                         Show dashboard status
   assembly enqueue <line> --task "..." [--hold] [--key <name>] [--depends-on a,b]
+  assembly enqueue <line> --from-file tasks.jsonl [--hold]
                                                     Drop a task into a line's inbox (or held/ with --hold).
                                                     --key names the task so other tasks can depend on it.
                                                     --depends-on holds the task in inbox until each key has
@@ -346,56 +347,174 @@ async function handleValidate(args: string[]) {
   }
 }
 
+const VALID_TASK_KEY = /^[A-Za-z0-9._-]+$/;
+
+type EnqueuePayload = {
+  task: string;
+  input?: Record<string, unknown>;
+  key?: string;
+  dependsOn?: string[];
+};
+
+type EnqueueOneOptions = {
+  hold: boolean;
+};
+
+type EnqueueOneResult = {
+  fileName: string;
+  filePath: string;
+  held: boolean;
+  task: string;
+};
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function assertValidTaskKey(value: string, label: string): void {
+  if (!VALID_TASK_KEY.test(value)) {
+    throw new Error(`${label} must be alphanumeric with . _ -`);
+  }
+}
+
+function validateEnqueuePayload(raw: unknown, context: string): EnqueuePayload {
+  if (!isPlainObject(raw)) {
+    throw new Error(`${context} must be an object`);
+  }
+
+  const task = raw.task;
+  if (typeof task !== "string" || task.trim().length === 0) {
+    throw new Error(`${context}.task must be a non-empty string`);
+  }
+
+  let input: Record<string, unknown> = {};
+  if ("input" in raw && raw.input !== undefined) {
+    if (!isPlainObject(raw.input)) {
+      throw new Error(`${context}.input must be an object`);
+    }
+    input = raw.input;
+  }
+
+  let key: string | undefined;
+  if ("key" in raw && raw.key !== undefined) {
+    if (typeof raw.key !== "string") {
+      throw new Error(`${context}.key must be a string`);
+    }
+    assertValidTaskKey(raw.key, `${context}.key`);
+    key = raw.key;
+  }
+
+  let dependsOn: string[] | undefined;
+  if ("dependsOn" in raw && raw.dependsOn !== undefined) {
+    if (!Array.isArray(raw.dependsOn) || !raw.dependsOn.every((dep) => typeof dep === "string")) {
+      throw new Error(`${context}.dependsOn must be an array of strings`);
+    }
+    dependsOn = raw.dependsOn;
+    for (const dep of dependsOn) {
+      assertValidTaskKey(dep, `${context}.dependsOn entry '${dep}'`);
+    }
+  }
+
+  return { task, input, key, dependsOn };
+}
+
+function taskFileExists(linePath: string, fileName: string): boolean {
+  return ["inbox", "held", "done"].some((queue) =>
+    existsSync(resolve(linePath, "queues", queue, fileName))
+  );
+}
+
+function nextAvailableTaskFileName(linePath: string, key?: string): string {
+  if (key) {
+    const fileName = `${key}.json`;
+    if (taskFileExists(linePath, fileName)) {
+      throw new Error(`task key '${key}' already exists in this line`);
+    }
+    return fileName;
+  }
+
+  const now = Date.now();
+  let attempt = 0;
+  while (true) {
+    const fileName = attempt === 0
+      ? `task-${now}.json`
+      : `task-${now}-${attempt}.json`;
+    if (!taskFileExists(linePath, fileName)) {
+      return fileName;
+    }
+    attempt += 1;
+  }
+}
+
+function enqueueOne(
+  linePath: string,
+  payload: EnqueuePayload,
+  opts: EnqueueOneOptions
+): EnqueueOneResult {
+  const normalized = validateEnqueuePayload(payload, "payload");
+  const destDir = resolve(linePath, "queues", opts.hold ? "held" : "inbox");
+  mkdirSync(destDir, { recursive: true });
+
+  const taskData: Record<string, unknown> = {
+    schema_version: CURRENT_INBOX_PAYLOAD_VERSION,
+    task: normalized.task,
+    input: normalized.input ?? {},
+  };
+  if (normalized.key) taskData.taskKey = normalized.key;
+  if (normalized.dependsOn && normalized.dependsOn.length > 0) {
+    taskData.dependsOn = normalized.dependsOn;
+  }
+
+  const fileName = nextAvailableTaskFileName(linePath, normalized.key);
+  const filePath = resolve(destDir, fileName);
+  const tmpPath = `${filePath}.tmp.${process.pid}`;
+
+  writeFileSync(tmpPath, JSON.stringify(taskData, null, 2));
+  recordEmit(destDir, fileName, "cli");
+  renameSync(tmpPath, filePath);
+
+  return {
+    fileName,
+    filePath,
+    held: opts.hold,
+    task: normalized.task,
+  };
+}
+
 async function handleEnqueue(args: string[]) {
   const lineRef = args[0];
   if (!lineRef) {
     console.error(
-      "Error: line required. Usage: assembly enqueue <line> --task '...'"
+      "Error: line required. Usage: assembly enqueue <line> --task '...' or --from-file tasks.jsonl"
     );
     process.exit(1);
   }
 
   const task = getFlag(args, "--task");
-  if (!task) {
-    console.error("Error: --task is required");
+  const fromFile = getFlag(args, "--from-file");
+  if (!task && !fromFile) {
+    console.error("Error: --task or --from-file is required");
+    process.exit(1);
+  }
+  if (task && fromFile) {
+    console.error("Error: provide either --task or --from-file, not both");
     process.exit(1);
   }
 
-  const inputRaw = getFlag(args, "--input");
-  let input: Record<string, unknown> = {};
-  if (inputRaw) {
-    try {
-      input = JSON.parse(inputRaw);
-    } catch {
-      console.error("Error: --input must be valid JSON");
-      process.exit(1);
-    }
-  }
-
-  const hold = args.includes("--hold");
-  const taskKey = getFlag(args, "--key");
-  const dependsOnRaw = getFlag(args, "--depends-on");
-  const dependsOn = dependsOnRaw
-    ? dependsOnRaw.split(",").map((s) => s.trim()).filter(Boolean)
-    : undefined;
-
-  // Keys become filenames in queues/*/, so reject anything that isn't a
-  // safe basename. Dependencies match keys (or default `task-<ts>` ids), so
-  // they must be sane too.
-  const VALID_KEY = /^[A-Za-z0-9._-]+$/;
-  if (taskKey !== null && !VALID_KEY.test(taskKey)) {
-    console.error("Error: --key must be alphanumeric with . _ -");
-    process.exit(1);
-  }
-  if (dependsOn) {
-    for (const dep of dependsOn) {
-      if (!VALID_KEY.test(dep)) {
-        console.error(`Error: --depends-on entry '${dep}' must be alphanumeric with . _ -`);
+  if (fromFile) {
+    for (const flag of ["--input", "--key", "--depends-on"]) {
+      if (args.includes(flag)) {
+        console.error(`Error: ${flag} is only valid with --task`);
         process.exit(1);
       }
     }
   }
 
+  const hold = args.includes("--hold");
   const linePath = resolveLinePath(lineRef);
 
   // Guard: refuse to create a queue dir under a path that isn't a real line.
@@ -418,56 +537,73 @@ async function handleEnqueue(args: string[]) {
     process.exit(1);
   }
 
-  const destDir = resolve(linePath, "queues", hold ? "held" : "inbox");
-  const { mkdirSync } = await import("fs");
-  mkdirSync(destDir, { recursive: true });
+  if (fromFile) {
+    const jsonlPath = resolve(fromFile);
+    const lines = readFileSync(jsonlPath, "utf-8").split(/\r?\n/);
+    let enqueued = 0;
+    let held = 0;
+    let failed = 0;
 
-  // Create task file. We must guarantee the manifest entry is on disk
-  // *before* the file is visible to the inbox watcher, otherwise the
-  // daemon's drain races us, sees an "unverified" workpiece, and
-  // quarantines it. Pattern: write to `.tmp`, append manifest, then
-  // atomic rename. The rename is the moment the watcher fires, and at
-  // that point the manifest already contains the final filename.
-  const taskData: Record<string, unknown> = { schema_version: CURRENT_INBOX_PAYLOAD_VERSION, task, input };
-  if (taskKey) taskData.taskKey = taskKey;
-  if (dependsOn && dependsOn.length > 0) taskData.dependsOn = dependsOn;
-  const fileName = `${taskKey ?? `task-${Date.now()}`}.json`;
-  const filePath = resolve(destDir, fileName);
+    for (let index = 0; index < lines.length; index += 1) {
+      const lineNumber = index + 1;
+      const line = lines[index];
+      if (index === lines.length - 1 && line === "") {
+        continue;
+      }
 
-  // Collision check: a duplicate --key would silently overwrite the
-  // earlier task. The held/ and inbox/ folders share a namespace via
-  // release, so guard both.
-  if (taskKey) {
-    const inboxPath = resolve(linePath, "queues", "inbox", fileName);
-    const heldPath = resolve(linePath, "queues", "held", fileName);
-    const donePath = resolve(linePath, "queues", "done", fileName);
-    if (existsSync(filePath) || existsSync(inboxPath) || existsSync(heldPath) || existsSync(donePath)) {
-      console.error(`Error: task key '${taskKey}' already exists in this line`);
+      try {
+        const parsed = JSON.parse(line);
+        const payload = validateEnqueuePayload(parsed, `line ${lineNumber}`);
+        const result = enqueueOne(linePath, payload, { hold });
+        if (result.held) held += 1;
+        else enqueued += 1;
+      } catch (err) {
+        console.error(`Line ${lineNumber}: ${(err as Error).message}`);
+        failed += 1;
+      }
+    }
+
+    console.log(`enqueued ${enqueued}, held ${held}, failed ${failed}`);
+    if (failed > 0) {
+      process.exit(1);
+    }
+    return;
+  }
+
+  const taskKey = getFlag(args, "--key");
+  const dependsOnRaw = getFlag(args, "--depends-on");
+  const dependsOn = dependsOnRaw
+    ? dependsOnRaw.split(",").map((s) => s.trim()).filter(Boolean)
+    : undefined;
+  const inputRaw = getFlag(args, "--input");
+  let input: Record<string, unknown> = {};
+  if (inputRaw) {
+    try {
+      input = JSON.parse(inputRaw);
+    } catch {
+      console.error("Error: --input must be valid JSON");
       process.exit(1);
     }
   }
 
-  if (hold) {
-    // `held/` files don't need recording — the inbox watcher never sees
-    // them; held → inbox release records the destination separately via
-    // held.ts.
-    writeFileSync(filePath, JSON.stringify(taskData, null, 2));
-  } else {
-    // Match the existing atomic-write convention from queue.ts:
-    // the inbox watcher's filter ignores names containing `.tmp.<pid>`.
-    const tmpPath = `${filePath}.tmp.${process.pid}`;
-    writeFileSync(tmpPath, JSON.stringify(taskData, null, 2));
-    recordEmit(destDir, fileName, "cli");
-    const { renameSync } = await import("fs");
-    renameSync(tmpPath, filePath);
+  let result: EnqueueOneResult;
+  try {
+    const payload = validateEnqueuePayload(
+      { task, input, key: taskKey ?? undefined, dependsOn },
+      "payload"
+    );
+    result = enqueueOne(linePath, payload, { hold });
+  } catch (err) {
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
   }
 
-  if (hold) {
-    console.log(`\n  Task held (not released): ${filePath}`);
+  if (result.held) {
+    console.log(`\n  Task held (not released): ${result.filePath}`);
   } else {
-    console.log(`\n  Task enqueued: ${filePath}`);
+    console.log(`\n  Task enqueued: ${result.filePath}`);
   }
-  console.log(`  Task: ${task.slice(0, 80)}${task.length > 80 ? "..." : ""}\n`);
+  console.log(`  Task: ${result.task.slice(0, 80)}${result.task.length > 80 ? "..." : ""}\n`);
 }
 
 function handleHeld(args: string[]) {

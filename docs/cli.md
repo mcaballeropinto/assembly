@@ -67,13 +67,22 @@ Prints what would execute without calling models. Same code path as `run` but wi
 ## `enqueue` — daemon mode
 
 ```bash
-assembly enqueue <line> --task "..." [--input '{…}'] [--hold]
+assembly enqueue <line> --task "..." [--input '{…}'] [--hold] [--key <name>] [--depends-on a,b]
+assembly enqueue <line> --from-file tasks.jsonl [--hold]
 ```
 
 Writes a task file to `<line>/queues/inbox/` (or `queues/held/` with `--hold`). The daemon picks it up.
 
-- Records the file in the producer allowlist (`.emitted.jsonl`) — see [`queues-and-flow.md`](./queues-and-flow.md#producer-allowlist).
-- `--hold` skips the allowlist; release later with `assembly release`.
+- Records each file in the destination queue manifest (`.emitted.jsonl`) — see [`queues-and-flow.md`](./queues-and-flow.md#producer-allowlist).
+- `--hold` stages tasks in `queues/held/`; release later with `assembly release`, which records the held-to-inbox move separately.
+- `--from-file` reads one JSON object per line shaped as `{ "task": "...", "input": {}, "key": "name", "dependsOn": ["other"] }`. Bad rows are reported with line numbers, skipped, and reflected in the final summary.
+
+Example JSONL:
+
+```jsonl
+{"task":"Audit Anthropic SDKs","input":{"repos":["anthropics/anthropic-sdk-python"]},"key":"audit-sdk"}
+{"task":"Summarize findings","dependsOn":["audit-sdk"]}
+```
 
 This is the only safe way to feed the daemon. Writing files directly to `queues/inbox/` triggers quarantine to `.unverified/`.
 

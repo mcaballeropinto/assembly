@@ -170,6 +170,7 @@ Quarantine: `quarantineUnverified(queueDir, filename)` moves the file to `.unver
 ```bash
 # Stage:
 assembly enqueue repo-health-digest --task "…" --hold
+assembly enqueue repo-health-digest --from-file tasks.jsonl --hold
 
 # List:
 assembly held repo-health-digest
@@ -179,7 +180,7 @@ assembly release repo-health-digest task-1715616000000.json
 assembly release repo-health-digest --all
 ```
 
-`release` does an atomic rename from `held/` to `inbox/` and records the file in `.emitted.jsonl` with source `release`. It's idempotent — files that have already moved appear in `skipped`, not `errors`.
+`enqueue --hold` records staged files in `queues/held/.emitted.jsonl` with source `cli`. `release` does an atomic rename from `held/` to `inbox/` and records the destination file in `queues/inbox/.emitted.jsonl` with source `release`. It's idempotent — files that have already moved appear in `skipped`, not `errors`.
 
 Use `--hold` when:
 - You're enqueuing in a tight loop and want to inspect before draining.
