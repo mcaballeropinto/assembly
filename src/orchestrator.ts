@@ -552,6 +552,7 @@ export async function startOrchestrator(
       if (lineSnap.usage_paused) {
         usagePaused = true;
         usagePauseReason = lineSnap.usage_pause_reason ?? "carried from predecessor";
+        startUsageResumePoll();
       }
     }
     if (adopted > 0 || skippedDead > 0) {
@@ -1645,7 +1646,7 @@ export async function startOrchestrator(
     const resumeProviders = Array.from(
       new Set(sections.map((section) => section.provider ?? "claude-code"))
     );
-    usageResumeTimer = setInterval(() => {
+    const checkResume = () => {
       evaluateAndSnapshotForProviders(resumeProviders).then((decision) => {
         if (!decision.blocked) {
           stopUsageResumePoll();
@@ -1662,7 +1663,9 @@ export async function startOrchestrator(
           });
         }
       }).catch(() => {});
-    }, 60_000);
+    };
+    usageResumeTimer = setInterval(checkResume, 60_000);
+    checkResume();
   }
 
   function stopUsageResumePoll() {
