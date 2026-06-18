@@ -48,6 +48,8 @@ interface ActivityFeedProps {
   onOpenWorkpiece?: (lineName: string, fileName: string) => void
 }
 
+const ACTIVITY_ROW_HEIGHT = 96
+
 export function ActivityFeed({
   items,
   selectedFilters,
@@ -62,7 +64,7 @@ export function ActivityFeed({
   const rowVirtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 84,
+    estimateSize: () => ACTIVITY_ROW_HEIGHT,
     overscan: 8,
     enabled: shouldVirtualize,
   })
@@ -105,8 +107,11 @@ export function ActivityFeed({
                   key={item.id}
                   data-index={virtualRow.index}
                   ref={rowVirtualizer.measureElement}
-                  className="absolute left-0 top-0 w-full"
-                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  className="absolute left-0 top-0 box-border w-full overflow-hidden"
+                  style={{
+                    height: `${ACTIVITY_ROW_HEIGHT}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
                 >
                   <ActivityRow item={item} onOpenWorkpiece={onOpenWorkpiece} />
                 </li>
@@ -241,7 +246,8 @@ function ActivityRow({
   return (
     <Element
       type={clickable ? "button" : undefined}
-      className="flex min-h-20 w-full items-start gap-3 border-b py-3 text-left last:border-0"
+      data-testid="activity-row"
+      className="flex h-24 w-full box-border items-start gap-3 overflow-hidden border-b py-3 text-left last:border-0"
       aria-label={`${item.event} on ${item.line}`}
       onClick={
         clickable
@@ -257,19 +263,25 @@ function ActivityRow({
       >
         <Icon className="h-4 w-4" />
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="truncate text-sm font-medium">{item.event}</span>
-          {item.station && (
-            <span className="max-w-36 truncate rounded border px-1.5 py-0.5 text-xs text-muted-foreground">
-              {item.station}
-            </span>
-          )}
-          <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">
-            {item.line}
-          </span>
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 overflow-hidden">
+          <div className="min-w-0 overflow-hidden">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 overflow-hidden">
+              <span className="min-w-0 max-w-full truncate text-sm font-medium">
+                {item.event}
+              </span>
+              {item.station && (
+                <span className="min-w-0 max-w-36 truncate rounded border px-1.5 py-0.5 text-xs text-muted-foreground">
+                  {item.station}
+                </span>
+              )}
+              <span className="min-w-0 max-w-40 truncate rounded border px-1.5 py-0.5 text-xs text-muted-foreground">
+                {item.line}
+              </span>
+            </div>
+          </div>
           <time
-            className="ml-auto text-xs tabular-nums text-muted-foreground"
+            className="shrink-0 self-start text-xs tabular-nums text-muted-foreground"
             dateTime={item.ts}
           >
             {time}
@@ -283,9 +295,9 @@ function ActivityRow({
             {item.detail}
           </p>
         )}
-        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 overflow-hidden">
           {item.workpieceFile && (
-            <span className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+            <span className="min-w-0 max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
               {item.workpieceFile}
             </span>
           )}
