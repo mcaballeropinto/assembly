@@ -100,7 +100,7 @@ mock.module("@tanstack/react-virtual", () => ({
   }),
 }))
 
-const { ActivityFeed } = await import("./activity-feed")
+const { ActivityFeed } = await import("./activity-feed.tsx?layout-test")
 
 beforeAll(() => {
   try {
