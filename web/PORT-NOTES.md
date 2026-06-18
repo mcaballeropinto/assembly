@@ -291,3 +291,40 @@ Task events: `GET /api/task-events/:line/:wpId` returns `{ stations: StationMeta
 **Observed results:** The implementation uses the live `/api/state` contract, but the live visual smoke could not be completed in this worktree because `localhost:4111` was not serving and this station is explicitly forbidden from starting, stopping, or restarting the dashboard service. The screenshot files are placeholders so the planned artifact paths exist; deploy/review should recapture them from the running dashboard after merge.
 
 **Activity verification:** Unit coverage exercises merged multi-line activity, URL filter parsing/serialization, retry_manual mapping, malformed activity entries, and default/empty/partial filter behavior. The `ActivityFeed` switches to `@tanstack/react-virtual` when the filtered row count is greater than 100; this path was covered by code inspection in this sandbox, not by a live screenshot because the real `/api/state` endpoint was unavailable.
+
+## Phase 11 Visual + Performance Validation - 2026-06-18
+
+| Panel | Legacy reference | React route/component checked | Result | Fix note |
+| --- | --- | --- | --- | --- |
+| 1 Connection chip | `/api/state` timestamp, live/stale/disconnected thresholds | `Shell`, `Header`, `ConnectionChip` | Checked | Active shell now passes live connection props; TODO badges removed. |
+| 2 Usage chip | `GET /api/usage` compact chip and popover | `Shell`, `Header`, `UsageChip` | Checked | Active shell polls usage and maps provider buckets into the chip. |
+| 3 Error banner | `/api/state` `banner_errors`, dismiss endpoint | `Shell`, `ErrorBanner` | Checked | Active shell renders banner errors and calls dismiss mutation. |
+| 4 Fetch-error banner | Client fetch failure on `/api/state` | `Shell`, `FetchErrorBanner` | Checked | Active shell surfaces fetch errors with retry. |
+| 5 Overview KPI totals | Eight legacy metric cards | `OverviewRoute`, `KpiStrip` | Checked | KPI strip now renders Lines, Running, Incoming, Done, Errors, Review, Recent Cost, and combined Throughput. |
+| 6 Per-line summary cards | `/api/state` line grid | `LineSummaryGrid` | Checked | Existing linked cards retained; active shell layout wraps the route. |
+| 7 Recent activity feed | Merged newest 50 events, drawer deep links | `OverviewRoute`, `ActivityFeed` | Checked | Overview caps filtered activity to 50 and opens drawer with `wpline`. |
+| 8 Line detail header | `GET /api/line/:name` health/timestamp | `LineRoute`, `LineDetailHeader` | Checked | Placeholder removed; line header uses live line state. |
+| 9 Station sequence | `sequence`, `sections`, timings, freshness | `StationSequence`, `line-detail.ts` | Checked | Live station chips show queue counts, state, freshness/progress. |
+| 10 Held tasks list | `held[]`, release single/all | `WorkpieceSections` | Checked | Single release and confirm release-all mutations wired. |
+| 11 Completed list | Completed merged with failed first | `WorkpieceSections`, `mergeCompletedWithFailed()` | Checked | Failed items are prepended ahead of completed items. |
+| 12 Errored list | Active + dismissed errors, dismiss/undismiss | `WorkpieceSections` | Checked | Retry, dismiss, and undismiss buttons call backend mutations. |
+| 13 Review list | `reviews[]` escalated workpieces | `WorkpieceSections` | Checked | Review records normalize defensively and open drawer. |
+| 14 Activity filters | Detail activity filter semantics | `LineRoute`, `ActivityFeed` | Checked | Detail activity uses existing filter parser/serializer. |
+| 15 History table | `/api/line/:name/history` lazy controls | `HistoryTable` | Checked | Expand-on-demand table includes include selector and limit input. |
+| 16 Flow metrics tiles | `/api/line/:name/flow-metrics` | `FlowMetrics` | Checked | Independent query renders metric tiles and empty/loading/error states. |
+| 17 Kanban view | `/api/line/:name/kanban`, read-only board | `LineKanbanRoute`, `KanbanBoard` | Checked | Existing kanban parity retained; drawer route context remains active. |
+| 18 Workpiece drawer | `?wp` / `?wpline` deep-linked drawer | `__root`, `WorkpieceDrawer` | Checked | Root route lazy-loads the real drawer only when `wp` is present. |
+| 19 Retry errored | `POST /api/line/:name/retry` | `DrawerFooter`, `WorkpieceSections` | Checked | Retry mutations invalidate state, line, kanban, and workpiece queries. |
+| 20 Release held | `POST /api/line/:name/release` | `DrawerFooter`, `WorkpieceSections` | Checked | Release actions are live and disabled while pending. |
+| 21 Dismiss / undismiss | Error dismiss/undismiss endpoints | `DrawerFooter`, `WorkpieceSections`, `ErrorBanner` | Checked | Confirm-on-second-click drawer dismiss preserved; list undismiss added. |
+| 22 Live progress events | Station timing `latestProgress`, task events | `StationSequence`, `WorkpieceDrawer` | Checked | Latest progress appears in station sequence; drawer remains deep-linkable for event tabs. |
+
+### Phase 11 Performance
+
+- Populated line: `assembly-dev`.
+- URLs validated by source and tests: `/`, `/line/assembly-dev`, `/line/assembly-dev/kanban`, `?wp=<file>&wpline=assembly-dev`.
+- Build command: `bun run build:web`.
+- Budget command: `bun run --cwd web perf`.
+- Fresh JS gzip total: `369235` bytes (`index` 362092, `routes` 1683, `workpiece-drawer` 5460), below the 409600 byte budget.
+- Code splitting: required for the drawer path and active via `React.lazy()` in `web/src/routes/__root.tsx`; kanban remains in the main route tree because the rebuilt JS total is under budget.
+- TTI: not live-measured in this sandbox because the task explicitly forbids starting or restarting the dashboard service. The performance checker enforces a 2000ms TTI budget when `DASHBOARD_LIGHTHOUSE_JSON` points at a Lighthouse JSON report; run Lighthouse against a populated `/line/assembly-dev` dashboard after deploy and store the report path in that env var to make the check fail closed.

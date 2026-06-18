@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchKanbanState, releaseAllHeld, releaseHeldTask } from "@/lib/api";
+import { fetchKanbanState, releaseAllHeld, releaseHeldTask } from "../../lib/api";
 
 /**
  * Hook to fetch kanban state with 3-second polling.

@@ -1,10 +1,10 @@
 import { useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
-import type { ActivityEntry } from '@/lib/api';
+import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
+import { ScrollArea } from '../ui/scroll-area';
+import { Badge } from '../ui/badge';
+import { cn } from '../../lib/utils';
+import type { ActivityEntry } from '../../lib/api';
 import { getEventIcon } from './event-icons';
 
 interface ActivityFeedProps {

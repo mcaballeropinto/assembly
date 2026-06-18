@@ -13,6 +13,7 @@
     "build": "bun build src/cli.ts --outdir dist --target node",
     "dashboard:web": "cd web && bun run dev",
     "build:web": "bun --cwd web run build",
+    "dashboard:perf": "bun run build:web && bun --cwd web run perf",
     "prepublishOnly": "bun run build:web",
     "test": "bun test",
     "typecheck": "tsc --noEmit",

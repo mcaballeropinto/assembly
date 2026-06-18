@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, Circle, SkipForward, XCircle } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
+import { Badge } from "../ui/badge"
 import {
   Timeline,
   TimelineContent,
@@ -9,9 +9,9 @@ import {
   TimelineItem,
   TimelineSeparator,
   TimelineTitle,
-} from "@/components/ui/timeline"
+} from "../ui/timeline"
 import type { ApiWorkpieceResponse } from "../../../../src/dashboard-api"
-import { cn } from "@/lib/utils"
+import { cn } from "../../lib/utils"
 import {
   formatCost,
   formatDuration,

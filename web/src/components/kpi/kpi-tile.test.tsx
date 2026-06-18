@@ -40,7 +40,10 @@ describe("KpiTile", () => {
   })
 
   test("uses Tremor SparkLineChart and no manual svg markup", () => {
-    const source = readFileSync("web/src/components/kpi/kpi-tile.tsx", "utf8")
+    const source = readFileSync(
+      new URL("./kpi-tile.tsx", import.meta.url),
+      "utf8",
+    )
 
     expect(source).toContain('@tremor/react"')
     expect(source).toContain("SparkLineChart")

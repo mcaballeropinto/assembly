@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Check, Filter } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command';
-import { cn } from '@/lib/utils';
-import type { ActivityEntry } from '@/lib/api';
+import { Button } from '../ui/button';
+import { Badge } from '../ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '../ui/command';
+import { cn } from '../../lib/utils';
+import type { ActivityEntry } from '../../lib/api';
 
 export interface FilterType {
   key: string;

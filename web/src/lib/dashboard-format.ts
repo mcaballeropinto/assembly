@@ -32,6 +32,41 @@ export function formatDurationShort(ms: number): string {
   return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`
 }
 
+export function formatDuration(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) {
+    return "—"
+  }
+
+  return formatDurationShort(ms)
+}
+
+export function formatCostUsd(value: number | null | undefined): string {
+  const cost = Number.isFinite(value ?? Number.NaN) ? Number(value) : 0
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: cost > 0 && cost < 0.01 ? 4 : 2,
+  }).format(cost)
+}
+
+export function formatTaskPreview(value: unknown, maxLength = 100): string {
+  const text =
+    typeof value === "string"
+      ? value.replace(/\s+/g, " ").trim()
+      : ""
+
+  if (!text) return "No task preview"
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
+}
+
+export function formatRelativeTime(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return "unknown"
+  const parsed = Date.parse(iso)
+  if (!Number.isFinite(parsed)) return "unknown"
+  return formatLastUpdate(Math.max(0, now - parsed))
+}
+
 export function formatLastUpdate(ms: number | null): string {
   if (ms === null || !Number.isFinite(ms) || ms < 0) {
     return "not connected"

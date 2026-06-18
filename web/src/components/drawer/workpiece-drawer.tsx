@@ -1,18 +1,19 @@
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 
-import { Badge } from "@/components/ui/badge"
+import { Badge } from "../ui/badge"
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@/components/ui/sheet"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { fetchWorkpiece, isApiError } from "@/lib/api"
+} from "../ui/sheet"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs"
+import { fetchWorkpiece, isApiError } from "../../lib/api"
 import type { ApiWorkpieceResponse } from "../../../../src/dashboard-api"
 import type { StationResult, Workpiece } from "../../../../src/types"
+import { DrawerFooter } from "./drawer-footer"
 
 type WorkpieceData = Extract<ApiWorkpieceResponse, Workpiece>
 type StationEntry = [string, StationResult]
@@ -50,6 +51,7 @@ export function WorkpieceDrawer({ lineName }: WorkpieceDrawerProps) {
       search: (prev) => {
         const next = { ...(prev as Record<string, unknown>) }
         delete next.wp
+        delete next.wpline
         return next
       },
       replace: true,
@@ -77,6 +79,14 @@ export function WorkpieceDrawer({ lineName }: WorkpieceDrawerProps) {
           isLoading={query.isLoading}
           workpiece={workpiece}
         />
+        {workpiece && fileName && lineName ? (
+          <DrawerFooter
+            lineName={lineName}
+            workpiece={workpiece}
+            fileName={fileName}
+            onClose={closeDrawer}
+          />
+        ) : null}
       </SheetContent>
     </Sheet>
   )

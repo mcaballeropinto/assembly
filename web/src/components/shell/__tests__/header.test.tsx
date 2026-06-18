@@ -69,14 +69,12 @@ async function waitFor(assertion: () => void) {
 }
 
 describe("Header", () => {
-  test("renders the overview breadcrumb and placeholder badges", async () => {
+  test("renders the overview breadcrumb without placeholder badges", async () => {
     const screen = renderHeader("/")
 
     await waitFor(() => {
       expect(screen.container.textContent).toContain("Overview")
-      expect(screen.container.textContent).toContain("TODO connection")
-      expect(screen.container.textContent).toContain("TODO usage")
-      expect(screen.container.textContent).toContain("TODO theme")
+      expect(screen.container.textContent).not.toContain("TODO")
     })
 
     screen.unmount()

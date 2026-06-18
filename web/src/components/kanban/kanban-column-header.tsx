@@ -1,20 +1,20 @@
 import { useState } from "react";
 import { Info, MoreHorizontal } from "lucide-react";
-import type { KanbanColumn, StationFreshness, StationStatus, StationTooltipMeta } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import type { KanbanColumn, StationFreshness, StationStatus, StationTooltipMeta } from "../../lib/api";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "../ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "../ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,9 +24,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "../ui/alert-dialog";
 import { useReleaseAllHeld } from "./use-kanban-query";
-import { cn } from "@/lib/utils";
+import { cn } from "../../lib/utils";
 
 interface KanbanColumnHeaderProps {
   column: KanbanColumn;

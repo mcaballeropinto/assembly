@@ -3,18 +3,18 @@ import { RefreshCw } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge } from "../ui/badge"
+import { Button } from "../ui/button"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { fetchTaskEvents, fetchTaskEventStations } from "@/lib/api"
+} from "../ui/select"
+import { fetchTaskEvents, fetchTaskEventStations } from "../../lib/api"
 import type { StationMeta } from "../../../../src/dashboard-api"
-import { cn } from "@/lib/utils"
+import { cn } from "../../lib/utils"
 import { sortStationMeta, stationStatusClass, stringifyDetail } from "./drawer-utils"
 
 interface TaskEventsStreamProps {

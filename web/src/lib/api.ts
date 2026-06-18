@@ -1,9 +1,14 @@
 import type {
+  ApiLineStateResponse,
+  ApiReleaseHeldResponse as BackendReleaseHeldResponse,
   ApiStateResponse,
   ApiTaskEventsResponse,
   ApiTaskEventStationsResponse,
+  ApiUsageResponse,
   ApiWorkpieceResponse,
   ApiWorkpieceSidecarsResponse,
+  FlowMetrics,
+  LineHistory,
 } from "../../../src/dashboard-api"
 
 export type {
@@ -11,6 +16,10 @@ export type {
   ApiStateLineEntry,
   ApiStateResponse,
   ApiStateTotals,
+  ApiUsageResponse,
+  ApiLineStateResponse,
+  FlowMetrics,
+  LineHistory,
 } from "../../../src/dashboard-api"
 
 export type KanbanLane = "inbox" | "processing" | "output"
@@ -127,6 +136,16 @@ export interface ApiReleaseHeldResponse {
   errors: Array<{ file?: string; error: string } | string>
 }
 
+export interface ApiRetryErroredResponse {
+  ok: true
+  newId: string
+  newFileName: string
+}
+
+export interface ApiDismissErrorsResponse {
+  dismissed: Record<string, { dismissed_at?: string }>
+}
+
 type JsonError = {
   error?: unknown
   message?: unknown
@@ -185,6 +204,17 @@ export function isApiError(
   )
 }
 
+export function isLineStateError(
+  value: ApiLineStateResponse | undefined
+): value is { error: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "error" in value &&
+    typeof value.error === "string"
+  )
+}
+
 export function fetchTaskEventStations(
   lineName: string,
   workpieceId: string
@@ -233,6 +263,37 @@ export function fetchApiState(
 export const fetchGlobalState = fetchApiState
 export const fetchDashboardState = fetchApiState
 
+export function fetchUsage(): Promise<ApiUsageResponse> {
+  return fetchJson<ApiUsageResponse>("/api/usage")
+}
+
+export function fetchLineState(
+  lineName: string,
+  input?: FetchApiStateInput,
+): Promise<ApiLineStateResponse> {
+  const signal = input && "aborted" in input ? input : input?.signal
+  return fetchJson<ApiLineStateResponse>(`/api/line/${enc(lineName)}`, {
+    signal,
+  })
+}
+
+export function fetchLineHistory(
+  lineName: string,
+  options: { limit?: number; include?: Array<"done" | "error"> } = {},
+): Promise<LineHistory> {
+  const params = new URLSearchParams()
+  if (options.limit !== undefined) params.set("limit", String(options.limit))
+  if (options.include?.length) params.set("include", options.include.join(","))
+  const qs = params.toString()
+  return fetchJson<LineHistory>(
+    `/api/line/${enc(lineName)}/history${qs ? `?${qs}` : ""}`,
+  )
+}
+
+export function fetchFlowMetrics(lineName: string): Promise<FlowMetrics> {
+  return fetchJson<FlowMetrics>(`/api/line/${enc(lineName)}/flow-metrics`)
+}
+
 export function getLineKanban(lineName: string): Promise<KanbanState> {
   return fetchJson<KanbanState>(`/api/line/${enc(lineName)}/kanban`)
 }
@@ -258,8 +319,8 @@ export const fetchDoneCards = getDoneKanbanCards
 export function releaseHeldTasks(
   lineName: string,
   body: { all: true } | { taskFile: string } | { next: number }
-): Promise<ApiReleaseHeldResponse> {
-  return fetchJson<ApiReleaseHeldResponse>(`/api/line/${enc(lineName)}/release`, {
+): Promise<BackendReleaseHeldResponse> {
+  return fetchJson<BackendReleaseHeldResponse>(`/api/line/${enc(lineName)}/release`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -268,20 +329,59 @@ export function releaseHeldTasks(
 
 export function releaseAllHeld(
   lineName: string
-): Promise<ApiReleaseHeldResponse> {
+): Promise<BackendReleaseHeldResponse> {
   return releaseHeldTasks(lineName, { all: true })
 }
 
 export function releaseNextHeld(
   lineName: string,
   next: number
-): Promise<ApiReleaseHeldResponse> {
+): Promise<BackendReleaseHeldResponse> {
   return releaseHeldTasks(lineName, { next })
 }
 
 export function releaseHeldTask(
   lineName: string,
   taskFile: string
-): Promise<ApiReleaseHeldResponse> {
+): Promise<BackendReleaseHeldResponse> {
   return releaseHeldTasks(lineName, { taskFile })
+}
+
+export function retryErroredWorkpiece(
+  lineName: string,
+  fileName: string,
+): Promise<ApiRetryErroredResponse> {
+  return fetchJson<ApiRetryErroredResponse>(`/api/line/${enc(lineName)}/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName }),
+  })
+}
+
+export function dismissErrors(
+  lineName: string,
+  fileNames: string[],
+): Promise<ApiDismissErrorsResponse> {
+  return fetchJson<ApiDismissErrorsResponse>(
+    `/api/line/${enc(lineName)}/errors/dismiss`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileNames }),
+    },
+  )
+}
+
+export function undismissErrors(
+  lineName: string,
+  fileNames: string[],
+): Promise<ApiDismissErrorsResponse> {
+  return fetchJson<ApiDismissErrorsResponse>(
+    `/api/line/${enc(lineName)}/errors/undismiss`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileNames }),
+    },
+  )
 }

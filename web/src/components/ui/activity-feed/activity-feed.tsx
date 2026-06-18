@@ -45,6 +45,7 @@ interface ActivityFeedProps {
   className?: string
   title?: string
   totalItems?: number
+  onOpenWorkpiece?: (lineName: string, fileName: string) => void
 }
 
 export function ActivityFeed({
@@ -54,6 +55,7 @@ export function ActivityFeed({
   className,
   title = "Activity",
   totalItems,
+  onOpenWorkpiece,
 }: ActivityFeedProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const shouldVirtualize = items.length > 100
@@ -106,7 +108,7 @@ export function ActivityFeed({
                   className="absolute left-0 top-0 w-full"
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                 >
-                  <ActivityRow item={item} />
+                  <ActivityRow item={item} onOpenWorkpiece={onOpenWorkpiece} />
                 </li>
               )
             })}
@@ -115,7 +117,7 @@ export function ActivityFeed({
           <ol>
             {items.map((item) => (
               <li key={item.id}>
-                <ActivityRow item={item} />
+                <ActivityRow item={item} onOpenWorkpiece={onOpenWorkpiece} />
               </li>
             ))}
           </ol>
@@ -224,14 +226,28 @@ function ActivityFilterCombobox({
   )
 }
 
-function ActivityRow({ item }: { item: DashboardActivityEvent }) {
+function ActivityRow({
+  item,
+  onOpenWorkpiece,
+}: {
+  item: DashboardActivityEvent
+  onOpenWorkpiece?: (lineName: string, fileName: string) => void
+}) {
   const Icon = iconForEvent(item)
   const time = formatTime(item.ts)
+  const clickable = Boolean(item.workpieceFile && onOpenWorkpiece)
+  const Element = clickable ? "button" : "div"
 
   return (
-    <div
-      className="flex min-h-20 items-start gap-3 border-b py-3 last:border-0"
+    <Element
+      type={clickable ? "button" : undefined}
+      className="flex min-h-20 w-full items-start gap-3 border-b py-3 text-left last:border-0"
       aria-label={`${item.event} on ${item.line}`}
+      onClick={
+        clickable
+          ? () => onOpenWorkpiece?.(item.line, item.workpieceFile!)
+          : undefined
+      }
     >
       <div
         className={cn(
@@ -286,7 +302,7 @@ function ActivityRow({ item }: { item: DashboardActivityEvent }) {
           )}
         </div>
       </div>
-    </div>
+    </Element>
   )
 }
 

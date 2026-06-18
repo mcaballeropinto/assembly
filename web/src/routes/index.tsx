@@ -13,6 +13,7 @@ import {
   serializeActivitySearch,
   type ActivityFilterKey,
 } from "../lib/activity"
+import { openWorkpieceSearch } from "../lib/drawer-url"
 import { apiStateQueryOptions } from "../lib/query"
 
 import { Route as rootRoute } from "./__root"
@@ -32,7 +33,7 @@ export function OverviewRoute() {
 
   const normalized = useMemo(() => (data ? normalizeActivity(data) : []), [data])
   const filtered = useMemo(
-    () => filterActivity(normalized, selectedFilters),
+    () => filterActivity(normalized, selectedFilters).slice(0, 50),
     [normalized, selectedFilters],
   )
 
@@ -72,9 +73,30 @@ export function OverviewRoute() {
         selectedFilters={selectedFilters}
         onSelectedFiltersChange={handleSelectedFiltersChange}
         title="Activity"
+        onOpenWorkpiece={(lineName, fileName) => {
+          writeDrawerSearch(fileName, lineName)
+        }}
       />
     </div>
   )
+}
+
+function writeDrawerSearch(fileName: string, lineName: string): void {
+  const url = new URL(window.location.href)
+  const next = openWorkpieceSearch(
+    Object.fromEntries(url.searchParams.entries()),
+    fileName,
+    lineName,
+  )
+  for (const key of ["wp", "wpline"]) {
+    const value = next[key]
+    if (typeof value === "string") {
+      url.searchParams.set(key, value)
+    } else {
+      url.searchParams.delete(key)
+    }
+  }
+  window.history.replaceState({}, "", url.toString())
 }
 
 function readActivitySearch(): string | undefined {

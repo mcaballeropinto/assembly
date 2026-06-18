@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchGlobalState } from '@/lib/api';
+import { fetchGlobalState } from '../lib/api';
 
 export function useGlobalState() {
   return useQuery({

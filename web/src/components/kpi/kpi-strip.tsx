@@ -11,15 +11,16 @@ export interface KpiStripProps {
 
 export function buildKpiItems(totals: ApiStateTotals): KpiTileProps[] {
   return [
-    { label: "Lines", value: `${totals.linesRunning}/${totals.lines}` },
-    { label: "Inbox", value: totals.totalInbox.toLocaleString() },
+    { label: "Lines", value: totals.lines.toLocaleString() },
+    { label: "Running", value: totals.linesRunning.toLocaleString() },
+    { label: "Incoming", value: totals.totalInbox.toLocaleString() },
     { label: "Done", value: totals.totalDone.toLocaleString() },
     { label: "Errors", value: totals.totalErrors.toLocaleString() },
     { label: "Review", value: totals.totalReview.toLocaleString() },
-    { label: "Cost", value: formatUsd(totals.totalCostUsd) },
+    { label: "Recent Cost", value: formatUsd(totals.totalCostUsd) },
     {
-      label: "Throughput 24h",
-      value: totals.totalThroughput24h.toLocaleString(),
+      label: "Throughput",
+      value: `${totals.totalThroughput1h.toLocaleString()}/hr · ${totals.totalThroughput24h.toLocaleString()}/day`,
     },
   ]
 }
@@ -39,7 +40,7 @@ export function KpiStrip({ totals, className }: KpiStripProps) {
 
   return (
     <section
-      className={cn("grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4", className)}
+      className={cn("grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-4", className)}
     >
       {items.map((item) => (
         <KpiTile key={item.label} {...item} />
