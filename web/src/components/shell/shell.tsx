@@ -34,7 +34,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="flex min-h-[calc(100vh-3.5rem)]">
         <Sidebar />
         <main className="min-w-0 flex-1">
-          <div className="mx-auto max-w-screen-2xl px-6 pb-12 pt-6 lg:px-8">
+          <div className="w-full px-4 pb-12 pt-6 sm:px-6 lg:px-8 2xl:px-10">
             <FetchErrorBanner
               error={state.error as Error | null}
               onRetry={() => state.refetch()}

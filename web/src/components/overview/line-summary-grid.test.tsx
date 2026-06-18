@@ -69,6 +69,7 @@ describe("LineSummaryGrid", () => {
     expect(markup).toContain("grid-cols-1")
     expect(markup).toContain("md:grid-cols-2")
     expect(markup).toContain("xl:grid-cols-3")
+    expect(markup).toContain("2xl:grid-cols-4")
     expect(markup).toContain("gap-4")
     expect(markup).toContain("p-6")
     expect(markup).toContain('href="/line/assembly-dev"')
@@ -114,5 +115,8 @@ describe("LineSummaryGrid", () => {
 
     expect(markup).toContain("No lines discovered.")
     expect(markup).toContain("p-6")
+    expect(markup).toContain("md:col-span-2")
+    expect(markup).toContain("xl:col-span-3")
+    expect(markup).toContain("2xl:col-span-4")
   })
 })

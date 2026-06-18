@@ -64,7 +64,7 @@ export function OverviewRoute() {
   }
 
   return (
-    <div className="space-y-8 pt-6 pb-12">
+    <div className="w-full min-w-0 space-y-8 pt-6 pb-12">
       <KpiStrip totals={data.totals} />
       <LineSummaryGrid lines={data.lines} />
       <ActivityFeed

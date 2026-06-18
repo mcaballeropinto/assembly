@@ -80,6 +80,24 @@ describe("Header", () => {
     screen.unmount()
   })
 
+  test("uses full-width header gutters without a max-width cap", async () => {
+    const screen = renderHeader("/")
+
+    await waitFor(() => {
+      const inner = screen.container.querySelector("header > div")
+
+      expect(inner?.className).toContain("w-full")
+      expect(inner?.className).toContain("px-4")
+      expect(inner?.className).toContain("sm:px-6")
+      expect(inner?.className).toContain("lg:px-8")
+      expect(inner?.className).toContain("2xl:px-10")
+      expect(inner?.className).not.toContain("max-w-screen-2xl")
+      expect(inner?.className).not.toContain("mx-auto")
+    })
+
+    screen.unmount()
+  })
+
   test("renders a line breadcrumb from the pathname", async () => {
     const screen = renderHeader("/line/assembly-dev")
 

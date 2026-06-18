@@ -38,7 +38,7 @@ export function Header({ connection, usage }: HeaderProps) {
 
   return (
     <header className="sticky top-0 z-40 h-14 border-b bg-background/80 backdrop-blur">
-      <div className="mx-auto flex h-full max-w-screen-2xl items-center justify-between gap-4 px-6 lg:px-8">
+      <div className="flex h-full w-full items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 2xl:px-10">
         <div className="min-w-0 truncate text-sm font-medium text-foreground">
           Assembly Dashboard · {breadcrumb}
         </div>

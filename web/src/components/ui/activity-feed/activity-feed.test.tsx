@@ -3,6 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { act } from "react"
 import type React from "react"
 import { createRoot, type Root } from "react-dom/client"
+import { renderToString } from "react-dom/server"
 
 import type { DashboardActivityEvent } from "../../../lib/activity"
 
@@ -237,6 +238,27 @@ describe("ActivityFeed row layout", () => {
     expect(details.every((detail) => detail.className.includes("truncate"))).toBe(
       true,
     )
+  })
+
+  test("preserves full-width and row-overlap protection classes", () => {
+    const longActivity = createActivityItem(0)
+    const markup = renderToString(
+      <ActivityFeed
+        items={[longActivity]}
+        selectedFilters={new Set(["station_done"])}
+        onSelectedFiltersChange={() => undefined}
+        totalItems={1}
+        title="Activity"
+      />,
+    )
+
+    expect(markup).toContain("w-full")
+    expect(markup).toContain("h-24")
+    expect(markup).toContain("min-w-0")
+    expect(markup).toContain("flex-wrap")
+    expect(markup).toContain("truncate")
+    expect(markup).toContain("h-[480px]")
+    expect(markup).toContain(longActivity.workpieceFile)
   })
 
   test("preserves the empty state", () => {

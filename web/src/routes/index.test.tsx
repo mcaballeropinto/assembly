@@ -167,6 +167,8 @@ describe("OverviewRoute", () => {
     const { OverviewRoute } = await import("./index")
     const markup = renderOverviewRoute(OverviewRoute)
 
+    expect(markup).toContain("w-full")
+    expect(markup).toContain("min-w-0")
     expect(markup).toContain("space-y-8")
     expect(markup).toContain("pt-6")
     expect(markup).toContain("pb-12")

@@ -72,7 +72,7 @@ The dashboard is Assembly's operational view for queues, workpieces, costs, and 
 | Card header/footer | `p-6 pb-3` headers, `p-6 pt-3` footers |
 | Major page sections | `gap-8` |
 | Card grids/stacks | `gap-4` in grids, `gap-6` in stacks |
-| App container | `max-w-screen-2xl mx-auto px-6 lg:px-8` |
+| App container | `w-full px-4 sm:px-6 lg:px-8 2xl:px-10` |
 | Header | `h-14` sticky |
 | Sidebar | `w-64` expanded, `w-16` collapsed |
 | Cards | `rounded-lg border bg-card` |

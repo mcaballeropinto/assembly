@@ -32,9 +32,12 @@ export function LineSummaryGrid({ lines, className }: LineSummaryGridProps) {
   if (sortedLines.length === 0) {
     return (
       <section
-        className={cn("grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4", className)}
+        className={cn(
+          "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4",
+          className,
+        )}
       >
-        <Card className="p-6 md:col-span-2 xl:col-span-3">
+        <Card className="p-6 md:col-span-2 xl:col-span-3 2xl:col-span-4">
           <p className="text-sm text-muted-foreground">No lines discovered.</p>
         </Card>
       </section>
@@ -43,7 +46,10 @@ export function LineSummaryGrid({ lines, className }: LineSummaryGridProps) {
 
   return (
     <section
-      className={cn("grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4", className)}
+      className={cn(
+        "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4",
+        className,
+      )}
     >
       {sortedLines.map((line) => (
         <a key={line.name} href={lineHref(line.name)} className="block">
