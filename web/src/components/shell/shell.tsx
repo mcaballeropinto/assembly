@@ -33,26 +33,24 @@ export function Shell({ children }: { children: ReactNode }) {
       <Header connection={connection} usage={usageProps} />
       <div className="flex min-h-[calc(100vh-3.5rem)]">
         <Sidebar />
-        <main className="min-w-0 flex-1">
-          <div className="w-full px-4 pb-12 pt-6 sm:px-6 lg:px-8 2xl:px-10">
-            <FetchErrorBanner
-              error={state.error as Error | null}
-              onRetry={() => state.refetch()}
-              isRetrying={state.isFetching}
-              className="mb-4"
-            />
-            <ErrorBanner
-              errors={bannerErrors}
-              className="mb-4"
-              onDismiss={(fileNames) => {
-                const lineName = bannerErrors.find((item) =>
-                  fileNames.includes(item.fileName),
-                )?.lineName
-                if (lineName) dismiss.mutate({ lineName, fileNames })
-              }}
-            />
-            {children}
-          </div>
+        <main className="min-w-0 flex-1 w-full px-4 pb-12 pt-6 sm:px-6 lg:px-8 2xl:px-10">
+          <FetchErrorBanner
+            error={state.error as Error | null}
+            onRetry={() => state.refetch()}
+            isRetrying={state.isFetching}
+            className="mb-4"
+          />
+          <ErrorBanner
+            errors={bannerErrors}
+            className="mb-4"
+            onDismiss={(fileNames) => {
+              const lineName = bannerErrors.find((item) =>
+                fileNames.includes(item.fileName),
+              )?.lineName
+              if (lineName) dismiss.mutate({ lineName, fileNames })
+            }}
+          />
+          {children}
         </main>
       </div>
     </div>
